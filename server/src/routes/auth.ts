@@ -1,5 +1,5 @@
 import { zValidator } from '@hono/zod-validator';
-import { and, desc, eq, gt, isNull } from 'drizzle-orm';
+import { and, desc, eq, gt, isNull, sql } from 'drizzle-orm';
 import { Hono } from 'hono';
 import { z } from 'zod';
 
@@ -35,28 +35,44 @@ authRoutes.post('/otp/request', zValidator('json', requestSchema), async (c) => 
     return c.json({ error: 'invalid_phone' }, 400);
   }
 
-  const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
-  const recent = await db
-    .select()
-    .from(otpCodes)
-    .where(and(eq(otpCodes.phoneE164, phone), gt(otpCodes.createdAt, oneHourAgo)))
-    .orderBy(desc(otpCodes.createdAt));
+  // The rate-limit check below is count-then-insert, not backed by a unique
+  // constraint (any number of otp_codes rows per phone is structurally
+  // valid) — so concurrent requests for the same number could all read the
+  // same under-the-cap count and all insert, blowing past the 5/hour limit.
+  // pg_advisory_xact_lock serializes concurrent requests for the same
+  // phone number (via a lock key derived from it) without blocking
+  // requests for any other number.
+  const result = await db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${phone})::bigint)`);
 
-  if (recent.length >= OTP_RATE_LIMIT_PER_HOUR) {
-    return c.json({ error: 'rate_limited' }, 429);
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+    const recent = await tx
+      .select()
+      .from(otpCodes)
+      .where(and(eq(otpCodes.phoneE164, phone), gt(otpCodes.createdAt, oneHourAgo)))
+      .orderBy(desc(otpCodes.createdAt));
+
+    if (recent.length >= OTP_RATE_LIMIT_PER_HOUR) {
+      return { status: 429 as const, body: { error: 'rate_limited' } };
+    }
+    const [last] = recent;
+    if (last && Date.now() - last.createdAt.getTime() < OTP_RESEND_COOLDOWN_SECONDS * 1000) {
+      return { status: 429 as const, body: { error: 'rate_limited' } };
+    }
+
+    const code = phone === DEMO_PHONE_E164 ? DEMO_OTP_CODE : generateOtpCode();
+    const expiresAt = new Date(Date.now() + OTP_TTL_MINUTES * 60 * 1000);
+
+    await tx.insert(otpCodes).values({ phoneE164: phone, codeHash: hashWithPepper(code), expiresAt });
+
+    return { status: 200 as const, body: { ok: true as const }, code };
+  });
+
+  if (result.status === 200) {
+    await smsSender.send(phone, `Your Meroa code is ${result.code}`);
   }
-  const [last] = recent;
-  if (last && Date.now() - last.createdAt.getTime() < OTP_RESEND_COOLDOWN_SECONDS * 1000) {
-    return c.json({ error: 'rate_limited' }, 429);
-  }
 
-  const code = phone === DEMO_PHONE_E164 ? DEMO_OTP_CODE : generateOtpCode();
-  const expiresAt = new Date(Date.now() + OTP_TTL_MINUTES * 60 * 1000);
-
-  await db.insert(otpCodes).values({ phoneE164: phone, codeHash: hashWithPepper(code), expiresAt });
-  await smsSender.send(phone, `Your Meroa code is ${code}`);
-
-  return c.json({ ok: true });
+  return c.json(result.body, result.status);
 });
 
 const verifySchema = z.object({ phone: z.string().min(3), code: z.string().min(4).max(8) });
@@ -93,25 +109,42 @@ authRoutes.post('/otp/verify', zValidator('json', verifySchema), async (c) => {
   let isNewUser = false;
 
   if (!user) {
-    isNewUser = true;
-    const [created] = await db.insert(users).values({ phoneE164: phone, prefs: {} }).returning();
-    if (!created) throw new Error('user_insert_failed');
-    user = created;
-
-    await db.insert(entitlements).values({ userId: user.id, plan: 'free' });
-
-    const [conversation] = await db
-      .insert(conversations)
-      .values({ userId: user.id, channel: 'app' })
+    // INSERT ... ON CONFLICT DO NOTHING instead of a bare insert: a
+    // double-tap or a client retry can send two concurrent verifies for the
+    // same brand-new number. Without this, the loser's insert would violate
+    // users_phone_e164_unique and bubble up as a raw 500 instead of
+    // gracefully resolving to the session the winner already created.
+    const [created] = await db
+      .insert(users)
+      .values({ phoneE164: phone, prefs: {} })
+      .onConflictDoNothing({ target: users.phoneE164 })
       .returning();
-    if (!conversation) throw new Error('conversation_insert_failed');
 
-    await db.insert(messages).values({
-      conversationId: conversation.id,
-      role: 'assistant',
-      content:
-        "Hey — I'm Meroa. Just so it's clear up front: I'm an AI, not a person. I'm here to actually help — keep track of things, think through stuff with you, check in without being annoying about it. What's going on with you today?",
-    });
+    if (created) {
+      isNewUser = true;
+      user = created;
+
+      await db.insert(entitlements).values({ userId: user.id, plan: 'free' });
+
+      const [conversation] = await db
+        .insert(conversations)
+        .values({ userId: user.id, channel: 'app' })
+        .returning();
+      if (!conversation) throw new Error('conversation_insert_failed');
+
+      await db.insert(messages).values({
+        conversationId: conversation.id,
+        role: 'assistant',
+        content:
+          "Hey — I'm Meroa. Just so it's clear up front: I'm an AI, not a person. I'm here to actually help — keep track of things, think through stuff with you, check in without being annoying about it. What's going on with you today?",
+      });
+    } else {
+      // Lost the race: another concurrent verify already created this user
+      // (and their entitlement/welcome conversation) — just sign them in.
+      const [existing] = await db.select().from(users).where(eq(users.phoneE164, phone)).limit(1);
+      if (!existing) throw new Error('user_insert_failed');
+      user = existing;
+    }
   }
 
   const accessToken = await signAccessToken(user.id);
