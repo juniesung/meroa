@@ -1,53 +1,56 @@
-/**
- * Below are the colors that are used in the app. The colors are defined in the light and dark mode.
- * There are many other ways to style your app. For example, [Nativewind](https://www.nativewind.dev/), [Tamagui](https://tamagui.dev/), [unistyles](https://reactnativeunistyles.vercel.app), etc.
- */
-
-import '@/global.css';
-
 import { Platform } from 'react-native';
 
-export const Colors = {
-  light: {
-    text: '#000000',
-    background: '#ffffff',
-    backgroundElement: '#F0F0F3',
-    backgroundSelected: '#E0E1E6',
-    textSecondary: '#60646C',
-  },
-  dark: {
-    text: '#ffffff',
-    background: '#000000',
-    backgroundElement: '#212225',
-    backgroundSelected: '#2E3135',
-    textSecondary: '#B0B4BA',
-  },
+export const theme = {
+  blue: '#0A84FF',
+  blueDeep: '#2563EB',
+  blueLight: '#5AB0FF',
+  gradient: ['#1E8BFF', '#0A6DF0'] as const,
+  text: '#F5F7FA',
+  dim: '#8E949E',
+  faint: '#5B6068',
+  bg: '#030507',
+  surface: '#111318',
+  card: '#191C22',
+  card2: '#1F232B',
+  bubbleAI: '#1C1F25',
+  border: 'rgba(255,255,255,0.06)',
+  borderStrong: 'rgba(255,255,255,0.1)',
+  success: '#30D158',
+  danger: '#FF453A',
 } as const;
 
-export type ThemeColor = keyof typeof Colors.light & keyof typeof Colors.dark;
+export type Theme = typeof theme;
+
+export const radii = {
+  bubble: 20,
+  bubbleTail: 6,
+  card: 18,
+  section: 16,
+  control: 18,
+  controlTight: 14,
+  chip: 10,
+  pill: 999,
+} as const;
+
+export const type = {
+  title: { fontSize: 16, fontWeight: '700' as const },
+  header: { fontSize: 28, fontWeight: '700' as const, letterSpacing: -0.5 },
+  eyebrow: { fontSize: 11, fontWeight: '700' as const, letterSpacing: 1.2, textTransform: 'uppercase' as const },
+  body: { fontSize: 15, fontWeight: '400' as const },
+  meta: { fontSize: 13, fontWeight: '400' as const },
+  bubble: { fontSize: 15, lineHeight: 20 },
+} as const;
 
 export const Fonts = Platform.select({
   ios: {
-    /** iOS `UIFontDescriptorSystemDesignDefault` */
     sans: 'system-ui',
-    /** iOS `UIFontDescriptorSystemDesignSerif` */
-    serif: 'ui-serif',
-    /** iOS `UIFontDescriptorSystemDesignRounded` */
     rounded: 'ui-rounded',
-    /** iOS `UIFontDescriptorSystemDesignMonospaced` */
     mono: 'ui-monospace',
   },
   default: {
     sans: 'normal',
-    serif: 'serif',
     rounded: 'normal',
     mono: 'monospace',
-  },
-  web: {
-    sans: 'var(--font-display)',
-    serif: 'var(--font-serif)',
-    rounded: 'var(--font-rounded)',
-    mono: 'var(--font-mono)',
   },
 });
 
@@ -61,5 +64,5 @@ export const Spacing = {
   six: 64,
 } as const;
 
-export const BottomTabInset = Platform.select({ ios: 50, android: 80 }) ?? 0;
+export const TAB_BAR_CONTENT_HEIGHT = 56;
 export const MaxContentWidth = 800;

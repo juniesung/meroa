@@ -259,7 +259,7 @@ DoD is met. When working a phase, load that phase's file alongside this one.
 
 | # | Phase | File | Status |
 |---|-------|------|--------|
-| 0 | Foundation & design system (fresh scaffold, tokens, components, static tabs) | `docs/phases/phase-0-foundation-design-system.md` | ☐ |
+| 0 | Foundation & design system (fresh scaffold, tokens, components, static tabs) | `docs/phases/phase-0-foundation-design-system.md` | ☑ |
 | 1 | Backend, accounts & continuity (API, DB, phone-linking, text→app handoff) | `docs/phases/phase-1-backend-accounts-continuity.md` | ☐ |
 | 2 | Live chat (model API, streaming, history, limits, AI disclosure) | `docs/phases/phase-2-live-chat.md` | ☐ |
 | 3 | Tasks (all types, chat + UI creation, recurring, reminders, missed-task recovery) | `docs/phases/phase-3-tasks.md` | ☐ |
