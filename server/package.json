@@ -9,9 +9,11 @@
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/db/migrate.ts",
-    "seed": "tsx src/seed.ts"
+    "seed": "tsx src/seed.ts",
+    "dev:token": "tsx src/dev-token.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.111.0",
     "@hono/node-server": "^1.14.0",
     "@hono/zod-validator": "^0.4.3",
     "dotenv": "^16.4.7",

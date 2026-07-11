@@ -38,10 +38,14 @@ let onSessionExpired: (() => void) | null = null;
 export function setSessionExpiredHandler(handler: () => void) {
   onSessionExpired = handler;
 }
+export function notifySessionExpired() {
+  onSessionExpired?.();
+}
 
 let refreshPromise: Promise<string | null> | null = null;
 
-async function refreshAccessToken(): Promise<string | null> {
+/** Shared by the streaming client (stream.ts) so both request paths refresh through the same promise. */
+export async function refreshAccessToken(): Promise<string | null> {
   if (!refreshPromise) {
     refreshPromise = (async () => {
       const refreshToken = getCachedRefreshToken();
@@ -127,11 +131,7 @@ export const api = {
       `/conversations/current/messages${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''}`,
     ),
 
-  sendMessage: (text: string) =>
-    request<{ messages: ApiMessage[] }>('/conversations/current/messages', {
-      method: 'POST',
-      body: JSON.stringify({ text }),
-    }),
+  // Sending a message streams via SSE — see lib/api/stream.ts's `streamMessage`.
 
   getTasks: () => request<{ tasks: ApiTask[] }>('/tasks'),
 

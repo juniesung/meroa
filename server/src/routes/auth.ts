@@ -13,6 +13,7 @@ import {
   OTP_RESEND_COOLDOWN_SECONDS,
   OTP_TTL_MINUTES,
   REFRESH_TOKEN_TTL_DAYS,
+  WELCOME_MESSAGE,
 } from '../lib/constants.ts';
 import { generateOtpCode, generateRefreshToken, hashWithPepper } from '../lib/crypto.ts';
 import { signAccessToken } from '../lib/jwt.ts';
@@ -135,8 +136,7 @@ authRoutes.post('/otp/verify', zValidator('json', verifySchema), async (c) => {
       await db.insert(messages).values({
         conversationId: conversation.id,
         role: 'assistant',
-        content:
-          "Hey — I'm Meroa. Just so it's clear up front: I'm an AI, not a person. I'm here to actually help — keep track of things, think through stuff with you, check in without being annoying about it. What's going on with you today?",
+        content: WELCOME_MESSAGE,
       });
     } else {
       // Lost the race: another concurrent verify already created this user
