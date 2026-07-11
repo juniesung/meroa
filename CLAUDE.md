@@ -261,7 +261,7 @@ DoD is met. When working a phase, load that phase's file alongside this one.
 |---|-------|------|--------|
 | 0 | Foundation & design system (fresh scaffold, tokens, components, static tabs) | `docs/phases/phase-0-foundation-design-system.md` | ☑ |
 | 1 | Backend, accounts & continuity (API, DB, phone-linking, text→app handoff) | `docs/phases/phase-1-backend-accounts-continuity.md` | ☑ |
-| 2 | Live chat (model API, streaming, history, limits, AI disclosure) | `docs/phases/phase-2-live-chat.md` | ☐ |
+| 2 | Live chat (model API, streaming, history, limits, AI disclosure) | `docs/phases/phase-2-live-chat.md` | ☑ |
 | 3 | Tasks (all types, chat + UI creation, recurring, reminders, missed-task recovery) | `docs/phases/phase-3-tasks.md` | ☐ |
 | 4 | Tools (templates, preview-before-save, entry, charts, history, edit-with-AI) | `docs/phases/phase-4-tools.md` | ☐ |
 | 5 | **The connected loop** (one record ↔ Chat/Tasks/Tools, undo, confidence gating) | `docs/phases/phase-5-connected-loop.md` | ☐ |
