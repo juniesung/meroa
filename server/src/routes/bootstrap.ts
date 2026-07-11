@@ -1,9 +1,10 @@
-import { and, asc, desc, eq, isNull } from 'drizzle-orm';
+import { and, desc, eq, isNull } from 'drizzle-orm';
 import { Hono } from 'hono';
 
 import { db } from '../db/client.ts';
 import { entitlements, memories, tasks, tools, users } from '../db/schema.ts';
 import { getOrCreateAppConversation, getRecentMessages } from '../lib/conversations.ts';
+import { taskStatusOrder } from '../lib/task-order.ts';
 import { requireAuth, type AuthVariables } from '../middleware/auth.ts';
 
 export const bootstrapRoutes = new Hono<{ Variables: AuthVariables }>();
@@ -37,7 +38,7 @@ bootstrapRoutes.get('/', async (c) => {
     .select()
     .from(tasks)
     .where(and(eq(tasks.userId, userId), isNull(tasks.deletedAt)))
-    .orderBy(asc(tasks.status), desc(tasks.createdAt));
+    .orderBy(taskStatusOrder, desc(tasks.createdAt));
 
   const toolRows = await db
     .select()

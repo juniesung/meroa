@@ -1,11 +1,12 @@
 import { zValidator } from '@hono/zod-validator';
-import { and, asc, desc, eq, isNull } from 'drizzle-orm';
+import { and, desc, eq, isNull } from 'drizzle-orm';
 import { Hono } from 'hono';
 import { z } from 'zod';
 
 import { db } from '../db/client.ts';
 import { records, tasks } from '../db/schema.ts';
 import { requireAuth, type AuthVariables } from '../middleware/auth.ts';
+import { taskStatusOrder } from '../lib/task-order.ts';
 
 export const taskRoutes = new Hono<{ Variables: AuthVariables }>();
 taskRoutes.use('*', requireAuth);
@@ -16,7 +17,7 @@ taskRoutes.get('/', async (c) => {
     .select()
     .from(tasks)
     .where(and(eq(tasks.userId, userId), isNull(tasks.deletedAt)))
-    .orderBy(asc(tasks.status), desc(tasks.createdAt));
+    .orderBy(taskStatusOrder, desc(tasks.createdAt));
   return c.json({ tasks: rows });
 });
 
