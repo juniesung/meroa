@@ -6,6 +6,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Icon, type IconName } from '@/components/Icon';
 import { TAB_BAR_CONTENT_HEIGHT, theme } from '@/constants/theme';
+import { useTimezoneSync } from '@/features/profile/useTimezoneSync';
+import { useTaskReminderSync } from '@/features/tasks/useTaskReminderSync';
 
 function makeIcon(name: IconName) {
   function TabIcon({ color, focused }: { color: ColorValue; focused: boolean }) {
@@ -23,6 +25,8 @@ function makeIcon(name: IconName) {
 
 export default function TabsLayout() {
   const insets = useSafeAreaInsets();
+  useTaskReminderSync();
+  useTimezoneSync();
 
   return (
     <Tabs

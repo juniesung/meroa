@@ -5,6 +5,7 @@ import { db } from '../db/client.ts';
 import { entitlements, memories, tasks, tools, users } from '../db/schema.ts';
 import { getOrCreateAppConversation, getRecentMessages } from '../lib/conversations.ts';
 import { taskStatusOrder } from '../lib/task-order.ts';
+import { materializeRecurringInstances } from '../lib/tasks/recurrence.ts';
 import { requireAuth, type AuthVariables } from '../middleware/auth.ts';
 
 export const bootstrapRoutes = new Hono<{ Variables: AuthVariables }>();
@@ -27,10 +28,14 @@ bootstrapRoutes.get('/', async (c) => {
   const conversation = await getOrCreateAppConversation(userId);
   const recentMessages = await getRecentMessages(userId, 50);
 
+  await materializeRecurringInstances(userId, user.timezone, db);
+
   const memoryRows = await db
     .select()
     .from(memories)
-    .where(and(eq(memories.userId, userId), eq(memories.suppressed, false), isNull(memories.deletedAt)))
+    .where(
+      and(eq(memories.userId, userId), eq(memories.suppressed, false), isNull(memories.deletedAt)),
+    )
     .orderBy(desc(memories.createdAt))
     .limit(50);
 

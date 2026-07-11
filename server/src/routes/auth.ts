@@ -76,10 +76,18 @@ authRoutes.post('/otp/request', zValidator('json', requestSchema), async (c) => 
   return c.json(result.body, result.status);
 });
 
-const verifySchema = z.object({ phone: z.string().min(3), code: z.string().min(4).max(8) });
+const verifySchema = z.object({
+  phone: z.string().min(3),
+  code: z.string().min(4).max(8),
+  // IANA name (e.g. "America/Chicago"), read from the device at verify time.
+  // Every task's "due today at 6am" reasoning — both the AI's and the
+  // recurrence materializer's — depends on this being right, so it's
+  // refreshed on every login below, not just captured once at signup.
+  timezone: z.string().min(1).max(100).optional(),
+});
 
 authRoutes.post('/otp/verify', zValidator('json', verifySchema), async (c) => {
-  const { code } = c.req.valid('json');
+  const { code, timezone } = c.req.valid('json');
   let phone: string;
   try {
     phone = normalizePhone(c.req.valid('json').phone);
@@ -117,7 +125,7 @@ authRoutes.post('/otp/verify', zValidator('json', verifySchema), async (c) => {
     // gracefully resolving to the session the winner already created.
     const [created] = await db
       .insert(users)
-      .values({ phoneE164: phone, prefs: {} })
+      .values({ phoneE164: phone, prefs: {}, timezone: timezone ?? null })
       .onConflictDoNothing({ target: users.phoneE164 })
       .returning();
 
@@ -145,6 +153,14 @@ authRoutes.post('/otp/verify', zValidator('json', verifySchema), async (c) => {
       if (!existing) throw new Error('user_insert_failed');
       user = existing;
     }
+  }
+
+  // Keep an existing user's timezone current — a stale one silently skews
+  // every AI-scheduled time and recurrence occurrence (the device moved,
+  // or this is a returning user from before timezone capture existed).
+  if (!isNewUser && timezone && timezone !== user.timezone) {
+    const [updated] = await db.update(users).set({ timezone }).where(eq(users.id, user.id)).returning();
+    if (updated) user = updated;
   }
 
   const accessToken = await signAccessToken(user.id);

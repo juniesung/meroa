@@ -1,9 +1,14 @@
 import { fetch as expoFetch } from 'expo/fetch';
 
-import { ApiError, notifySessionExpired, refreshAccessToken, SessionExpiredError } from '@/lib/api/client';
+import {
+  ApiError,
+  notifySessionExpired,
+  refreshAccessToken,
+  SessionExpiredError,
+} from '@/lib/api/client';
 import { getCachedAccessToken, loadTokens } from '@/lib/auth/tokenStore';
 
-import type { ApiMessage } from './types';
+import type { ApiMessage, ApiTask } from './types';
 
 const BASE_URL = process.env.EXPO_PUBLIC_API_URL;
 if (!BASE_URL) {
@@ -14,12 +19,15 @@ export type ChatStreamEvent =
   | { type: 'user_message'; message: ApiMessage }
   | { type: 'delta'; text: string }
   | { type: 'segment'; message: ApiMessage }
+  | { type: 'action'; message: ApiMessage; task: ApiTask }
   | { type: 'stream_end' }
   | { type: 'error'; retryable: boolean; message: string }
   | { type: 'limit_reached'; plan: 'free' | 'plus'; limit: number };
 
 /** Parses a `text/event-stream` body into `{event, data}` pairs, one per blank-line-delimited block. */
-async function* parseSSE(body: ReadableStream<Uint8Array>): AsyncGenerator<{ event: string; data: string }> {
+async function* parseSSE(
+  body: ReadableStream<Uint8Array>,
+): AsyncGenerator<{ event: string; data: string }> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
@@ -48,7 +56,10 @@ async function* parseSSE(body: ReadableStream<Uint8Array>): AsyncGenerator<{ eve
 }
 
 /** Streams a chat reply for `text`. Yields events as they arrive; never throws for a limit/model error — those surface as `error`/`limit_reached` events. */
-export async function* streamMessage(text: string, isRetry = false): AsyncGenerator<ChatStreamEvent> {
+export async function* streamMessage(
+  text: string,
+  isRetry = false,
+): AsyncGenerator<ChatStreamEvent> {
   await loadTokens();
   const accessToken = getCachedAccessToken();
 
@@ -93,6 +104,9 @@ export async function* streamMessage(text: string, isRetry = false): AsyncGenera
         break;
       case 'segment':
         yield { type: 'segment', message: parsed.message };
+        break;
+      case 'action':
+        yield { type: 'action', message: parsed.message, task: parsed.task };
         break;
       case 'stream_end':
         yield { type: 'stream_end' };

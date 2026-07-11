@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback } from 'react';
 
+import { tasksQueryKey } from '@/features/tasks/queries';
 import { api } from '@/lib/api/client';
 import { streamMessage } from '@/lib/api/stream';
 import type { ApiMessage } from '@/lib/api/types';
@@ -69,7 +70,11 @@ export function useSendMessage() {
         status: 'sending',
       };
 
-      updateMessages((prev) => [...prev, tempUserMessage, placeholderAssistantMessage(currentAssistantId)]);
+      updateMessages((prev) => [
+        ...prev,
+        tempUserMessage,
+        placeholderAssistantMessage(currentAssistantId),
+      ]);
 
       const markFailed = (status: ChatMessageStatus) => {
         const failedAssistantId = currentAssistantId;
@@ -91,7 +96,9 @@ export function useSendMessage() {
           } else if (event.type === 'delta') {
             const assistantId = currentAssistantId;
             updateMessages((prev) =>
-              prev.map((m) => (m.id === assistantId ? { ...m, content: m.content + event.text } : m)),
+              prev.map((m) =>
+                m.id === assistantId ? { ...m, content: m.content + event.text } : m,
+              ),
             );
           } else if (event.type === 'segment') {
             const persisted = event.message;
@@ -102,6 +109,18 @@ export function useSendMessage() {
               placeholderAssistantMessage(nextId),
             ]);
             currentAssistantId = nextId;
+          } else if (event.type === 'action') {
+            const persisted = event.message;
+            const finishedId = currentAssistantId;
+            const nextId = nextTempId('temp-assistant');
+            updateMessages((prev) => [
+              ...prev.map((m) => (m.id === finishedId ? persisted : m)),
+              placeholderAssistantMessage(nextId),
+            ]);
+            currentAssistantId = nextId;
+            // Same record, two views (CLAUDE.md §2) — the Tasks tab must
+            // reflect this the instant the card appears in chat.
+            queryClient.invalidateQueries({ queryKey: tasksQueryKey });
           } else if (event.type === 'stream_end') {
             // The last segment always leaves one trailing, never-filled
             // placeholder behind (created in anticipation of a segment that
@@ -118,7 +137,7 @@ export function useSendMessage() {
         markFailed('failed');
       }
     },
-    [updateMessages],
+    [updateMessages, queryClient],
   );
 
   const retry = useCallback(

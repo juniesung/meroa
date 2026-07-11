@@ -95,7 +95,8 @@ async function main() {
     },
   ]);
 
-  // --- open tasks; one traceable straight back to that chat moment ---
+  // --- open tasks; one of each type so the simulator shows the full spread ---
+  // (one traceable straight back to that chat moment)
   await db.insert(tasks).values([
     {
       userId: user.id,
@@ -111,6 +112,54 @@ async function main() {
       title: 'Drink 2L of water',
       icon: 'droplet',
       status: 'open',
+    },
+    {
+      userId: user.id,
+      type: 'checklist',
+      title: 'Pack for the gym',
+      icon: 'briefcase',
+      status: 'open',
+      config: {
+        items: [
+          { id: crypto.randomUUID(), text: 'Shoes', done: true },
+          { id: crypto.randomUUID(), text: 'Towel', done: false },
+          { id: crypto.randomUUID(), text: 'Water bottle', done: false },
+        ],
+      },
+    },
+    {
+      userId: user.id,
+      type: 'counter',
+      title: 'Pushups',
+      icon: 'flame',
+      status: 'open',
+      config: { count: 15, target: 50, unit: 'reps' },
+    },
+    {
+      userId: user.id,
+      type: 'duration',
+      title: 'Study Spanish',
+      icon: 'book',
+      status: 'open',
+      config: { loggedMinutes: 10, targetMinutes: 30, runningSince: null },
+    },
+    {
+      userId: user.id,
+      type: 'counter',
+      title: 'Emergency fund',
+      icon: 'wallet',
+      status: 'open',
+      config: { count: 320, target: 1000, unit: '$' },
+    },
+    // A recurring template — its dated instances materialize lazily on the
+    // next read (GET /tasks / bootstrap), so nothing to spawn here.
+    {
+      userId: user.id,
+      type: 'completion',
+      title: 'Weekly grocery run',
+      icon: 'wallet',
+      status: 'open',
+      recurrence: { freq: 'weekly', byWeekday: ['sa'], time: '10:00' },
     },
   ]);
 

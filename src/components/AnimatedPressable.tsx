@@ -19,3 +19,25 @@ export function useTapFeedback(scaleTo = 0.96) {
     },
   };
 }
+
+/**
+ * A soft blue glow around the edge of a tappable row (list-style rows read
+ * better with a highlight than a scale/shrink) — pair with an absolutely
+ * positioned `<Animated.View pointerEvents="none" style={[rimStyle, highlightStyle]} />`
+ * sized to the row, layered under its content.
+ */
+export function useRimHighlight() {
+  const pressed = useSharedValue(0);
+  const highlightStyle = useAnimatedStyle(() => ({
+    opacity: withTiming(pressed.value, { duration: pressed.value ? 80 : 220 }),
+  }));
+  return {
+    highlightStyle,
+    onPressIn: () => {
+      pressed.value = 1;
+    },
+    onPressOut: () => {
+      pressed.value = 0;
+    },
+  };
+}

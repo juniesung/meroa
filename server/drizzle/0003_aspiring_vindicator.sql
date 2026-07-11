@@ -1,0 +1,1 @@
+ALTER TABLE "records" ADD COLUMN "tool_call_id" text;

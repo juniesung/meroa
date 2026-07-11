@@ -1,12 +1,13 @@
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { MeroaMark } from '@/components/MeroaMark';
 import { Row } from '@/components/Row';
 import { theme } from '@/constants/theme';
-import { useMe } from '@/features/profile/queries';
+import { useMe, useUpdatePrefs } from '@/features/profile/queries';
 import { useTabBarHeight } from '@/hooks/use-tab-bar-inset';
 import { useAuth } from '@/lib/auth/AuthProvider';
+import { requestNotificationPermission } from '@/lib/notifications';
 
 function capitalize(value: string): string {
   return value.length ? value[0]!.toUpperCase() + value.slice(1) : value;
@@ -16,21 +17,36 @@ export default function YouScreen() {
   const tabBarHeight = useTabBarHeight();
   const { data } = useMe();
   const { signOut } = useAuth();
+  const updatePrefs = useUpdatePrefs();
 
   const communicationStyle =
     typeof data?.user.prefs.communicationStyle === 'string'
       ? capitalize(data.user.prefs.communicationStyle)
       : 'Casual';
+  const proactiveCheckins = data?.user.prefs.proactiveCheckins === true;
+
+  const handleToggleCheckins = async (next: boolean) => {
+    // Ask the OS only when turning check-ins on (CLAUDE.md §2) — the sync
+    // logic separately checks actual permission before scheduling, so a
+    // denial here doesn't need to be reflected back into the toggle.
+    if (next) await requestNotificationPermission();
+    updatePrefs.mutate({ proactiveCheckins: next });
+  };
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 20, paddingBottom: tabBarHeight + 40 }}>
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={{ padding: 20, paddingBottom: tabBarHeight + 40 }}
+      >
         <View style={styles.hero}>
           <MeroaMark size={64} glow />
           <Text style={styles.name}>{data?.user.displayName ?? data?.user.phoneE164 ?? '—'}</Text>
           {data?.user.displayName ? <Text style={styles.email}>{data.user.phoneE164}</Text> : null}
           <View style={styles.pill}>
-            <Text style={styles.pillText}>{data?.entitlement.plan === 'plus' ? 'Meroa Plus' : 'Meroa Free'}</Text>
+            <Text style={styles.pillText}>
+              {data?.entitlement.plan === 'plus' ? 'Meroa Plus' : 'Meroa Free'}
+            </Text>
           </View>
         </View>
 
@@ -44,8 +60,23 @@ export default function YouScreen() {
         </Section>
 
         <Section title="PREFERENCES">
-          <Row icon="bell" label="Notifications" />
-          <Row icon="moon" label="Dark appearance" right={<Text style={styles.hint}>Always</Text>} />
+          <Row
+            icon="bell"
+            label="Proactive check-ins"
+            right={
+              <Switch
+                value={proactiveCheckins}
+                onValueChange={handleToggleCheckins}
+                trackColor={{ true: theme.blue, false: theme.border }}
+                thumbColor="#fff"
+              />
+            }
+          />
+          <Row
+            icon="moon"
+            label="Dark appearance"
+            right={<Text style={styles.hint}>Always</Text>}
+          />
           <Row icon="lock" label="Privacy" />
         </Section>
 

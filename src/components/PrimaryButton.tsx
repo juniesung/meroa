@@ -1,4 +1,5 @@
 import { LinearGradient } from 'expo-linear-gradient';
+import * as Haptics from 'expo-haptics';
 import { StyleSheet, Text, type ViewStyle } from 'react-native';
 
 import { radii, theme } from '@/constants/theme';
@@ -15,8 +16,15 @@ export function PrimaryButton({
 }) {
   const { animatedStyle, onPressIn, onPressOut } = useTapFeedback();
 
+  const handlePress = onPress
+    ? () => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+        onPress();
+      }
+    : undefined;
+
   return (
-    <AnimatedPressable onPress={onPress} onPressIn={onPressIn} onPressOut={onPressOut} style={[style, animatedStyle]}>
+    <AnimatedPressable onPress={handlePress} onPressIn={onPressIn} onPressOut={onPressOut} style={[style, animatedStyle]}>
       <LinearGradient
         colors={theme.gradient}
         start={{ x: 0, y: 0 }}

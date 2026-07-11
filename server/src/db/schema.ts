@@ -2,6 +2,7 @@ import { relations } from 'drizzle-orm';
 import {
   boolean,
   check,
+  date,
   index,
   integer,
   jsonb,
@@ -115,16 +116,19 @@ export const records = pgTable(
     sourceMessageId: uuid('source_message_id').references(() => messages.id, {
       onDelete: 'set null',
     }),
+    // The Anthropic tool_use block's own id — one per individual tool call,
+    // even when several calls share a sourceMessageId (a single chat turn
+    // creating two tasks, or starting then stopping the same timer). Lets
+    // idempotency key on "this exact tool call", not "this message + kind",
+    // so distinct calls in one turn never collide with each other.
+    toolCallId: text('tool_call_id'),
     occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull().defaultNow(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     revertedAt: timestamp('reverted_at', { withTimezone: true }),
   },
   (t) => [
     index('records_user_idx').on(t.userId),
-    check(
-      'records_source_check',
-      sql`${t.source} in ('chat','tasks_ui','tool_ui','system')`,
-    ),
+    check('records_source_check', sql`${t.source} in ('chat','tasks_ui','tool_ui','system')`),
   ],
 );
 
@@ -152,6 +156,13 @@ export const tools = pgTable(
 // `type` covers all six Phase-3 task types up front so the column never
 // needs to change shape later. `toolId` is the Phase-5 task<->tool link,
 // nullable now because linking doesn't exist yet.
+//
+// A recurring task is a *template* row (`recurrence` non-null, `type` is
+// still the per-instance base type — a daily counter is still a counter
+// each day). Occurrences are separate dated *instance* rows: `templateId`
+// points back at the template, `occurrenceDate` is that instance's calendar
+// date, and `recurrence` is null on instances. The literal 'recurring'
+// value in the type check below is unused (kept for column-shape history).
 export const tasks = pgTable(
   'tasks',
   {
@@ -173,6 +184,8 @@ export const tasks = pgTable(
     createdFromMessageId: uuid('created_from_message_id').references(() => messages.id, {
       onDelete: 'set null',
     }),
+    templateId: uuid('template_id'),
+    occurrenceDate: date('occurrence_date', { mode: 'string' }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
   },
@@ -183,6 +196,12 @@ export const tasks = pgTable(
       sql`${t.type} in ('completion','checklist','counter','duration','numeric_meter','recurring')`,
     ),
     check('tasks_status_check', sql`${t.status} in ('open','done','archived')`),
+    // Partial unique index (not a FK — a template's instances reference it,
+    // but nothing should ever cascade-delete a template out from under its
+    // history) — makes lazy materialization idempotent under concurrent reads.
+    uniqueIndex('tasks_template_occurrence_unique')
+      .on(t.templateId, t.occurrenceDate)
+      .where(sql`${t.templateId} is not null`),
   ],
 );
 

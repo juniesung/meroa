@@ -14,6 +14,11 @@ import type {
   AuthTokens,
   BootstrapResponse,
   ApiMessage,
+  CompleteTaskInput,
+  CreateTaskInput,
+  EditTaskPatch,
+  PostponeTaskInput,
+  ProgressInput,
   VerifyOtpResponse,
 } from './types';
 
@@ -37,6 +42,23 @@ export class SessionExpiredError extends Error {}
 let onSessionExpired: (() => void) | null = null;
 export function setSessionExpiredHandler(handler: () => void) {
   onSessionExpired = handler;
+}
+
+// Rough device-vs-server clock offset, refreshed from every response's Date
+// header (every HTTP response has one — no dedicated endpoint needed). Not
+// meant to be precise (no RTT correction), just enough to keep a running
+// timer's live display from freezing at 0% for its whole duration if the
+// device clock is genuinely misconfigured, not just momentarily stale.
+let clockOffsetMs = 0;
+export function getClockOffsetMs(): number {
+  return clockOffsetMs;
+}
+function updateClockOffset(res: Response) {
+  const dateHeader = res.headers.get('date');
+  if (!dateHeader) return;
+  const serverTime = Date.parse(dateHeader);
+  if (Number.isNaN(serverTime)) return;
+  clockOffsetMs = serverTime - Date.now();
 }
 export function notifySessionExpired() {
   onSessionExpired?.();
@@ -84,6 +106,7 @@ async function request<T>(path: string, options: RequestInit = {}, isRetry = fal
       ...options.headers,
     },
   });
+  updateClockOffset(res);
 
   if (res.status === 401 && !isRetry && !path.startsWith('/auth/')) {
     const newAccessToken = await refreshAccessToken();
@@ -108,7 +131,10 @@ export const api = {
   verifyOtp: (phone: string, code: string) =>
     request<VerifyOtpResponse>('/auth/otp/verify', {
       method: 'POST',
-      body: JSON.stringify({ phone, code }),
+      // The device's IANA timezone — every AI-scheduled time and recurring
+      // occurrence is computed against whatever the server has on file, so
+      // this needs to reach it before any task gets created.
+      body: JSON.stringify({ phone, code, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone }),
     }),
 
   logout: async () => {
@@ -124,6 +150,18 @@ export const api = {
 
   me: () => request<{ user: ApiUser; entitlement: ApiEntitlement }>('/me'),
 
+  updatePrefs: (patch: Record<string, unknown>) =>
+    request<{ prefs: Record<string, unknown> }>('/me/prefs', {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
+
+  updateTimezone: (timezone: string) =>
+    request<{ timezone: string }>('/me/timezone', {
+      method: 'PATCH',
+      body: JSON.stringify({ timezone }),
+    }),
+
   bootstrap: () => request<BootstrapResponse>('/bootstrap'),
 
   getMessages: (cursor?: string) =>
@@ -135,10 +173,34 @@ export const api = {
 
   getTasks: () => request<{ tasks: ApiTask[] }>('/tasks'),
 
-  createTask: (input: { title: string; icon?: string; dueAt?: string }) =>
+  createTask: (input: CreateTaskInput) =>
     request<{ task: ApiTask }>('/tasks', { method: 'POST', body: JSON.stringify(input) }),
 
-  toggleTask: (id: string) => request<{ task: ApiTask }>(`/tasks/${id}/toggle`, { method: 'POST' }),
+  editTask: (id: string, patch: EditTaskPatch) =>
+    request<{ task: ApiTask }>(`/tasks/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+
+  completeTask: (id: string, input: CompleteTaskInput = {}) =>
+    request<{ task: ApiTask }>(`/tasks/${id}/complete`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+
+  progressTask: (id: string, input: ProgressInput) =>
+    request<{ task: ApiTask }>(`/tasks/${id}/progress`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+
+  postponeTask: (id: string, input: PostponeTaskInput) =>
+    request<{ task: ApiTask }>(`/tasks/${id}/postpone`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+
+  deleteTask: (id: string) => request<{ task: ApiTask }>(`/tasks/${id}`, { method: 'DELETE' }),
+
+  undoLastTaskAction: () =>
+    request<{ task: ApiTask; action: string }>('/tasks/undo', { method: 'POST' }),
 
   getTools: () => request<{ tools: ApiTool[] }>('/tools'),
 };

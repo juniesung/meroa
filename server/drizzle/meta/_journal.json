@@ -15,6 +15,20 @@
       "when": 1783738628188,
       "tag": "0001_magical_jack_flag",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1783747174780,
+      "tag": "0002_icy_robbie_robertson",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1783764380865,
+      "tag": "0003_aspiring_vindicator",
+      "breakpoints": true
     }
   ]
 }

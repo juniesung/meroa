@@ -12,15 +12,26 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import Animated, { useAnimatedStyle, useSharedValue, withRepeat, withSequence, withTiming } from 'react-native-reanimated';
+import Animated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withRepeat,
+  withSequence,
+  withTiming,
+} from 'react-native-reanimated';
 
 import { AnimatedPressable, useTapFeedback } from '@/components/AnimatedPressable';
 import { Bubble } from '@/components/Bubble';
 import { Icon } from '@/components/Icon';
 import { MeroaMark } from '@/components/MeroaMark';
+import { TaskCard } from '@/components/TaskCard';
 import { radii, theme } from '@/constants/theme';
 import { type ChatMessage, useMessages, useSendMessage } from '@/features/chat/queries';
+import { useCompleteTask, useDeleteTask, useProgressTask, useTasks } from '@/features/tasks/queries';
 import { useTabBarHeight } from '@/hooks/use-tab-bar-inset';
+import type { ApiTask } from '@/lib/api/types';
+import { toIconName } from '@/lib/icon';
+import { requestNotificationPermission } from '@/lib/notifications';
 
 // Must match the server's `sendSchema` max (server/src/routes/messages.ts) —
 // otherwise an over-limit send round-trips to a 400, gets marked "failed",
@@ -33,7 +44,11 @@ function TypingDots() {
   const d3 = useSharedValue(0.3);
 
   useEffect(() => {
-    const loop = () => withRepeat(withSequence(withTiming(1, { duration: 350 }), withTiming(0.3, { duration: 350 })), -1);
+    const loop = () =>
+      withRepeat(
+        withSequence(withTiming(1, { duration: 350 }), withTiming(0.3, { duration: 350 })),
+        -1,
+      );
     d1.value = loop();
     d2.value = withSequence(withTiming(0.3, { duration: 120 }), loop());
     d3.value = withSequence(withTiming(0.3, { duration: 240 }), loop());
@@ -55,9 +70,117 @@ function TypingDots() {
   );
 }
 
-function MessageRow({ message, onRetry }: { message: ChatMessage; onRetry: (m: ChatMessage) => void }) {
-  const isStreamingEmpty = message.role === 'assistant' && message.status === 'streaming' && !message.content;
+// The task card in a chat reply is a view of the same record as the Tasks
+// tab (CLAUDE.md §2) — it resolves live state from the tasks query by id so
+// completing it elsewhere updates the card here too, falling back to the
+// meta snapshot taken at creation time only if that task can't be found
+// (e.g. history loaded before the tasks query has settled).
+function TaskActionCard({ message }: { message: ChatMessage }) {
+  const { data: tasks } = useTasks();
+  const completeTask = useCompleteTask();
+  const progressTask = useProgressTask();
+
+  const taskId = message.meta.taskId as string | undefined;
+  const snapshot = message.meta.task as ApiTask | undefined;
+  const task = tasks?.find((t) => t.id === taskId) ?? snapshot;
+  if (!task) return null;
+
+  return (
+    <View style={styles.actionCard}>
+      <TaskCard
+        task={task}
+        onToggleComplete={() => completeTask.mutate({ id: task.id })}
+        onCounterIncrement={() =>
+          progressTask.mutate({ id: task.id, input: { kind: 'counter_increment' } })
+        }
+        onCounterDecrement={() =>
+          progressTask.mutate({ id: task.id, input: { kind: 'counter_increment', amount: -1 } })
+        }
+        onTimerStart={() => {
+          void requestNotificationPermission();
+          progressTask.mutate({ id: task.id, input: { kind: 'duration_start' } });
+        }}
+        onTimerStop={() => progressTask.mutate({ id: task.id, input: { kind: 'duration_stop' } })}
+        onDurationReopen={() => progressTask.mutate({ id: task.id, input: { kind: 'reopen' } })}
+        onToggleItem={(itemId) =>
+          progressTask.mutate({ id: task.id, input: { kind: 'checklist_toggle', itemId } })
+        }
+      />
+    </View>
+  );
+}
+
+// remove_task never deletes on its own — the AI asks, this card shows the
+// real task, and only a tap on Delete actually removes it (via the same
+// REST endpoint the Tasks tab's swipe-to-delete uses). If the task is no
+// longer in the live list (deleted from here, or from elsewhere), the card
+// just reflects that instead of asking again.
+function TaskRemovalConfirmCard({ message }: { message: ChatMessage }) {
+  const { data: tasks } = useTasks();
+  const deleteTask = useDeleteTask();
+  const [dismissed, setDismissed] = useState(false);
+
+  const taskId = message.meta.taskId as string | undefined;
+  const snapshot = message.meta.task as ApiTask | undefined;
+  const liveTask = tasks?.find((t) => t.id === taskId);
+  const task = liveTask ?? snapshot;
+  if (!task) return null;
+
+  const alreadyRemoved = !liveTask;
+  const statusText = alreadyRemoved ? 'Removed' : dismissed ? "Kept — didn't delete it" : 'Delete this task?';
+
+  return (
+    <View style={styles.actionCard}>
+      <View style={styles.removalRow}>
+        <View style={styles.removalIconChip}>
+          <Icon name={toIconName(task.icon)} size={18} color={theme.dim} stroke={1.9} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.removalTitle} numberOfLines={1}>
+            {task.title}
+          </Text>
+          <Text style={styles.removalStatus}>{statusText}</Text>
+        </View>
+      </View>
+      {!alreadyRemoved && !dismissed && (
+        <View style={styles.removalButtons}>
+          <Pressable onPress={() => setDismissed(true)} style={styles.removalCancelButton} hitSlop={4}>
+            <Text style={styles.removalCancelText}>Keep it</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => {
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
+              deleteTask.mutate(task.id);
+            }}
+            style={styles.removalConfirmButton}
+            hitSlop={4}
+          >
+            <Icon name="trash" size={14} color="#fff" stroke={2.2} />
+            <Text style={styles.removalConfirmText}>Delete</Text>
+          </Pressable>
+        </View>
+      )}
+    </View>
+  );
+}
+
+function MessageRow({
+  message,
+  onRetry,
+}: {
+  message: ChatMessage;
+  onRetry: (m: ChatMessage) => void;
+}) {
+  const isStreamingEmpty =
+    message.role === 'assistant' && message.status === 'streaming' && !message.content;
   if (isStreamingEmpty) return <TypingDots />;
+
+  if (message.role === 'assistant' && message.meta?.kind === 'task_action') {
+    return <TaskActionCard message={message} />;
+  }
+  if (message.role === 'assistant' && message.meta?.kind === 'task_removal_pending') {
+    return <TaskRemovalConfirmCard message={message} />;
+  }
 
   return (
     <View>
@@ -218,6 +341,45 @@ export default function ChatScreen() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: theme.bg },
+  actionCard: { marginVertical: 4, alignSelf: 'stretch' },
+  removalRow: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14 },
+  removalIconChip: {
+    width: 34,
+    height: 34,
+    borderRadius: radii.chip,
+    backgroundColor: theme.card2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  removalTitle: { color: theme.text, fontSize: 15, fontWeight: '600' },
+  removalStatus: { color: theme.dim, fontSize: 12, marginTop: 2 },
+  removalButtons: {
+    flexDirection: 'row',
+    gap: 10,
+    paddingHorizontal: 14,
+    paddingBottom: 14,
+  },
+  removalCancelButton: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    borderRadius: radii.controlTight,
+    borderWidth: 1,
+    borderColor: theme.borderStrong,
+  },
+  removalCancelText: { color: theme.text, fontSize: 14, fontWeight: '600' },
+  removalConfirmButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    borderRadius: radii.controlTight,
+    backgroundColor: theme.danger,
+  },
+  removalConfirmText: { color: '#fff', fontSize: 14, fontWeight: '600' },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
