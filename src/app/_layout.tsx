@@ -1,3 +1,4 @@
+import { QueryClientProvider } from '@tanstack/react-query';
 import { DarkTheme, Stack, ThemeProvider } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect } from 'react';
@@ -5,6 +6,8 @@ import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import { theme } from '@/constants/theme';
+import { AuthProvider, useAuth } from '@/lib/auth/AuthProvider';
+import { queryClient } from '@/lib/query-client';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -20,19 +23,40 @@ const navTheme = {
   },
 };
 
-export default function RootLayout() {
+function RootNavigator() {
+  const { status } = useAuth();
+
   useEffect(() => {
-    SplashScreen.hideAsync();
-  }, []);
+    if (status !== 'loading') {
+      SplashScreen.hideAsync();
+    }
+  }, [status]);
+
+  if (status === 'loading') return null;
 
   return (
+    <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: theme.bg } }}>
+      <Stack.Protected guard={status === 'signedIn'}>
+        <Stack.Screen name="(tabs)" />
+      </Stack.Protected>
+      <Stack.Protected guard={status === 'signedOut'}>
+        <Stack.Screen name="(auth)" />
+      </Stack.Protected>
+    </Stack>
+  );
+}
+
+export default function RootLayout() {
+  return (
     <GestureHandlerRootView style={{ flex: 1, backgroundColor: theme.bg }}>
-      <ThemeProvider value={navTheme}>
-        <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: theme.bg } }}>
-          <Stack.Screen name="(tabs)" />
-        </Stack>
-        <StatusBar style="light" />
-      </ThemeProvider>
+      <QueryClientProvider client={queryClient}>
+        <AuthProvider>
+          <ThemeProvider value={navTheme}>
+            <RootNavigator />
+            <StatusBar style="light" />
+          </ThemeProvider>
+        </AuthProvider>
+      </QueryClientProvider>
     </GestureHandlerRootView>
   );
 }

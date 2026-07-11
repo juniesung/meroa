@@ -1,6 +1,7 @@
 import * as Haptics from 'expo-haptics';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -16,20 +17,12 @@ import { Bubble } from '@/components/Bubble';
 import { Icon } from '@/components/Icon';
 import { MeroaMark } from '@/components/MeroaMark';
 import { theme } from '@/constants/theme';
+import { useMessages, useSendMessage } from '@/features/chat/queries';
 import { useTabBarHeight } from '@/hooks/use-tab-bar-inset';
 
-type Msg = { id: string; from: 'me' | 'ai'; text: string };
-
-const seed: Msg[] = [
-  { id: '1', from: 'ai', text: "Hey — how's the day going?" },
-  { id: '2', from: 'me', text: 'honestly kinda tired. i really need to work out though 😮‍💨' },
-  { id: '3', from: 'ai', text: 'Totally hear you. Want to commit to it today — even a short one? I can lock it in.' },
-  { id: '4', from: 'me', text: "yeah let's do chest today" },
-  { id: '5', from: 'ai', text: 'Done. Added it to today.' },
-];
-
 export default function ChatScreen() {
-  const [messages, setMessages] = useState<Msg[]>(seed);
+  const { data: messages = [], isLoading } = useMessages();
+  const sendMessage = useSendMessage();
   const [draft, setDraft] = useState('');
   const scrollRef = useRef<ScrollView>(null);
   const ellipsisFeedback = useTapFeedback();
@@ -37,19 +30,16 @@ export default function ChatScreen() {
   const micSendFeedback = useTapFeedback(0.9);
   const tabBarHeight = useTabBarHeight();
 
+  useEffect(() => {
+    scrollRef.current?.scrollToEnd({ animated: true });
+  }, [messages.length]);
+
   const send = () => {
     const text = draft.trim();
     if (!text) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-    setMessages((prev) => [...prev, { id: `${Date.now()}`, from: 'me', text }]);
     setDraft('');
-    setTimeout(() => {
-      setMessages((prev) => [
-        ...prev,
-        { id: `${Date.now()}-ai`, from: 'ai', text: 'Got it. Weaving that into your day.' },
-      ]);
-      scrollRef.current?.scrollToEnd({ animated: true });
-    }, 500);
+    sendMessage.mutate(text);
   };
 
   return (
@@ -79,22 +69,28 @@ export default function ChatScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={80}
       >
-        <ScrollView
-          ref={scrollRef}
-          style={{ flex: 1 }}
-          contentContainerStyle={{ padding: 14, paddingBottom: 20 }}
-          onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: true })}
-        >
-          <Text style={styles.timestamp}>
-            {new Date().toLocaleDateString(undefined, { weekday: 'long' })} ·{' '}
-            {new Date().toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}
-          </Text>
-          {messages.map((m) => (
-            <Bubble key={m.id} from={m.from}>
-              {m.text}
-            </Bubble>
-          ))}
-        </ScrollView>
+        {isLoading ? (
+          <View style={styles.loading}>
+            <ActivityIndicator color={theme.dim} />
+          </View>
+        ) : (
+          <ScrollView
+            ref={scrollRef}
+            style={{ flex: 1 }}
+            contentContainerStyle={{ padding: 14, paddingBottom: 20 }}
+            onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: true })}
+          >
+            <Text style={styles.timestamp}>
+              {new Date().toLocaleDateString(undefined, { weekday: 'long' })} ·{' '}
+              {new Date().toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}
+            </Text>
+            {messages.map((m) => (
+              <Bubble key={m.id} from={m.role === 'user' ? 'me' : 'ai'}>
+                {m.content}
+              </Bubble>
+            ))}
+          </ScrollView>
+        )}
 
         <View style={[styles.composer, { paddingBottom: tabBarHeight + 16 }]}>
           <AnimatedPressable
@@ -160,6 +156,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  loading: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   timestamp: { color: theme.faint, fontSize: 11, textAlign: 'center', marginBottom: 8 },
   composer: {
     flexDirection: 'row',

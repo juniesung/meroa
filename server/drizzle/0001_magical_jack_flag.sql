@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "conversations_user_channel_unique" ON "conversations" USING btree ("user_id","channel");

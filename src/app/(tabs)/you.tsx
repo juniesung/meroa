@@ -4,26 +4,43 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { MeroaMark } from '@/components/MeroaMark';
 import { Row } from '@/components/Row';
 import { theme } from '@/constants/theme';
+import { useMe } from '@/features/profile/queries';
 import { useTabBarHeight } from '@/hooks/use-tab-bar-inset';
+import { useAuth } from '@/lib/auth/AuthProvider';
+
+function capitalize(value: string): string {
+  return value.length ? value[0]!.toUpperCase() + value.slice(1) : value;
+}
 
 export default function YouScreen() {
   const tabBarHeight = useTabBarHeight();
+  const { data } = useMe();
+  const { signOut } = useAuth();
+
+  const communicationStyle =
+    typeof data?.user.prefs.communicationStyle === 'string'
+      ? capitalize(data.user.prefs.communicationStyle)
+      : 'Casual';
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 20, paddingBottom: tabBarHeight + 40 }}>
         <View style={styles.hero}>
           <MeroaMark size={64} glow />
-          <Text style={styles.name}>Alex Rivera</Text>
-          <Text style={styles.email}>alex@meroa.app</Text>
+          <Text style={styles.name}>{data?.user.displayName ?? data?.user.phoneE164 ?? '—'}</Text>
+          {data?.user.displayName ? <Text style={styles.email}>{data.user.phoneE164}</Text> : null}
           <View style={styles.pill}>
-            <Text style={styles.pillText}>Meroa Plus</Text>
+            <Text style={styles.pillText}>{data?.entitlement.plan === 'plus' ? 'Meroa Plus' : 'Meroa Free'}</Text>
           </View>
         </View>
 
         <Section title="PERSONALITY">
-          <Row icon="sparkle" label="Communication style" right={<Text style={styles.hint}>Casual</Text>} />
-          <Row icon="book" label="Memory" right={<Text style={styles.hint}>128 notes</Text>} />
+          <Row
+            icon="sparkle"
+            label="Communication style"
+            right={<Text style={styles.hint}>{communicationStyle}</Text>}
+          />
+          <Row icon="book" label="Memory" />
         </Section>
 
         <Section title="PREFERENCES">
@@ -34,7 +51,7 @@ export default function YouScreen() {
 
         <Section title="ACCOUNT">
           <Row icon="crown" label="Manage subscription" />
-          <Row icon="logout" label="Sign out" danger />
+          <Row icon="logout" label="Sign out" danger onPress={() => signOut()} />
         </Section>
 
         <Text style={styles.footer}>Meroa · v1.0.0</Text>
