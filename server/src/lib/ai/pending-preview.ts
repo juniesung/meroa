@@ -39,7 +39,7 @@ export function findPendingPreview(messages: MessageLike[]): GoalPreview | null 
   return null;
 }
 
-function describeStarter(starter: StarterTask, currency: string): string {
+function describeStarter(starter: StarterTask, currency: string | null): string {
   const cadence =
     starter.recurrence?.freq === 'daily'
       ? ' daily'
@@ -48,16 +48,22 @@ function describeStarter(starter: StarterTask, currency: string): string {
         : starter.recurrence?.freq === 'every_n_days'
           ? ` every ${starter.recurrence.n} days`
           : '';
-  return `"${starter.title}"${cadence} (${currency}${starter.contribution}/completion)`;
+  const amount =
+    starter.contribution !== undefined && currency !== null ? ` (${currency}${starter.contribution}/completion)` : '';
+  return `"${starter.title}"${cadence}${amount}`;
 }
 
 /** One compact state line for the model's context, '' when nothing is pending. */
 export function renderPendingPreview(preview: GoalPreview | null): string {
   if (!preview) return '';
   const d = preview.definition;
-  const deadline = d.deadline ? ` · by ${d.deadline}` : '';
+  const currency = d.type === 'savings' ? d.currency : null;
+  const facts =
+    d.type === 'savings'
+      ? ` · ${d.currency}${d.targetValue}${d.deadline ? ` · by ${d.deadline}` : ''}`
+      : ' · habit (daily check-in streak, no target amount)';
   const starters = preview.starterTasks?.length
-    ? ` · starter tasks: ${preview.starterTasks.map((s) => describeStarter(s, d.currency)).join('; ')}`
+    ? ` · starter tasks: ${preview.starterTasks.map((s) => describeStarter(s, currency)).join('; ')}`
     : '';
-  return `A create_goal preview is showing but NOT saved yet (the user hasn't tapped Create): "${preview.name}" · ${d.currency}${d.targetValue}${deadline}${starters}. If the user asks to change it, call create_goal again with the full revised version; if they ask about it, it's this one.`;
+  return `A create_goal preview is showing but NOT saved yet (the user hasn't tapped Create): "${preview.name}"${facts}${starters}. If the user asks to change it, call create_goal again with the full revised version; if they ask about it, it's this one.`;
 }

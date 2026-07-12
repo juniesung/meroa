@@ -36,12 +36,38 @@ function TotalView({ detail }: { detail: ApiGoalDetail }) {
         <Ring value={pct} size={56} stroke={5} label={`${pct}%`} />
         <View style={{ flex: 1 }}>
           <Text style={styles.viewHeadline}>
-            {detail.currency}{formatNumber(detail.total)} / {detail.currency}{formatNumber(detail.targetValue)}
+            {detail.currency}{formatNumber(detail.total ?? 0)} / {detail.currency}{formatNumber(detail.targetValue ?? 0)}
           </Text>
           {detail.card.paceLine ? <Text style={styles.viewSub}>{detail.card.paceLine}</Text> : null}
         </View>
       </View>
       <Progress value={pct} />
+    </View>
+  );
+}
+
+// Habit goals have no total/target — the streak IS the progress
+// (docs/goals-redesign-plan.md §1), so the detail hero is the current run,
+// not a ring toward a fraction that doesn't exist.
+function StreakView({ detail }: { detail: ApiGoalDetail }) {
+  const streak = detail.streak ?? { current: 0, longest: 0, doneCount: 0 };
+  const lit = streak.current > 0;
+  return (
+    <View style={styles.viewCard}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+        <View style={[styles.flameChip, lit && { backgroundColor: 'rgba(10,132,255,0.14)' }]}>
+          <Icon name="flame" size={26} color={lit ? theme.blue : theme.faint} stroke={2} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.viewHeadline}>
+            {lit ? `${streak.current}-day streak` : 'No streak yet'}
+          </Text>
+          <Text style={styles.viewSub}>
+            longest {streak.longest} · {streak.doneCount} check-in{streak.doneCount === 1 ? '' : 's'}
+          </Text>
+        </View>
+      </View>
+      <Text style={styles.habitNote}>Completing the daily task is the check-in — nothing to log here.</Text>
     </View>
   );
 }
@@ -65,6 +91,7 @@ export default function GoalDetailScreen() {
   }
 
   const { goal, detail, entries } = data;
+  const isHabit = detail.type === 'habit';
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
@@ -90,22 +117,26 @@ export default function GoalDetailScreen() {
       <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 120, gap: 12 }}>
         <Text style={styles.headline}>{detail.card.headline}</Text>
 
-        <TotalView detail={detail} />
+        {isHabit ? <StreakView detail={detail} /> : <TotalView detail={detail} />}
 
-        <Text style={styles.sectionTitle}>History</Text>
-        {entries.length === 0 ? (
-          <Text style={styles.emptyText}>No entries yet — log your first one.</Text>
-        ) : (
-          <View style={{ gap: 8 }}>
-            {entries.map((entry: ApiGoalEntry) => (
-              <View key={entry.id} style={styles.entryRow}>
-                <Text style={styles.entryLine} numberOfLines={1}>
-                  {formatEntryLine(detail.currency, entry.data)}
-                </Text>
-                <Text style={styles.entryDate}>{formatEntryDate(entry.entryAt)}</Text>
+        {!isHabit && (
+          <>
+            <Text style={styles.sectionTitle}>History</Text>
+            {entries.length === 0 ? (
+              <Text style={styles.emptyText}>No entries yet — log your first one.</Text>
+            ) : (
+              <View style={{ gap: 8 }}>
+                {entries.map((entry: ApiGoalEntry) => (
+                  <View key={entry.id} style={styles.entryRow}>
+                    <Text style={styles.entryLine} numberOfLines={1}>
+                      {formatEntryLine(detail.currency ?? '', entry.data)}
+                    </Text>
+                    <Text style={styles.entryDate}>{formatEntryDate(entry.entryAt)}</Text>
+                  </View>
+                ))}
               </View>
-            ))}
-          </View>
+            )}
+          </>
         )}
 
         <View style={{ marginTop: 24, alignItems: 'center' }}>
@@ -133,18 +164,22 @@ export default function GoalDetailScreen() {
         </View>
       </ScrollView>
 
-      <Pressable
-        onPress={() => {
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-          setEntrySheetOpen(true);
-        }}
-        style={styles.logButton}
-      >
-        <Icon name="plus" size={18} color="#fff" stroke={2.2} />
-        <Text style={styles.logButtonText}>Log</Text>
-      </Pressable>
+      {!isHabit && (
+        <>
+          <Pressable
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+              setEntrySheetOpen(true);
+            }}
+            style={styles.logButton}
+          >
+            <Icon name="plus" size={18} color="#fff" stroke={2.2} />
+            <Text style={styles.logButtonText}>Log</Text>
+          </Pressable>
 
-      <GoalEntrySheet visible={entrySheetOpen} onClose={() => setEntrySheetOpen(false)} goal={goal} />
+          <GoalEntrySheet visible={entrySheetOpen} onClose={() => setEntrySheetOpen(false)} goal={goal} />
+        </>
+      )}
     </SafeAreaView>
   );
 }
@@ -190,6 +225,15 @@ const styles = StyleSheet.create({
   },
   viewHeadline: { color: theme.text, fontSize: 17, fontWeight: '700' },
   viewSub: { color: theme.dim, fontSize: 12 },
+  flameChip: {
+    width: 56,
+    height: 56,
+    borderRadius: 999,
+    backgroundColor: theme.card2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  habitNote: { color: theme.faint, fontSize: 12 },
   sectionTitle: { color: theme.text, fontSize: 15, fontWeight: '700', marginTop: 10 },
   emptyText: { color: theme.dim, fontSize: 13 },
   entryRow: {

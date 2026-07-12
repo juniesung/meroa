@@ -184,13 +184,21 @@ export async function createGoal(
       // unlinked, and completing it moved nothing). Stamping every instance
       // of the template closes that hole for any occurrence date.
       const templateId = created.templateId ?? created.id;
+      // Habit starters never stamp a contribution — even if one slipped past
+      // the schema, a stamped amount would make the completion hook insert
+      // goal_entries against a goal that must have none (the completions ARE
+      // the record). Only savings starters stamp an auto-log amount.
+      const contributionExtra =
+        input.definition.type === 'savings' && starter.contribution !== undefined
+          ? { goalContribution: starter.contribution }
+          : {};
       const [templateRow] = await tx.select().from(tasks).where(eq(tasks.id, templateId)).limit(1);
       if (!templateRow) throw new Error('task_insert_failed');
       const [updatedTemplate] = await tx
         .update(tasks)
         .set({
           goalId: goal.id,
-          config: { ...(templateRow.config as Record<string, unknown>), goalContribution: starter.contribution },
+          config: { ...(templateRow.config as Record<string, unknown>), ...contributionExtra },
         })
         .where(eq(tasks.id, templateId))
         .returning();
@@ -203,7 +211,7 @@ export async function createGoal(
           .update(tasks)
           .set({
             goalId: goal.id,
-            config: { ...(instance.config as Record<string, unknown>), goalContribution: starter.contribution },
+            config: { ...(instance.config as Record<string, unknown>), ...contributionExtra },
           })
           .where(eq(tasks.id, instance.id))
           .returning();
@@ -240,15 +248,23 @@ export async function createGoal(
 // --- edit (constrained ops) ---------------------------------------------
 
 /**
- * Applies a constrained edit patch to a goal's current definition. v1 ops:
- * targetValue, deadline — nothing else exists to edit yet
- * (docs/goals-redesign-plan.md §2.2). Returns an error string instead of
- * throwing so the executor can wrap it consistently as an invalid_input.
+ * Applies a constrained edit patch to a goal's current definition —
+ * targetValue and deadline exist only on savings; a habit goal's definition
+ * has nothing numeric to edit (name/icon live on the row, not in here).
+ * Returns an error string instead of throwing so the executor can wrap it
+ * consistently as an invalid_input.
  */
 function applyEditOps(
   definition: GoalDefinition,
   patch: EditGoalPatch,
 ): { definition: GoalDefinition } | { error: string } {
+  if (definition.type === 'habit') {
+    if (patch.targetValue !== undefined || patch.deadline !== undefined) {
+      return { error: 'a habit goal has no target amount or deadline to change — only its name or icon can be edited' };
+    }
+    return { definition };
+  }
+
   let next = definition;
 
   if (patch.targetValue !== undefined) {
@@ -327,6 +343,15 @@ export async function logGoalEntry(
     }
 
     const goal = await loadGoal(tx, userId, goalId);
+    // Habit goals have no entries by design — the check-in task's
+    // completions ARE the record, and inventing an "amount" for a habit
+    // would be exactly the fabricated-number class CLAUDE.md §2 bans.
+    if ((goal.definition as GoalDefinition).type === 'habit') {
+      throw new GoalActionError(
+        'invalid_input',
+        `"${goal.name}" is a habit goal — it tracks check-ins through its daily task, not logged amounts. Completing the task is the check-in.`,
+      );
+    }
 
     // patch.entryAt, when set, has already been normalized to a real UTC
     // instant by the caller (lib/ai/actions.ts, via localDatetimeToUtcIso) —

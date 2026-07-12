@@ -35,6 +35,7 @@ import {
   type GoalPreview,
   type LogGoalEntryPatch,
 } from '../goals/schema.ts';
+import { buildGoalScopedStreaks } from '../goals/consistency.ts';
 import { buildGoalCardSummaries } from '../goals/summary.ts';
 import type { TurnRef, TurnRefs } from './task-context.ts';
 import { isAiToolName, validateToolInput, type AiToolName } from './tools.ts';
@@ -123,10 +124,12 @@ async function goalHeadlineWithPace(goal: GoalRow, timezone: string | null): Pro
 
 // The connected loop's side effect, stated as a fact on the completion/
 // reopen summary itself — without it, complete_task's result says nothing
-// about the goal, and the model does its own money math (observed live
-// announcing "$220.50" while the real total was $100.50; lesson 6/16).
-// Empty when the task isn't goal-linked, when the status didn't cross the
-// done boundary, or when the goal is archived (the entry hook skipped it).
+// about the goal, and the model does its own math (observed live announcing
+// "$220.50" while the real total was $100.50; lesson 6/16). Savings-linked
+// tasks state the auto-logged amount + recomputed total/pace; habit-linked
+// tasks state the recomputed streak (the model must never derive a streak
+// itself — same lesson). Empty when the task isn't goal-linked, when the
+// status didn't cross the done boundary, or when the goal is archived.
 async function goalImpactSuffix(
   userId: string,
   timezone: string | null,
@@ -134,14 +137,24 @@ async function goalImpactSuffix(
   after: TaskRow,
 ): Promise<string> {
   if (!after.goalId) return '';
-  const contribution = (after.config as { goalContribution?: unknown }).goalContribution;
-  if (typeof contribution !== 'number') return '';
   const becameDone = after.status === 'done' && priorStatus !== 'done';
   const becameOpen = after.status !== 'done' && priorStatus === 'done';
   if (!becameDone && !becameOpen) return '';
   const goal = await getGoalRow(userId, after.goalId);
   if (!goal) return '';
-  const currency = (goal.definition as GoalDefinition).currency;
+  const definition = goal.definition as GoalDefinition;
+
+  if (definition.type === 'habit') {
+    const streaks = await buildGoalScopedStreaks(userId, timezone, [goal.id]);
+    const streak = streaks.get(goal.id) ?? { current: 0, longest: 0, doneCount: 0 };
+    return becameDone
+      ? ` That's the check-in for habit "${goal.name}" — streak is now ${streak.current} day${streak.current === 1 ? '' : 's'} (longest: ${streak.longest}).`
+      : ` Check-in removed for habit "${goal.name}" — streak is now ${streak.current} (longest: ${streak.longest}).`;
+  }
+
+  const contribution = (after.config as { goalContribution?: unknown }).goalContribution;
+  if (typeof contribution !== 'number') return '';
+  const currency = definition.currency;
   const fact = await goalHeadlineWithPace(goal, timezone);
   return becameDone
     ? ` Auto-logged ${currency}${contribution} to "${goal.name}" — now ${fact}.`
@@ -155,7 +168,6 @@ async function summarizeGoalUndo(
   entryData?: GoalEntryData,
 ): Promise<string> {
   const headline = await goalHeadline(goal, timezone);
-  const currency = (goal.definition as GoalDefinition).currency;
   switch (undidKind) {
     case 'goal_created':
       return `Removed the "${goal.name}" goal.`;
@@ -164,6 +176,10 @@ async function summarizeGoalUndo(
     case 'goal_edited':
       return `Undid the last edit to "${goal.name}"${headline ? ` — ${headline}` : ''}.`;
     case 'goal_entry': {
+      // Entries exist only on savings goals, so the currency is always
+      // present on this branch's definition.
+      const definition = goal.definition as GoalDefinition;
+      const currency = definition.type === 'savings' ? definition.currency : '';
       const logged = entryData ? describeEntryData(currency, entryData) : '';
       return `Removed that${logged ? ` ${logged}` : ''} entry from "${goal.name}"${headline ? ` — ${headline} now` : ''}.`;
     }
@@ -186,15 +202,19 @@ function describeGoalEdit(
 
   const beforeDef = before.definition as GoalDefinition;
   const afterDef = after.definition as GoalDefinition;
-  if (input.targetValue !== undefined) {
-    parts.push(`target is now ${afterDef.currency}${afterDef.targetValue} (was ${beforeDef.currency}${beforeDef.targetValue})`);
-  }
-  if (input.deadline !== undefined) {
-    parts.push(
-      beforeDef.deadline
-        ? `deadline is now ${afterDef.deadline} (was ${beforeDef.deadline})`
-        : `deadline is now ${afterDef.deadline}`,
-    );
+  // target/deadline only exist on savings; the executor already rejected
+  // those patch fields for a habit, so this narrowing never drops real info.
+  if (beforeDef.type === 'savings' && afterDef.type === 'savings') {
+    if (input.targetValue !== undefined) {
+      parts.push(`target is now ${afterDef.currency}${afterDef.targetValue} (was ${beforeDef.currency}${beforeDef.targetValue})`);
+    }
+    if (input.deadline !== undefined) {
+      parts.push(
+        beforeDef.deadline
+          ? `deadline is now ${afterDef.deadline} (was ${beforeDef.deadline})`
+          : `deadline is now ${afterDef.deadline}`,
+      );
+    }
   }
 
   return parts.length ? `Updated "${after.name}" — ${parts.join('; ')}.` : `Updated "${after.name}".`;
@@ -735,17 +755,23 @@ async function executeAiToolCallInner(
 
         // Never saves — this returns a preview only (docs/goals-redesign-
         // plan.md §2.1). POST /goals {previewMessageId} does the actual
-        // create once the user taps. v1 ships exactly one goal type
-        // (savings), so the executor stamps it rather than asking the
-        // model to choose (docs/goals-redesign-plan.md §2.2).
-        const definition = goalDefinitionSchema.parse({
-          type: 'savings',
-          currency: validated.data.currency ?? '$',
-          targetValue: validated.data.targetValue,
-          deadline: validated.data.deadline,
-        });
+        // create once the user taps. The cross-field rules (savings needs a
+        // target, habit needs its check-in task and no numbers) are already
+        // enforced by createGoalParamsSchema's superRefine in
+        // validateToolInput above — a violation came back as an error the
+        // model can act on, not a half-built preview.
+        const definition = goalDefinitionSchema.parse(
+          validated.data.type === 'habit'
+            ? { type: 'habit' }
+            : {
+                type: 'savings',
+                currency: validated.data.currency ?? '$',
+                targetValue: validated.data.targetValue,
+                deadline: validated.data.deadline,
+              },
+        );
         const preview: GoalPreview = {
-          template: 'savings',
+          template: validated.data.type,
           name: validated.data.name,
           icon: validated.data.icon ?? null,
           definition,
@@ -843,7 +869,10 @@ async function executeAiToolCallInner(
         const { goal } = await logGoalEntry(userId, goalId, patch, source);
 
         const headline = await goalHeadline(goal, timezone);
-        const currency = (goal.definition as GoalDefinition).currency;
+        // logGoalEntry rejects habit goals, so a success here is always
+        // savings — the currency exists.
+        const definition = goal.definition as GoalDefinition;
+        const currency = definition.type === 'savings' ? definition.currency : '';
         const logged = describeEntryData(currency, { amount: validated.data.amount, note: validated.data.note });
         return {
           ok: true,

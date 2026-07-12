@@ -44,7 +44,7 @@ function GoalEntryForm({ goal, onDone }: { goal: ApiGoal; onDone: () => void }) 
           <TextInput
             value={amount}
             onChangeText={setAmount}
-            placeholder={goal.definition.currency}
+            placeholder={goal.definition.type === 'savings' ? goal.definition.currency : ''}
             placeholderTextColor={theme.faint}
             keyboardType="decimal-pad"
             style={styles.textInput}

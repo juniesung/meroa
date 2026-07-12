@@ -30,6 +30,14 @@ const COAT: GoalPreview = {
   definition: { type: 'savings', currency: '$', targetValue: 110 },
 };
 
+const MEDITATE: GoalPreview = {
+  template: 'habit',
+  name: 'Meditate daily',
+  icon: 'sparkle',
+  definition: { type: 'habit' },
+  starterTasks: [{ title: 'Meditate 10 min', recurrence: { freq: 'daily' } }],
+};
+
 describe('findPendingPreview', () => {
   it('returns null with no previews at all', () => {
     expect(findPendingPreview([textMessage('user'), textMessage('assistant')])).toBeNull();
@@ -72,6 +80,17 @@ describe('renderPendingPreview', () => {
     expect(line).toContain('$1500');
     expect(line).toContain('by 2026-12-25');
     expect(line).toContain('"Save $60" weekly on su ($60/completion)');
+    expect(line).toContain('NOT saved yet');
+  });
+
+  it('renders a habit proposal without inventing amounts', () => {
+    const line = renderPendingPreview(MEDITATE);
+    expect(line).toContain('"Meditate daily"');
+    expect(line).toContain('habit (daily check-in streak, no target amount)');
+    expect(line).toContain('"Meditate 10 min" daily');
+    // No currency/amount anywhere — a habit has none to describe.
+    expect(line).not.toContain('$');
+    expect(line).not.toContain('/completion');
     expect(line).toContain('NOT saved yet');
   });
 });

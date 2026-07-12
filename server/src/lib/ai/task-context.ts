@@ -266,15 +266,20 @@ export async function buildTaskContext(userId: string, timezone: string | null):
         : 'no due date');
 
     // A goal-linked task's line says so explicitly — completing it IS the
-    // logging (the auto-entry in lib/tasks/executor.ts), and without this
-    // the model has no way to know that and can double-record the same
-    // real-world action with a separate log_goal_entry call
+    // logging/check-in (the hooks in lib/tasks/executor.ts), and without
+    // this the model has no way to know that and can double-record the
+    // same real-world action with a separate log_goal_entry call
     // (docs/goals-redesign-plan.md §2.3).
     const contribution = ((displayRow.config ?? {}) as { goalContribution?: unknown }).goalContribution;
-    const goalLabel =
-      displayRow.goalName && !displayRow.goalArchivedAt && typeof contribution === 'number'
-        ? ` · auto-logs ${(displayRow.goalDefinition as GoalDefinition | null)?.currency ?? ''}${contribution} to goal "${displayRow.goalName}" when completed`
-        : '';
+    const linkedDefinition = displayRow.goalDefinition as GoalDefinition | null;
+    let goalLabel = '';
+    if (displayRow.goalName && !displayRow.goalArchivedAt) {
+      if (linkedDefinition?.type === 'habit') {
+        goalLabel = ` · the daily check-in for habit goal "${displayRow.goalName}" (completing = checking in)`;
+      } else if (typeof contribution === 'number') {
+        goalLabel = ` · auto-logs ${linkedDefinition?.type === 'savings' ? linkedDefinition.currency : ''}${contribution} to goal "${displayRow.goalName}" when completed`;
+      }
+    }
 
     const line = `[${alias}] "${displayRow.title}" · ${progressLabel(displayRow.type, (displayRow.config ?? {}) as Record<string, unknown>, alias, refs, displayRow.id)} · ${due}${scheduleNote}${goalLabel} · ${displayRow.status}`;
 

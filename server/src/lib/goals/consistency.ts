@@ -1,4 +1,4 @@
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, inArray, isNull } from 'drizzle-orm';
 
 import { db } from '../../db/client.ts';
 import { tasks } from '../../db/schema.ts';
@@ -178,4 +178,51 @@ export async function buildGoalConsistency(
     longest: computeLongestStreak(buckets),
     calendar: buildCalendar(buckets, todayYmd),
   };
+}
+
+export type GoalStreak = { current: number; longest: number; doneCount: number };
+
+/**
+ * Per-goal streaks for habit goals, batched — one query over every linked
+ * task instance for the given goals, then the same pure day-verdict/streak
+ * machinery scoped per goal (docs/goals-redesign-plan.md §2.4's "per-habit
+ * goal streak counts that goal's own daily task"). `doneCount` is the total
+ * completed check-ins, for the card's sub-line. Goals with no linked task
+ * activity yet come back as all-zeroes rather than being omitted.
+ */
+export async function buildGoalScopedStreaks(
+  userId: string,
+  timezone: string | null,
+  goalIds: string[],
+): Promise<Map<string, GoalStreak>> {
+  const result = new Map<string, GoalStreak>();
+  if (goalIds.length === 0) return result;
+  const tz = timezone ?? 'UTC';
+  const todayYmd = ymdInTz(new Date(), tz);
+
+  const rows = await db
+    .select({ goalId: tasks.goalId, dueAt: tasks.dueAt, status: tasks.status })
+    .from(tasks)
+    .where(
+      and(eq(tasks.userId, userId), isNull(tasks.deletedAt), isNull(tasks.recurrence), inArray(tasks.goalId, goalIds)),
+    );
+
+  const byGoal = new Map<string, TaskDueRow[]>();
+  for (const row of rows) {
+    if (!row.goalId || !row.dueAt) continue;
+    const list = byGoal.get(row.goalId) ?? [];
+    list.push({ dueYmd: ymdInTz(row.dueAt, tz), status: row.status });
+    byGoal.set(row.goalId, list);
+  }
+
+  for (const goalId of goalIds) {
+    const dueRows = byGoal.get(goalId) ?? [];
+    const buckets = bucketTasksByDay(dueRows);
+    result.set(goalId, {
+      current: computeCurrentStreak(buckets, todayYmd),
+      longest: computeLongestStreak(buckets),
+      doneCount: dueRows.filter((r) => r.status === 'done').length,
+    });
+  }
+  return result;
 }

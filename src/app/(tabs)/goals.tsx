@@ -206,6 +206,7 @@ export default function GoalsScreen() {
                   subtitle={goal.headline ?? goal.sub ?? `${goal.entryCount} entries logged`}
                   progress={Math.round((goal.progress ?? 0) * 100)}
                   paceLine={goal.paceLine}
+                  streak={goal.streak}
                 />
               </Pressable>
             ))}

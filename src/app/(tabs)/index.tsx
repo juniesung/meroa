@@ -261,8 +261,13 @@ function GoalPreviewCard({ message }: { message: ChatMessage }) {
   // server-side either way — one preview never creates twice).
   const createdButRemoved = created && !!liveGoals && !liveGoals.some((g) => g.id === createdGoalId);
 
-  const targetLine = `Target: ${definition.currency}${definition.targetValue}`;
-  const deadlineLine = definition.deadline ? `By ${definition.deadline}` : null;
+  // A habit has no target amount or deadline — the check-in task + streak is
+  // the whole mechanic, and the card says so instead of faking numbers.
+  const isSavings = definition.type === 'savings';
+  const targetLine = isSavings
+    ? `Target: ${definition.currency}${definition.targetValue}`
+    : 'Habit — daily check-ins build the streak';
+  const deadlineLine = isSavings && definition.deadline ? `By ${definition.deadline}` : null;
   const starterTasks = preview.starterTasks ?? [];
 
   const statusText = created
@@ -291,8 +296,10 @@ function GoalPreviewCard({ message }: { message: ChatMessage }) {
         {deadlineLine ? <Text style={styles.previewFields}>{deadlineLine}</Text> : null}
         {starterTasks.map((task, idx) => (
           <Text key={idx} style={styles.previewFields}>
-            ✓ {task.title} — {definition.currency}
-            {task.contribution}
+            ✓ {task.title}
+            {isSavings && task.contribution !== undefined
+              ? ` — ${definition.currency}${task.contribution}`
+              : ''}
             {describeStarterTaskRecurrence(task.recurrence)}
           </Text>
         ))}

@@ -137,24 +137,34 @@ export type PostponeTaskInput = {
 };
 
 // --- goals (mirrors server/src/lib/goals/schema.ts) ------------------------
-// v1 ships exactly one goal type — savings. A fixed { type, currency,
-// targetValue, deadline? } definition, no field builder.
+// Two goal types: savings (a fixed { currency, targetValue, deadline? }
+// shape) and habit (no numbers — a linked daily task + streak is the whole
+// mechanic). No field builder.
 
-export type GoalTemplateKey = 'savings';
+export type GoalTemplateKey = 'savings' | 'habit';
 
-export type GoalDefinition = {
-  type: 'savings';
-  currency: string;
-  targetValue: number;
-  deadline?: string;
-  checkInCadence?: 'weekly' | 'off';
-};
+export type GoalDefinition =
+  | {
+      type: 'savings';
+      currency: string;
+      targetValue: number;
+      deadline?: string;
+      checkInCadence?: 'weekly' | 'off';
+    }
+  | {
+      type: 'habit';
+      checkInCadence?: 'weekly' | 'off';
+    };
 
 export type StarterTask = {
   title: string;
   recurrence?: Recurrence;
-  contribution: number;
+  // Savings only — the amount completing the task auto-logs. Habit
+  // check-in tasks carry no amount.
+  contribution?: number;
 };
+
+export type GoalStreak = { current: number; longest: number; doneCount: number };
 
 // What create_goal returns for display before anything is saved — stored on
 // a goal_preview message's meta.preview, and what POST /goals sends back.
@@ -183,6 +193,8 @@ export type ApiGoal = {
   sub?: string;
   progress?: number | null;
   paceLine?: string | null;
+  // Habit goals only — null/absent for savings.
+  streak?: GoalStreak | null;
   lastEntryAt?: string | null;
 };
 
@@ -198,11 +210,15 @@ export type ApiGoalEntry = {
 };
 
 export type ApiGoalDetail = {
+  type: 'savings' | 'habit';
   card: { headline: string; sub: string; progress: number | null; paceLine: string | null };
-  total: number;
-  targetValue: number;
-  currency: string;
+  // Savings fields — null on a habit detail.
+  total: number | null;
+  targetValue: number | null;
+  currency: string | null;
   deadline: string | null;
+  // Habit field — null on a savings detail.
+  streak: GoalStreak | null;
   entryCount: number;
   lastEntryAt: string | null;
 };
@@ -226,10 +242,11 @@ export type ApiGoalConsistency = {
 };
 
 export type CreateGoalParams = {
+  type?: 'savings' | 'habit';
   name: string;
   icon?: string;
   currency?: string;
-  targetValue: number;
+  targetValue?: number;
   deadline?: string;
 };
 

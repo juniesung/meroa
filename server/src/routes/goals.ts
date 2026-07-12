@@ -165,6 +165,12 @@ goalRoutes.post('/', zValidator('json', createFromPreviewSchema), async (c) => {
   if (starterTasks && !parsedStarterTasks?.success) {
     return c.json({ error: 'invalid_input', message: 'stored preview starter tasks are invalid' }, 400);
   }
+  // A habit goal without its check-in task could never progress — the AI
+  // schema already enforces this, but the tap re-validates the stored
+  // preview rather than trusting it (same reason the definition re-parses).
+  if (parsedDefinition.data.type === 'habit' && !parsedStarterTasks?.data?.length) {
+    return c.json({ error: 'invalid_input', message: 'a habit preview must include its check-in task' }, 400);
+  }
 
   try {
     const { goal, tasks } = await createGoal(

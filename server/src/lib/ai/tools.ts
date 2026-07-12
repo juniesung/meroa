@@ -276,24 +276,30 @@ export const AI_TOOLS: Anthropic.Tool[] = [
   {
     name: 'create_goal',
     description:
-      'Show the user a preview of a new savings goal before saving it — this does NOT save anything by itself. Call it as soon as there\'s a name and a target amount; don\'t ask "should I set this up?" in chat text first — the Create button on the preview card is the only confirmation, so asking again in words makes them confirm twice. Only ask a real question when the target amount is genuinely missing — a savings goal needs a number to save toward, so unlike other optional specifics this one is always required. Never invent a number the user did not say. If the user asks for a change before tapping Create, call this again with the revision for a fresh preview.',
+      'Show the user a preview of a new goal before saving it — this does NOT save anything by itself. Two types: "savings" (a target amount to save toward, e.g. "$200 for a trip" — needs targetValue) and "habit" (a repeating practice with a streak, e.g. "meditate daily" — NO target amount, NO deadline; instead it REQUIRES its recurring check-in task in starterTasks, because completing that task is the check-in and the streak counts it). Call it as soon as you have enough; don\'t ask "should I set this up?" in chat text first — the Create button on the preview card is the only confirmation. Only ask a real question when something required is genuinely missing (a savings amount). Never invent a number the user did not say. If the user asks for a change before tapping Create, call this again with the revision for a fresh preview.',
     input_schema: {
       type: 'object',
       properties: {
-        name: { type: 'string', description: 'Short name for the goal, e.g. "Rave savings".' },
+        type: {
+          type: 'string',
+          enum: ['savings', 'habit'],
+          description:
+            'savings: a money target ("save $500"). habit: a repeating practice tracked by streak ("meditate every day", "no-sugar habit") — anything the user wants to do consistently rather than accumulate.',
+        },
+        name: { type: 'string', description: 'Short name for the goal, e.g. "Rave savings" or "Daily meditation".' },
         icon: { type: 'string', enum: ICON_ENUM, description: 'Pick whichever best matches what this is for.' },
         currency: {
           type: 'string',
-          description: 'Currency symbol, e.g. "$" — only if the user actually said one; defaults to "$".',
+          description: 'savings only. Currency symbol, e.g. "$" — only if the user actually said one; defaults to "$".',
         },
         targetValue: {
           type: 'number',
-          description: 'The target amount the user wants to save toward — required, e.g. "$200" -> 200.',
+          description: 'savings only, required there: the target amount, e.g. "$200" -> 200. NEVER set for a habit.',
         },
         deadline: {
           type: 'string',
           description:
-            'A concrete ISO date (YYYY-MM-DD) the user wants to hit the target by — only if they gave a timeframe (e.g. "in 30 days", "by December"). Convert relative language to an absolute date using today\'s date from context; never invent a deadline the user didn\'t imply. Omit entirely if no timeframe was mentioned.',
+            'savings only. A concrete ISO date (YYYY-MM-DD) the user wants to hit the target by — only if they gave a timeframe (e.g. "in 30 days", "by December"). Convert relative language to an absolute date using today\'s date from context; never invent a deadline the user didn\'t imply. Omit entirely if no timeframe was mentioned.',
         },
         starterTasks: {
           type: 'array',
@@ -317,22 +323,23 @@ export const AI_TOOLS: Anthropic.Tool[] = [
               },
               contribution: {
                 type: 'number',
-                description: 'The amount completing this task once logs to the goal, e.g. 5 for "save $5 daily".',
+                description:
+                  'savings goals only: the amount completing this task once logs to the goal, e.g. 5 for "save $5 daily". OMIT for a habit — a habit check-in has no amount; completing the task is the check-in itself.',
               },
             },
-            required: ['title', 'contribution'],
+            required: ['title'],
           },
           description:
-            'Up to 5 proposed starter tasks that work toward this goal, e.g. a daily "Save $5" task for a savings goal — only propose these when a natural next action is obvious from what the user said (a deadline or a stated pace implies one); skip this entirely rather than inventing a schedule or amount they never mentioned. Each task\'s completion automatically logs its contribution to the goal — never a separate log_goal_entry call for the same amount.',
+            'Proposed starter tasks (up to 5). For a savings goal: optional, e.g. a daily "Save $5" — only when a natural next action is obvious from what the user said; each completion auto-logs its contribution, never a separate log_goal_entry for the same amount. For a HABIT goal: required, exactly the recurring check-in task ("Meditate 10 min", daily) — the streak counts that task and completing it IS the check-in. Never invent a schedule, amount, or time the user didn\'t give (a plain "daily" gets no time field).',
         },
       },
-      required: ['name', 'targetValue'],
+      required: ['type', 'name'],
     },
   },
   {
     name: 'edit_goal',
     description:
-      "Edit an existing goal's name, icon, target amount, or deadline — use the goal's ref from the goals list in context, never guess one. Only include what the user actually asked to change; never resend the whole thing. Applies immediately (it's undoable, unlike create_goal's preview) — state the concrete before/after value when you confirm it.",
+      "Edit an existing goal's name or icon (any type), or a savings goal's target amount or deadline — use the goal's ref from the goals list in context, never guess one. A habit goal has no target or deadline to edit. Only include what the user actually asked to change; never resend the whole thing. Applies immediately (it's undoable, unlike create_goal's preview) — state the concrete before/after value when you confirm it.",
     input_schema: {
       type: 'object',
       properties: {
@@ -352,7 +359,7 @@ export const AI_TOOLS: Anthropic.Tool[] = [
   {
     name: 'log_goal_entry',
     description:
-      'Log an explicit amount to an existing goal the user just told you about — e.g. "log $150 to savings", "put in $40 birthday money". Only for a value the user actually stated; never invent an amount — ask instead. Use the goal\'s ref exactly as shown in the goals list in context.',
+      'SAVINGS goals only: log an explicit amount the user just told you about — e.g. "log $150 to savings", "put in $40 birthday money". Never for a habit goal (its check-ins happen by completing its task — use complete_task). Only for a value the user actually stated; never invent an amount — ask instead. Use the goal\'s ref exactly as shown in the goals list in context.',
     input_schema: {
       type: 'object',
       properties: {

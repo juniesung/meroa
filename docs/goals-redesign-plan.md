@@ -500,3 +500,70 @@ passing (goal-entry-decision + consistency pure-function suites). Both packages
 typecheck clean throughout. Client verified via a clean `expo export` bundle (1830
 modules) at each UI-touching step — no simulator/screenshot access in this
 environment, noted explicitly rather than claiming a rendered-screenshot verification.
+
+## Habit goal type (2026-07-12) — built, tested, shipped
+
+Second goal type from §1, built to the locked decisions: **no target number at
+all** — a linked recurring check-in task + the streak IS the whole mechanic.
+Missing a day genuinely resets the streak (mechanically real); `longest` is
+always kept and shown next to the current run. Session lessons were designed in
+up front rather than re-discovered:
+
+**Shape & invariants**
+- `definition = { type: 'habit' }` (plus the stored-only `checkInCadence`),
+  discriminated union with savings; `goals.template` mirrors the tag.
+- **Habit goals have NO `goal_entries`** — the task completions ARE the record.
+  Guarded four deep: `createGoalParamsSchema` superRefine rejects a habit
+  starter carrying a `contribution` (fails loud with a corrective message the
+  model can act on); the executor only stamps `goalContribution` when
+  `definition.type === 'savings'` (backstop for the preview-tap path);
+  `logGoalEntry` throws `invalid_input` for habit goals; and the tool schema
+  says savings-only. Live-verified: zero `goal_entries` rows after check-ins.
+- `create_goal` gained a required `type` param; superRefine enforces the
+  cross-field rules (savings → targetValue required; habit → no
+  targetValue/currency/deadline, starterTasks required with recurrence on the
+  check-in). Habit edit is name/icon only — target/deadline ops error with a
+  type-aware message.
+- Streaks come from the existing consistency engine scoped per goal
+  (`buildGoalScopedStreaks`, batched for the list) — same tested
+  `computeCurrentStreak`/`computeLongestStreak`, filtered to the goal's linked
+  task instances. Never derived by the model or the client.
+
+**Surfaces**
+- Card: `computeHabitCardSummary` — headline "N-day streak"/"No streak yet",
+  sub "longest N · M check-ins"/"First check-in starts it", progress/pace null
+  (a habit never fakes a fraction). `GoalDetail` is discriminated by `type`
+  with nullable savings/habit fields; client `GoalCard` renders a flame+count
+  variant, detail screen shows a `StreakView` (no Log button, no entry sheet,
+  no history section), the chat preview card says "Habit — daily check-ins
+  build the streak" instead of a Target line.
+- Model context: goal line renders `habit · N-day streak (…) · check-in via
+  "task" (complete_task IS the check-in)`; task line says "completing =
+  checking in"; pending-preview state line renders the habit shape without
+  amounts; `goalImpactSuffix` states the post-completion streak fact from
+  server data ("streak is now 1 day (longest: 1)") so the model narrates
+  facts, not derivations.
+
+**Verification** — 40/40 vitest (new: schema superRefine suite,
+computeHabitCardSummary suite, habit pending-preview render), both packages
+typecheck clean, `expo export` clean (1830 modules). Live as-a-user pass on
+fresh dev-token accounts (+15555559301–03): creation via 3 phrasings (3/3
+correct habit previews, no invented times/amounts) → Create tap (goal + linked
+daily instance, no contribution stamped) → chat check-in (streak fact stated,
+streak 1, zero entries in DB) → re-report ("i meditated today") correctly
+acknowledged without double-count → "log 20 minutes" correctly explained as
+streak-based instead of logging → unmark (streak back to 0/0/0) → re-complete
+after unmark (clean, new record, streak 1) → remove_goal (cascaded the
+check-in task) → undo (goal + tasks restored) → rename ok, "set target to 30
+days" correctly refused with a clarifying counter-offer → savings regression
+(create → Create tap → $45 chat log) intact.
+
+*Known wobble (existing class, 2 sightings):* the narrate pass occasionally
+contradicts the action result's streak fact using stale conversation history
+("longest 1" after an unmark that made it 0). The action card always carries
+the server-computed fact; the fix lever, if the rate warrants it, is
+sharpening the narrate prompt's "trust the results block over history" rule —
+not new to habit.
+
+*Deferred, same as savings:* post-creation task→goal linking; `checkInCadence`
+acted on in Phase 6; indirect + milestone types in their own passes.

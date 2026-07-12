@@ -10,14 +10,16 @@ import type { TurnRefs } from './task-context.ts';
 const MAX_ROWS = 10;
 const MAX_CHARS = 1500;
 
-// The first linked task carrying a contribution, so the goal line can state
-// "$5/day via 'Save $5'" (docs/goals-redesign-plan.md §2.3) — the model
-// already sees the task itself (with its own ref) in the task list, so this
-// names it by title rather than duplicating a ref cross-reference.
+// The first linked task per goal, so the goal line can state "$5/day via
+// 'Save $5'" for savings or "check-in via 'Meditate'" for habit
+// (docs/goals-redesign-plan.md §2.3) — the model already sees the task
+// itself (with its own ref) in the task list, so this names it by title
+// rather than duplicating a ref cross-reference. `contribution` is null for
+// habit check-in tasks, which carry no amount by design.
 async function fetchPrimaryContribution(
   goalIds: string[],
-): Promise<Map<string, { title: string; contribution: number }>> {
-  const byGoal = new Map<string, { title: string; contribution: number }>();
+): Promise<Map<string, { title: string; contribution: number | null }>> {
+  const byGoal = new Map<string, { title: string; contribution: number | null }>();
   if (goalIds.length === 0) return byGoal;
   const rows = await db
     .select({ goalId: tasks.goalId, title: tasks.title, config: tasks.config, createdAt: tasks.createdAt })
@@ -27,7 +29,10 @@ async function fetchPrimaryContribution(
   for (const row of rows) {
     if (!row.goalId || byGoal.has(row.goalId)) continue;
     const contribution = (row.config as Record<string, unknown>).goalContribution;
-    if (typeof contribution === 'number') byGoal.set(row.goalId, { title: row.title, contribution });
+    byGoal.set(row.goalId, {
+      title: row.title,
+      contribution: typeof contribution === 'number' ? contribution : null,
+    });
   }
   return byGoal;
 }
@@ -74,14 +79,25 @@ export async function buildGoalContext(
     const alias = `G${shown + 1}`;
     const summary = summaries.get(goal.id)!;
     const definition = goal.definition as GoalDefinition;
-    const deadlineLabel = definition.deadline ? `, due ${formatYmdShort(definition.deadline)}` : '';
-    const lastLabel = summary.lastEntryAt ? `, last ${formatYmdShort(ymdInTz(summary.lastEntryAt, tz))}` : '';
-    const contribution = contributions.get(goal.id);
-    const contributionLabel = contribution
-      ? ` · ${definition.currency}${contribution.contribution}/completion via "${contribution.title}"`
-      : '';
 
-    const line = `[${alias}] "${goal.name}" · ${summary.headline}${contributionLabel}${summary.paceLine ? ` · ${summary.paceLine}` : ''}${deadlineLabel} · ${summary.entryCount} ${summary.entryCount === 1 ? 'entry' : 'entries'}${lastLabel}`;
+    // Habit line leads with the streak (its whole mechanic) and the
+    // check-in task; savings with the money facts. Both precomputed —
+    // the model quotes, never derives (lesson 6).
+    let line: string;
+    if (definition.type === 'habit') {
+      const contribution = contributions.get(goal.id);
+      const viaLabel = contribution ? ` · check-in via "${contribution.title}" (complete_task IS the check-in)` : '';
+      line = `[${alias}] "${goal.name}" · habit · ${summary.headline} (${summary.sub})${viaLabel}`;
+    } else {
+      const deadlineLabel = definition.deadline ? `, due ${formatYmdShort(definition.deadline)}` : '';
+      const lastLabel = summary.lastEntryAt ? `, last ${formatYmdShort(ymdInTz(summary.lastEntryAt, tz))}` : '';
+      const contribution = contributions.get(goal.id);
+      const contributionLabel =
+        contribution && contribution.contribution !== null
+          ? ` · ${definition.currency}${contribution.contribution}/completion via "${contribution.title}"`
+          : '';
+      line = `[${alias}] "${goal.name}" · ${summary.headline}${contributionLabel}${summary.paceLine ? ` · ${summary.paceLine}` : ''}${deadlineLabel} · ${summary.entryCount} ${summary.entryCount === 1 ? 'entry' : 'entries'}${lastLabel}`;
+    }
 
     if (charCount + line.length > MAX_CHARS) {
       truncated = true;
