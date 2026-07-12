@@ -2,7 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback } from 'react';
 
 import { tasksQueryKey } from '@/features/tasks/queries';
-import { goalDetailQueryKey, goalsQueryKey } from '@/features/goals/queries';
+import { goalsQueryKey } from '@/features/goals/queries';
 import { api } from '@/lib/api/client';
 import { streamMessage } from '@/lib/api/stream';
 import type { ApiMessage } from '@/lib/api/types';
@@ -120,15 +120,14 @@ export function useSendMessage() {
             ]);
             currentAssistantId = nextId;
             // Same record, two views (CLAUDE.md §2) — the Tasks/Goals tab
-            // must reflect this the instant the card appears in chat.
-            const kind = persisted.meta?.kind as string | undefined;
-            if (kind === 'goal_action' || kind === 'goal_preview') {
-              queryClient.invalidateQueries({ queryKey: goalsQueryKey });
-              const goalId = event.goal?.id ?? (persisted.meta?.goalId as string | undefined);
-              if (goalId) queryClient.invalidateQueries({ queryKey: goalDetailQueryKey(goalId) });
-            } else {
-              queryClient.invalidateQueries({ queryKey: tasksQueryKey });
-            }
+            // must reflect this the instant the card appears in chat. Both
+            // prefixes always: a task_action on a goal-linked task auto-logs
+            // a goal entry server-side (and undo reverses one), so splitting
+            // the invalidation by kind left whichever tab the kind didn't
+            // name showing stale totals. The ['goals'] prefix covers the
+            // list, every detail/entries query, and the consistency map.
+            queryClient.invalidateQueries({ queryKey: tasksQueryKey });
+            queryClient.invalidateQueries({ queryKey: goalsQueryKey });
           } else if (event.type === 'stream_end') {
             // The last segment always leaves one trailing, never-filled
             // placeholder behind (created in anticipation of a segment that

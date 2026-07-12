@@ -32,11 +32,15 @@ function upsertTask(tasks: ApiTask[], task: ApiTask): ApiTask[] {
 // recurring create's freshly-materialized siblings and anything else the
 // response didn't carry stay in sync.
 //
-// Also invalidates the goals-consistency key by its literal value (not
-// imported from features/goals/queries.ts, which itself imports
-// tasksQueryKey from here — importing the other direction too would make
-// the two modules circular) — completing/postponing/editing a task can
-// change a day's verdict, so the streak/heatmap need a fresh fetch too.
+// The whole ['goals'] prefix is invalidated too — by literal value, not
+// imported from features/goals/queries.ts (which itself imports
+// tasksQueryKey from here; importing the other direction would make the
+// two modules circular). Completing a goal-linked task auto-logs a goal
+// entry server-side, so the goal LIST (card headlines/progress), the goal
+// detail, its entries, and the consistency map can all change on any task
+// mutation; invalidating only the consistency key left the Goals tab card
+// frozen at its old total while the detail screen (refetched on mount)
+// showed the truth — hit live.
 function useTaskMutation<TVars>(mutationFn: (vars: TVars) => Promise<{ task: ApiTask }>) {
   const queryClient = useQueryClient();
   return useMutation({
@@ -48,7 +52,7 @@ function useTaskMutation<TVars>(mutationFn: (vars: TVars) => Promise<{ task: Api
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: tasksQueryKey });
-      queryClient.invalidateQueries({ queryKey: ['goals', 'consistency'] });
+      queryClient.invalidateQueries({ queryKey: ['goals'] });
     },
   });
 }
@@ -92,6 +96,7 @@ export function useDeleteTask() {
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: tasksQueryKey });
+      queryClient.invalidateQueries({ queryKey: ['goals'] });
     },
   });
 }
@@ -108,16 +113,20 @@ export function useBulkDeleteTasks() {
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: tasksQueryKey });
+      queryClient.invalidateQueries({ queryKey: ['goals'] });
     },
   });
 }
 
+// Undo can revert a task completion — which removes its auto-logged goal
+// entry — or revert a goal action entirely, so goals refresh here too.
 export function useUndoLastTaskAction() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: () => api.undoLastTaskAction(),
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: tasksQueryKey });
+      queryClient.invalidateQueries({ queryKey: ['goals'] });
     },
   });
 }
