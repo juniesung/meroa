@@ -276,8 +276,8 @@ DoD is met. When working a phase, load that phase's file alongside this one.
 | 1   | Backend, accounts & continuity (API, DB, phone-linking, text→app handoff)            | `docs/phases/phase-1-backend-accounts-continuity.md`  | ☑      |
 | 2   | Live chat (model API, streaming, history, limits, AI disclosure)                     | `docs/phases/phase-2-live-chat.md`                    | ☑      |
 | 3   | Tasks (all types, chat + UI creation, recurring, reminders, missed-task recovery)    | `docs/phases/phase-3-tasks.md`                        | ☑      |
-| 4   | Tools (templates, preview-before-save, entry, charts, history, edit-with-AI)         | `docs/phases/phase-4-tools.md`                        | ☑      |
-| 5   | **The connected loop** (one record ↔ Chat/Tasks/Tools, undo, confidence gating)      | `docs/phases/phase-5-connected-loop.md`               | ☐      |
+| 4   | ~~Tools~~ — superseded by the Goals redesign (see `docs/goals-redesign-plan.md`); Tools tab and its generic field/template builder scrapped in favor of Goals | `docs/phases/phase-4-tools.md`                        | ☑ (superseded) |
+| 5   | **The connected loop** (one record ↔ Chat/Tasks/Goals, undo, confidence gating) — the task-completion ↔ goal-entry half shipped early as part of the Goals redesign; habit/indirect/milestone goal types and the rest of this phase's scope remain | `docs/phases/phase-5-connected-loop.md`               | ◐ (partial) |
 | 6   | Personalization, memory & trust (vibe, adaptive style, memory controls, quiet hours) | `docs/phases/phase-6-personalization-memory-trust.md` | ☐      |
 | 7   | Free & Premium (paywall, Apple/Google billing, restore, entitlements, metering)      | `docs/phases/phase-7-premium-billing.md`              | ☐      |
 | 8   | Release readiness (notifications, deep links, privacy, deletion, store submission)   | `docs/phases/phase-8-release-readiness.md`            | ☐      |

@@ -274,3 +274,70 @@ matched_regex: false`) and appended the corrective segment. Mitigations, cheapes
   (template/field-builder surfaces), which this redesign deletes outright — mooted, no
   individual fixes carried forward. If any equivalent behavior resurfaces in the new
   Goals UI during the §4 protocol, log it here as a fresh entry.
+- [x] create_goal preview-narrated-with-zero-calls found live *again* during the §4 run
+  below, past the §2.6 mitigations as first shipped — root-caused and fixed (see §4
+  results, items 1 and 6 follow-up commit). Not a new bug class, a gap in the first fix.
+
+## §4 results (2026-07-12, deepseek-v4-flash, isolated dev-token account +15555559911)
+
+Ran end-to-end against the live server (not a simulation) — real chat turns through the
+actual model, real DB state checked via REST between steps.
+
+1. **Pass.** "I want to save $200 for the next rave in 30 days" → one preview, deadline
+   correctly resolved to 2026-08-11 (30 days from the session's "today"), a proposed
+   daily "Save $7" starter task (the model's own choice of pace, not $5 — reasonable,
+   ~$210 total covers the target with margin), no chat-text double-confirm. Create →
+   goal + starter task both exist, `task.goalId` set, `config.goalContribution: 7`.
+2. **Pass.** Completed today's instance via REST (Tasks-tab equivalent) → goal total
+   $0→$7, exactly one `goal_entries` row referencing the same record as the task's
+   `completedRecordId`. Next chat turn ("hey how's my savings goal looking?") correctly
+   narrated the $7/$200 state and attributed it to the just-completed task.
+3. **Pass.** Un-complete → total back to $0, zero live entries. Re-complete → back to
+   $7 via a *new* record, exactly one live entry (no double-count) — matches the
+   goal-entry-decision unit tests, now also confirmed against the real DB end to end.
+4. **Pass.** "log my $40 birthday money into rave savings" → ad-hoc entry logged with
+   note "birthday money", reply stated the real recomputed total ($47/$200). Didn't
+   explicitly restate the pace line this turn — not a bug (pace math is correct and in
+   context; the model chose to lead with the fraction instead), just model style
+   variance worth knowing about.
+5. **Pass.** "change the target to $250" → concrete before/after ("$200 → $250") in
+   both the tool result and the chat reply. "undo that" → restored to $200, version
+   reverted 2→1, concrete restored value stated.
+6. **Pass (live-verifiable slice).** The one real due day (today, the starter task)
+   correctly hit calendar level 3 (`dueCount: 1, doneCount: 1, verdict: perfect`) with
+   `current: 1, longest: 1` via the live `/goals/consistency` endpoint. The multi-day
+   "leave one open past midnight → streak resets, longest retained" transition wasn't
+   separately re-verified live (the test account only had one real day of history to
+   work with) — it's covered by consistency.test.ts's unit tests instead, which pin
+   that exact scenario (missed-day-breaks-streak, longest-survives-a-reset) against
+   contrived multi-day data; the live endpoint composes the same tested pure functions
+   over real query results, verified above.
+7. **Found and fixed a real gap.** 5 varied creation phrasings ("save $500 for a
+   laptop", "$1000 for a new car", "$300 emergency cash", "$150 concert tickets", "$80
+   headphones") produced 4 zero-tool-call preview claims and 1 honest real tool call.
+   The *first* zero-call turn ("Sending a preview your way — **$500 laptop fund**...
+   tap **Create**") slipped past both the regex tier and the classifier — root cause:
+   markdown bold breaking `tap create`'s literal-adjacency assumption, plus
+   present-tense phrasing the verb list didn't cover; the classifier's own prompt never
+   named a preview claim as a qualifying case either. Fixed both (commit after this
+   run) and re-probed live: the remaining 3 zero-call turns were all caught by the
+   regex tier (100% post-fix), each producing the truthful "that preview didn't
+   actually go through" correction instead of the generic one. The underlying
+   *zero-call rate* itself stayed high (4/5) — the doc's target was "caught by the
+   regex tier or gone," and it's now reliably caught; the act/narrate split
+   (docs/ai-reliability-hardening.md, deferred) would be the next lever if the raw rate
+   itself needs to come down, noted per §2.6 item 4's instruction, not built.
+8. **Pass.** Plain (non-goal) task create → complete → undo all worked normally via
+   chat; a non-goal-linked task correctly gets no `goal_entries` side effects (the
+   `task.goalId` guard). Incidentally also caught a genuine, pre-existing (unrelated to
+   this redesign) undo hallucination — the model claimed "Done — undone." without
+   calling `undo_last_action`; the existing FAKE_ACTION_PATTERN/classifier system
+   caught it correctly and told the user honestly, then the retry succeeded for real.
+   Confirms the general claim-check system is unaffected by the goals-redesign changes.
+
+**Overall:** all 8 protocol items pass; one real bug found and fixed along the way
+(item 7), which is exactly what the probe step is for. `npm test` in `server/`: 20/20
+passing (goal-entry-decision + consistency pure-function suites). Both packages
+typecheck clean throughout. Client verified via a clean `expo export` bundle (1830
+modules) at each UI-touching step — no simulator/screenshot access in this
+environment, noted explicitly rather than claiming a rendered-screenshot verification.
