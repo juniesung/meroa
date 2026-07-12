@@ -27,10 +27,10 @@ export type TurnRef =
   | { kind: 'task'; taskId: string; isRecurringSeries: boolean; instanceId?: string; templateId?: string }
   | { kind: 'checklist_item'; taskId: string; itemId: string }
   // Goal refs — assigned by lib/ai/goal-context.ts into this same map,
-  // aliased "G1"/"G1.1" rather than "T*" so a regex can't confuse the two
-  // ref families.
-  | { kind: 'goal'; goalId: string }
-  | { kind: 'goal_field'; goalId: string; fieldId: string };
+  // aliased "G1" rather than "T*" so a regex can't confuse the two ref
+  // families. v1 goals have no field refs (fixed {amount, note} entry
+  // shape) — only field-based Phase-4 tools ever needed those.
+  | { kind: 'goal'; goalId: string };
 export type TurnRefs = Map<string, TurnRef>;
 
 export type TaskContextResult = {

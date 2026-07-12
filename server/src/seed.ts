@@ -13,8 +13,7 @@ import {
   users,
 } from './db/schema.ts';
 import { logger } from './logger.ts';
-import { buildTemplateDefinition } from './lib/goals/templates.ts';
-import type { GoalField } from './lib/goals/schema.ts';
+import type { GoalDefinition } from './lib/goals/schema.ts';
 
 // Same demo number as DEMO_PHONE_E164 in lib/constants.ts — kept as a literal
 // here so the seed script has no dependency on the OTP flow's internals.
@@ -165,51 +164,45 @@ async function main() {
     },
   ]);
 
-  // --- a workout goal with history, so Goals isn't empty on first open ---
-  // Uses the same template builder create_goal did pre-simplification
-  // (lib/goals/templates.ts) so this stays schema-valid as GoalDefinition
-  // evolves, instead of an ad-hoc shape drifting out of sync with it (a
-  // stale ad-hoc { unit, exercises } shape here once crashed every chat
-  // turn's goal-context build, since computeCardSummary assumes
-  // definition.fields exists).
-  const workoutDefinition = buildTemplateDefinition({
-    template: 'workout',
-    name: 'Strength tracker',
-    unit: 'lb',
-  });
-  const fieldByLabel = new Map<string, GoalField>(workoutDefinition.fields.map((f) => [f.label, f]));
+  // --- a savings goal with history, so Goals isn't empty on first open ---
+  // v1 ships exactly one goal type (docs/goals-redesign-plan.md §2.2) — a
+  // fixed { type: 'savings', currency, targetValue, deadline? } shape, no
+  // field builder to route through.
+  const deadline = new Date(Date.now() + 25 * dayMs).toISOString().slice(0, 10);
+  const savingsDefinition: GoalDefinition = {
+    type: 'savings',
+    currency: '$',
+    targetValue: 200,
+    deadline,
+  };
 
-  const [workoutGoal] = await db
+  const [savingsGoal] = await db
     .insert(goals)
     .values({
       userId: user.id,
-      template: 'workout',
-      name: 'Strength tracker',
-      icon: 'dumbbell',
-      definition: workoutDefinition,
+      template: 'savings',
+      name: 'Rave savings',
+      icon: 'wallet',
+      definition: savingsDefinition,
     })
     .returning();
-  if (!workoutGoal) throw new Error('seed_goal_insert_failed');
+  if (!savingsGoal) throw new Error('seed_goal_insert_failed');
 
   const entries = [
-    { daysAgo: 5, exercise: 'Bench Press', weight: 155, reps: 8 },
-    { daysAgo: 2, exercise: 'Bench Press', weight: 165, reps: 8 },
+    { daysAgo: 5, amount: 25, note: undefined },
+    { daysAgo: 2, amount: 20, note: 'birthday money' },
   ];
 
   for (const entry of entries) {
     const occurredAt = new Date(Date.now() - entry.daysAgo * dayMs);
-    const data = {
-      [fieldByLabel.get('Exercise')!.id]: entry.exercise,
-      [fieldByLabel.get('Weight')!.id]: entry.weight,
-      [fieldByLabel.get('Reps')!.id]: entry.reps,
-    };
+    const data = entry.note ? { amount: entry.amount, note: entry.note } : { amount: entry.amount };
 
     const [record] = await db
       .insert(records)
       .values({
         userId: user.id,
         kind: 'goal_entry',
-        payload: { goalId: workoutGoal.id, name: workoutGoal.name, data, entryAt: occurredAt.toISOString() },
+        payload: { goalId: savingsGoal.id, name: savingsGoal.name, data, entryAt: occurredAt.toISOString() },
         source: 'goal_ui',
         occurredAt,
       })
@@ -217,7 +210,7 @@ async function main() {
     if (!record) throw new Error('seed_record_insert_failed');
 
     await db.insert(goalEntries).values({
-      goalId: workoutGoal.id,
+      goalId: savingsGoal.id,
       recordId: record.id,
       data,
       entryAt: occurredAt,

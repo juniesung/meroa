@@ -247,14 +247,8 @@ function GoalPreviewCard({ message }: { message: ChatMessage }) {
     createGoalFromPreview.data?.goal.id ?? (message.meta.createdGoalId as string | undefined);
   const created = !!createdGoalId;
 
-  const activeFields = definition.fields.filter((f) => !f.archived);
-  const fieldsLine = activeFields.map((f) => (f.unit ? `${f.label} (${f.unit})` : f.label)).join(' · ');
-  const targetLine =
-    definition.target?.kind === 'total'
-      ? `Target: ${definition.target.value}${definition.target.unit ? ` ${definition.target.unit}` : ''}`
-      : definition.target?.kind === 'count_per_period'
-        ? `Target: ${definition.target.value}x per ${definition.target.period}`
-        : null;
+  const targetLine = `Target: ${definition.currency}${definition.targetValue}`;
+  const deadlineLine = definition.deadline ? `By ${definition.deadline}` : null;
 
   const statusText = created ? 'Created ✓' : dismissed ? 'Not saved' : 'Create this goal?';
 
@@ -272,8 +266,8 @@ function GoalPreviewCard({ message }: { message: ChatMessage }) {
         </View>
       </View>
       <View style={styles.previewBody}>
-        <Text style={styles.previewFields}>{fieldsLine}</Text>
-        {targetLine ? <Text style={styles.previewFields}>{targetLine}</Text> : null}
+        <Text style={styles.previewFields}>{targetLine}</Text>
+        {deadlineLine ? <Text style={styles.previewFields}>{deadlineLine}</Text> : null}
       </View>
       {!created && !dismissed && (
         <View style={styles.removalButtons}>

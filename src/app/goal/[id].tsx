@@ -4,30 +4,21 @@ import { useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { BarChart } from '@/components/BarChart';
 import { Icon } from '@/components/Icon';
 import { Progress } from '@/components/Progress';
 import { Ring } from '@/components/Ring';
 import { radii, theme } from '@/constants/theme';
 import { useArchiveGoal, useGoal } from '@/features/goals/queries';
 import { GoalEntrySheet } from '@/features/goals/GoalEntrySheet';
-import type { ApiGoalEntry, ApiGoalViewData, GoalDefinition } from '@/lib/api/types';
+import type { ApiGoalDetail, ApiGoalEntry } from '@/lib/api/types';
 import { toIconName } from '@/lib/icon';
 
 function formatNumber(n: number): string {
   return Number.isInteger(n) ? n.toLocaleString() : n.toLocaleString(undefined, { maximumFractionDigits: 2 });
 }
 
-function formatEntryLine(definition: GoalDefinition, data: Record<string, unknown>): string {
-  const fieldsById = new Map(definition.fields.map((f) => [f.id, f]));
-  const parts: string[] = [];
-  for (const [fieldId, value] of Object.entries(data)) {
-    const field = fieldsById.get(fieldId);
-    if (!field) continue;
-    const unit = field.unit ? ` ${field.unit}` : '';
-    parts.push(field.id === definition.primaryFieldId ? `${value}${unit}` : `${field.label}: ${value}${unit}`);
-  }
-  return parts.join(' · ') || 'Entry';
+function formatEntryLine(currency: string, data: { amount: number; note?: string }): string {
+  return data.note ? `${currency}${formatNumber(data.amount)} — ${data.note}` : `${currency}${formatNumber(data.amount)}`;
 }
 
 function formatEntryDate(iso: string): string {
@@ -37,40 +28,20 @@ function formatEntryDate(iso: string): string {
   return `${date} · ${time}`;
 }
 
-function ProgressTotalView({ view }: { view: Extract<ApiGoalViewData, { kind: 'progress_total' }> }) {
-  const pct = Math.round((view.progress ?? 0) * 100);
-  const unit = view.unit ? ` ${view.unit}` : '';
+function TotalView({ detail }: { detail: ApiGoalDetail }) {
+  const pct = Math.round((detail.card.progress ?? 0) * 100);
   return (
     <View style={styles.viewCard}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
         <Ring value={pct} size={56} stroke={5} label={`${pct}%`} />
         <View style={{ flex: 1 }}>
           <Text style={styles.viewHeadline}>
-            {view.total != null ? `${formatNumber(view.total)}${unit}` : `0${unit}`}
-            {view.targetValue != null ? ` / ${formatNumber(view.targetValue)}${unit}` : ''}
+            {detail.currency}{formatNumber(detail.total)} / {detail.currency}{formatNumber(detail.targetValue)}
           </Text>
-          <Text style={styles.viewSub}>Total logged</Text>
+          {detail.card.paceLine ? <Text style={styles.viewSub}>{detail.card.paceLine}</Text> : null}
         </View>
       </View>
-      {view.targetValue != null ? <Progress value={pct} /> : null}
-    </View>
-  );
-}
-
-function StreakView({ view }: { view: Extract<ApiGoalViewData, { kind: 'streak' }> }) {
-  return (
-    <View style={[styles.viewCard, { flexDirection: 'row', alignItems: 'center', gap: 10 }]}>
-      <Icon name="flame" size={20} color={theme.blue} stroke={2} />
-      <Text style={styles.viewHeadline}>{view.streak > 0 ? `${view.streak}-day streak` : 'No streak yet'}</Text>
-    </View>
-  );
-}
-
-function BarsView({ view }: { view: Extract<ApiGoalViewData, { kind: 'bars' }> }) {
-  return (
-    <View style={styles.viewCard}>
-      <Text style={styles.viewSub}>{view.bucket === 'day' ? 'Last 7 days' : 'Last 8 weeks'}</Text>
-      <BarChart buckets={view.buckets} />
+      <Progress value={pct} />
     </View>
   );
 }
@@ -94,7 +65,6 @@ export default function GoalDetailScreen() {
   }
 
   const { goal, detail, entries } = data;
-  const definition = goal.definition;
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
@@ -120,12 +90,7 @@ export default function GoalDetailScreen() {
       <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 120, gap: 12 }}>
         <Text style={styles.headline}>{detail.card.headline}</Text>
 
-        {detail.views.map((view, idx) => {
-          if (view.kind === 'progress_total') return <ProgressTotalView key={idx} view={view} />;
-          if (view.kind === 'streak') return <StreakView key={idx} view={view} />;
-          if (view.kind === 'bars') return <BarsView key={idx} view={view} />;
-          return null;
-        })}
+        <TotalView detail={detail} />
 
         <Text style={styles.sectionTitle}>History</Text>
         {entries.length === 0 ? (
@@ -135,7 +100,7 @@ export default function GoalDetailScreen() {
             {entries.map((entry: ApiGoalEntry) => (
               <View key={entry.id} style={styles.entryRow}>
                 <Text style={styles.entryLine} numberOfLines={1}>
-                  {formatEntryLine(definition, entry.data)}
+                  {formatEntryLine(detail.currency, entry.data)}
                 </Text>
                 <Text style={styles.entryDate}>{formatEntryDate(entry.entryAt)}</Text>
               </View>

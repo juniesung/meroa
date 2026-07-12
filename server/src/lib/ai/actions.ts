@@ -26,15 +26,13 @@ import {
   GoalActionError,
   type GoalRow,
 } from '../goals/executor.ts';
-import { buildTemplateDefinition } from '../goals/templates.ts';
 import {
   goalDefinitionSchema,
-  validateEntryValues,
   type EditGoalPatch,
-  type LogGoalEntryPatch,
   type GoalDefinition,
-  type GoalEntryValue,
+  type GoalEntryData,
   type GoalPreview,
+  type LogGoalEntryPatch,
 } from '../goals/schema.ts';
 import { buildGoalCardSummaries } from '../goals/summary.ts';
 import type { TurnRef, TurnRefs } from './task-context.ts';
@@ -91,19 +89,11 @@ export type TaskActionResult =
   | { ok: true; toolName: AiToolName; preview: GoalPreview; summary: string; recordKind: string }
   | { ok: false; error: string };
 
-// "$150" for the primary field, "Note: groceries" for anything else — used
-// both to confirm what log_goal_entry actually recorded and to narrate what
-// an undone entry removed.
-function describeEntryValues(definition: GoalDefinition, data: Record<string, unknown>): string {
-  const fieldsById = new Map(definition.fields.map((f) => [f.id, f]));
-  const parts: string[] = [];
-  for (const [fieldId, value] of Object.entries(data)) {
-    const field = fieldsById.get(fieldId);
-    if (!field) continue;
-    const unit = field.unit ? ` ${field.unit}` : '';
-    parts.push(field.id === definition.primaryFieldId ? `${value}${unit}` : `${field.label}: ${value}${unit}`);
-  }
-  return parts.join(', ');
+// "$150" or "$150 (birthday money)" — used both to confirm what
+// log_goal_entry actually recorded and to narrate what an undone entry
+// removed.
+function describeEntryData(currency: string, data: GoalEntryData): string {
+  return data.note ? `${currency}${data.amount} (${data.note})` : `${currency}${data.amount}`;
 }
 
 // The goal's concrete, recomputed post-action fact (never leaves the model
@@ -119,9 +109,10 @@ async function summarizeGoalUndo(
   goal: GoalRow,
   undidKind: string,
   timezone: string | null,
-  entryData?: Record<string, unknown>,
+  entryData?: GoalEntryData,
 ): Promise<string> {
   const headline = await goalHeadline(goal, timezone);
+  const currency = (goal.definition as GoalDefinition).currency;
   switch (undidKind) {
     case 'goal_created':
       return `Removed the "${goal.name}" goal.`;
@@ -130,7 +121,7 @@ async function summarizeGoalUndo(
     case 'goal_edited':
       return `Undid the last edit to "${goal.name}"${headline ? ` — ${headline}` : ''}.`;
     case 'goal_entry': {
-      const logged = entryData ? describeEntryValues(goal.definition as GoalDefinition, entryData) : '';
+      const logged = entryData ? describeEntryData(currency, entryData) : '';
       return `Removed that${logged ? ` ${logged}` : ''} entry from "${goal.name}"${headline ? ` — ${headline} now` : ''}.`;
     }
     default:
@@ -145,41 +136,25 @@ async function summarizeGoalUndo(
 function describeGoalEdit(
   before: GoalRow,
   after: GoalRow,
-  input: {
-    name?: string;
-    targetValue?: number;
-    unit?: string;
-    addFields?: unknown[];
-    removeFieldRefs?: string[];
-    renameFields?: unknown[];
-  },
+  input: { name?: string; targetValue?: number; deadline?: string },
 ): string {
   const parts: string[] = [];
   if (input.name !== undefined) parts.push(`renamed to "${after.name}"`);
 
-  const beforeTarget = (before.definition as GoalDefinition).target;
-  const afterTarget = (after.definition as GoalDefinition).target;
-  if (input.targetValue !== undefined && afterTarget && beforeTarget) {
-    const afterUnit = 'unit' in afterTarget && afterTarget.unit ? ` ${afterTarget.unit}` : '';
-    const beforeUnit = 'unit' in beforeTarget && beforeTarget.unit ? ` ${beforeTarget.unit}` : '';
-    parts.push(`target is now ${afterTarget.value}${afterUnit} (was ${beforeTarget.value}${beforeUnit})`);
+  const beforeDef = before.definition as GoalDefinition;
+  const afterDef = after.definition as GoalDefinition;
+  if (input.targetValue !== undefined) {
+    parts.push(`target is now ${afterDef.currency}${afterDef.targetValue} (was ${beforeDef.currency}${beforeDef.targetValue})`);
   }
-  if (input.unit !== undefined) parts.push(`unit is now ${input.unit}`);
-  if (input.addFields?.length) {
-    parts.push(input.addFields.length === 1 ? 'added a field' : `added ${input.addFields.length} fields`);
-  }
-  if (input.removeFieldRefs?.length) {
+  if (input.deadline !== undefined) {
     parts.push(
-      input.removeFieldRefs.length === 1 ? 'removed a field' : `removed ${input.removeFieldRefs.length} fields`,
+      beforeDef.deadline
+        ? `deadline is now ${afterDef.deadline} (was ${beforeDef.deadline})`
+        : `deadline is now ${afterDef.deadline}`,
     );
   }
-  if (input.renameFields?.length) {
-    parts.push(input.renameFields.length === 1 ? 'renamed a field' : `renamed ${input.renameFields.length} fields`);
-  }
 
-  const changedFields = !!(input.addFields?.length || input.removeFieldRefs?.length || input.renameFields?.length);
-  const suffix = changedFields ? ' Past entries are unaffected.' : '';
-  return parts.length ? `Updated "${after.name}" — ${parts.join('; ')}.${suffix}` : `Updated "${after.name}".`;
+  return parts.length ? `Updated "${after.name}" — ${parts.join('; ')}.` : `Updated "${after.name}".`;
 }
 
 // "7:00 PM" / "tomorrow at 7:00 PM" / "Jul 15 at 7:00 PM" — short and
@@ -315,21 +290,6 @@ function resolveGoalRef(
     };
   }
   return { ok: true, ref: entry };
-}
-
-function resolveGoalFieldRef(
-  refs: TurnRefs,
-  goalId: string,
-  fieldRef: string,
-): { ok: true; fieldId: string } | { ok: false; error: string } {
-  const entry = refs.get(fieldRef);
-  if (!entry || entry.kind !== 'goal_field' || entry.goalId !== goalId) {
-    return {
-      ok: false,
-      error: `${fieldRef} isn't a valid field ref for that goal — re-check the [fields: ...] list in context.`,
-    };
-  }
-  return { ok: true, fieldId: entry.fieldId };
 }
 
 // Same pattern as verifyTitleHint, for goals.
@@ -637,10 +597,17 @@ async function executeAiToolCallInner(
 
         // Never saves — this returns a preview only (docs/goals-redesign-
         // plan.md §2.1). POST /goals {previewMessageId} does the actual
-        // create once the user taps.
-        const definition = goalDefinitionSchema.parse(buildTemplateDefinition(validated.data));
+        // create once the user taps. v1 ships exactly one goal type
+        // (savings), so the executor stamps it rather than asking the
+        // model to choose (docs/goals-redesign-plan.md §2.2).
+        const definition = goalDefinitionSchema.parse({
+          type: 'savings',
+          currency: validated.data.currency ?? '$',
+          targetValue: validated.data.targetValue,
+          deadline: validated.data.deadline,
+        });
         const preview: GoalPreview = {
-          template: validated.data.template,
+          template: 'savings',
           name: validated.data.name,
           icon: validated.data.icon ?? null,
           definition,
@@ -668,34 +635,11 @@ async function executeAiToolCallInner(
           return { ok: false, error: "that goal ref doesn't match any current goal — check the goals list." };
         }
 
-        let removeFieldIds: string[] | undefined;
-        if (validated.data.removeFieldRefs?.length) {
-          removeFieldIds = [];
-          for (const fieldRef of validated.data.removeFieldRefs) {
-            const resolvedField = resolveGoalFieldRef(refs, goalId, fieldRef);
-            if (!resolvedField.ok) return { ok: false, error: resolvedField.error };
-            removeFieldIds.push(resolvedField.fieldId);
-          }
-        }
-
-        let renameFields: { fieldId: string; label: string }[] | undefined;
-        if (validated.data.renameFields?.length) {
-          renameFields = [];
-          for (const r of validated.data.renameFields) {
-            const resolvedField = resolveGoalFieldRef(refs, goalId, r.fieldRef);
-            if (!resolvedField.ok) return { ok: false, error: resolvedField.error };
-            renameFields.push({ fieldId: resolvedField.fieldId, label: r.label });
-          }
-        }
-
         const patch: EditGoalPatch = {
           name: validated.data.name,
           icon: validated.data.icon,
           targetValue: validated.data.targetValue,
-          unit: validated.data.unit,
-          addFields: validated.data.addFields,
-          removeFieldIds,
-          renameFields,
+          deadline: validated.data.deadline,
         };
         const { goal } = await editGoal(userId, goalId, patch, source);
 
@@ -716,29 +660,24 @@ async function executeAiToolCallInner(
         const hintCheck = await verifyNameHint(userId, goalId, validated.data.nameHint);
         if (hintCheck) return { ok: false, error: hintCheck.error };
 
-        const values: GoalEntryValue[] = [];
-        for (const v of validated.data.values) {
-          const resolvedField = resolveGoalFieldRef(refs, goalId, v.fieldRef);
-          if (!resolvedField.ok) return { ok: false, error: resolvedField.error };
-          values.push({ fieldId: resolvedField.fieldId, value: v.value });
-        }
-
         const entryAt = normalizeDueAt(validated.data.entryAt, timezone);
         if ('error' in entryAt) return { ok: false, error: entryAt.error };
 
-        const patch: LogGoalEntryPatch = { values, entryAt: entryAt.value ?? undefined };
+        const patch: LogGoalEntryPatch = {
+          amount: validated.data.amount,
+          note: validated.data.note,
+          entryAt: entryAt.value ?? undefined,
+        };
         const { goal } = await logGoalEntry(userId, goalId, patch, source);
 
         const headline = await goalHeadline(goal, timezone);
-        const logged = describeEntryValues(
-          goal.definition as GoalDefinition,
-          Object.fromEntries(values.map((v) => [v.fieldId, v.value])),
-        );
+        const currency = (goal.definition as GoalDefinition).currency;
+        const logged = describeEntryData(currency, { amount: validated.data.amount, note: validated.data.note });
         return {
           ok: true,
           toolName,
           goal,
-          summary: `Logged ${logged || 'that'} to "${goal.name}"${headline ? ` — ${headline} now` : ''}.`,
+          summary: `Logged ${logged} to "${goal.name}"${headline ? ` — ${headline} now` : ''}.`,
           recordKind: 'goal_entry',
         };
       }
@@ -749,7 +688,12 @@ async function executeAiToolCallInner(
             ok: true,
             toolName,
             goal: result.goal,
-            summary: await summarizeGoalUndo(result.goal, result.action, timezone, result.goalEntryData),
+            summary: await summarizeGoalUndo(
+              result.goal,
+              result.action,
+              timezone,
+              result.goalEntryData as GoalEntryData | undefined,
+            ),
             recordKind: result.action,
           };
         }

@@ -8,12 +8,7 @@ import {
   postponeInputSchema,
   recurrenceSchema,
 } from '../tasks/schema.ts';
-import {
-  createGoalParamsSchema,
-  GOAL_FIELD_TYPES,
-  GOAL_TEMPLATES,
-  goalFieldInputSchema,
-} from '../goals/schema.ts';
+import { createGoalParamsSchema } from '../goals/schema.ts';
 
 // Content-relevant subset of the app's icon set (src/components/Icon.tsx) —
 // excludes chrome-only icons (chat, tasks, tools, plus, chevron, etc.) that
@@ -52,8 +47,6 @@ const GOAL_NAME_HINT_PROPERTY = {
   description:
     "The goal's name exactly as it appears in the goals list in context — checked against the real goal before this runs, so it must match what goalRef actually points to.",
 };
-const GOAL_TEMPLATES_ENUM = [...GOAL_TEMPLATES];
-const GOAL_FIELD_TYPES_ENUM = [...GOAL_FIELD_TYPES];
 
 // Six allow-listed task actions, per phase-3-tasks.md. Field names are kept
 // identical to the corresponding zod schema in lib/tasks/schema.ts wherever
@@ -278,66 +271,33 @@ export const AI_TOOLS: Anthropic.Tool[] = [
   {
     name: 'create_goal',
     description:
-      'Show the user a preview of a new goal before saving it — this does NOT save anything by itself. Call it as soon as there\'s enough to render a sensible preview (a template + name is usually enough on its own); don\'t ask "should I set this up?" in chat text first — the Create button on the preview card is the only confirmation, so asking again in words makes them confirm twice. Only ask a real question when something required is missing or genuinely ambiguous — never interrogate for optional specifics nobody brought up, and never invent a target number, a unit, or an extra field the user didn\'t actually mention. If the user asks for a change before tapping Create, call this again with the revision for a fresh preview.',
+      'Show the user a preview of a new savings goal before saving it — this does NOT save anything by itself. Call it as soon as there\'s a name and a target amount; don\'t ask "should I set this up?" in chat text first — the Create button on the preview card is the only confirmation, so asking again in words makes them confirm twice. Only ask a real question when the target amount is genuinely missing — a savings goal needs a number to save toward, so unlike other optional specifics this one is always required. Never invent a number the user did not say. If the user asks for a change before tapping Create, call this again with the revision for a fresh preview.',
     input_schema: {
       type: 'object',
       properties: {
-        template: {
-          type: 'string',
-          enum: GOAL_TEMPLATES_ENUM,
-          description:
-            'workout: exercise/sets/reps/weight log. habit: a daily/weekly check-in with a streak. numeric: track a single number over time (pages read, weight, anything countable) toward an optional total. money: track contributions toward a savings/spending goal. journal: freeform entries with an optional rating — for things with no natural number.',
-        },
-        name: { type: 'string', description: 'Short name for the goal, e.g. "Savings for Berlin".' },
-        icon: { type: 'string', enum: ICON_ENUM, description: 'Pick whichever best matches what this tracks.' },
-        unit: {
-          type: 'string',
-          description:
-            'Unit for the tracked number, e.g. "lb", "kg", "pages", "min" — only if the user actually said one.',
-        },
+        name: { type: 'string', description: 'Short name for the goal, e.g. "Rave savings".' },
+        icon: { type: 'string', enum: ICON_ENUM, description: 'Pick whichever best matches what this is for.' },
         currency: {
           type: 'string',
-          description: 'Currency symbol for a money goal, e.g. "$" — only for template=money.',
+          description: 'Currency symbol, e.g. "$" — only if the user actually said one; defaults to "$".',
         },
         targetValue: {
           type: 'number',
-          description:
-            'The target amount, only if the user actually gave one (e.g. "$2,000", "3 times a week"). Never invent a number they did not say — omit this entirely rather than guess, and a goal without a target is completely fine.',
+          description: 'The target amount the user wants to save toward — required, e.g. "$200" -> 200.',
         },
-        targetPeriod: {
+        deadline: {
           type: 'string',
-          enum: ['day', 'week'],
-          description: 'Only with a targetValue on workout/habit templates — how often the target resets.',
-        },
-        extraFields: {
-          type: 'array',
-          items: {
-            type: 'object',
-            properties: {
-              label: { type: 'string' },
-              type: { type: 'string', enum: GOAL_FIELD_TYPES_ENUM },
-              unit: { type: 'string' },
-              options: { type: 'array', items: { type: 'string' }, description: 'choice fields only.' },
-              required: { type: 'boolean' },
-            },
-            required: ['label', 'type'],
-          },
           description:
-            'Up to 5 extra fields beyond the template defaults — only if the user specifically asked to track something extra (e.g. "and RPE").',
-        },
-        omitFields: {
-          type: 'array',
-          items: { type: 'string' },
-          description: 'Default field labels to drop, only if the user said they don\'t want them.',
+            'A concrete ISO date (YYYY-MM-DD) the user wants to hit the target by — only if they gave a timeframe (e.g. "in 30 days", "by December"). Convert relative language to an absolute date using today\'s date from context; never invent a deadline the user didn\'t imply. Omit entirely if no timeframe was mentioned.',
         },
       },
-      required: ['template', 'name'],
+      required: ['name', 'targetValue'],
     },
   },
   {
     name: 'edit_goal',
     description:
-      "Edit an existing goal's name, icon, target amount, unit, or fields — use the goal's ref from the goals list in context, never guess one. Only include what the user actually asked to change; never resend the whole thing. You can: rename the goal or a field, change the target number, change the unit, add new field(s) (max 5 at a time), or remove a field (its past entries keep their data — they just stop showing that field going forward). You cannot change a goal's template type or fully redesign its layout — if the user wants something structurally different, suggest creating a new goal instead of forcing it through this. Applies immediately (it's undoable, unlike create_goal's preview) — state the concrete before/after value when you confirm it.",
+      "Edit an existing goal's name, icon, target amount, or deadline — use the goal's ref from the goals list in context, never guess one. Only include what the user actually asked to change; never resend the whole thing. Applies immediately (it's undoable, unlike create_goal's preview) — state the concrete before/after value when you confirm it.",
     input_schema: {
       type: 'object',
       properties: {
@@ -345,37 +305,10 @@ export const AI_TOOLS: Anthropic.Tool[] = [
         nameHint: GOAL_NAME_HINT_PROPERTY,
         name: { type: 'string' },
         icon: { type: 'string', enum: ICON_ENUM },
-        targetValue: {
-          type: 'number',
-          description: "New target amount — only if this goal already has a target to change.",
-        },
-        unit: { type: 'string' },
-        addFields: {
-          type: 'array',
-          items: {
-            type: 'object',
-            properties: {
-              label: { type: 'string' },
-              type: { type: 'string', enum: GOAL_FIELD_TYPES_ENUM },
-              unit: { type: 'string' },
-              options: { type: 'array', items: { type: 'string' } },
-              required: { type: 'boolean' },
-            },
-            required: ['label', 'type'],
-          },
-        },
-        removeFieldRefs: {
-          type: 'array',
-          items: { type: 'string' },
-          description: 'Field refs to remove, e.g. ["G1.3"] — from that goal\'s [fields: ...] list in context.',
-        },
-        renameFields: {
-          type: 'array',
-          items: {
-            type: 'object',
-            properties: { fieldRef: { type: 'string' }, label: { type: 'string' } },
-            required: ['fieldRef', 'label'],
-          },
+        targetValue: { type: 'number', description: 'New target amount.' },
+        deadline: {
+          type: 'string',
+          description: 'New concrete ISO date (YYYY-MM-DD) — convert relative language to an absolute date.',
         },
       },
       required: ['goalRef', 'nameHint'],
@@ -384,34 +317,21 @@ export const AI_TOOLS: Anthropic.Tool[] = [
   {
     name: 'log_goal_entry',
     description:
-      'Log an explicit entry to an existing goal the user just told you about — e.g. "log $150 to savings", "did 3 sets of 10 at 135lb". Only for a value the user actually stated; never invent a missing required field — ask instead. Use the goal\'s ref and its field refs exactly as shown in the goals list in context, e.g. goalRef "G1", fieldRef "G1.1".',
+      'Log an explicit amount to an existing goal the user just told you about — e.g. "log $150 to savings", "put in $40 birthday money". Only for a value the user actually stated; never invent an amount — ask instead. Use the goal\'s ref exactly as shown in the goals list in context.',
     input_schema: {
       type: 'object',
       properties: {
         goalRef: GOAL_REF_PROPERTY,
         nameHint: GOAL_NAME_HINT_PROPERTY,
-        values: {
-          type: 'array',
-          items: {
-            type: 'object',
-            properties: {
-              fieldRef: {
-                type: 'string',
-                description: 'A field ref from that goal\'s [fields: ...] list, e.g. "G1.1" — never a guess.',
-              },
-              value: { description: 'The value for that field — a number, text, true/false, or (rating) 1-5.' },
-            },
-            required: ['fieldRef', 'value'],
-          },
-          description: 'Every field value the user actually gave — omit fields they did not mention.',
-        },
+        amount: { type: 'number', description: 'The amount the user actually stated — required.' },
+        note: { type: 'string', description: 'Optional short note, only if the user gave one (e.g. "birthday money").' },
         entryAt: {
           type: 'string',
           description:
-            'Optional — only set if the user specified a different time than now (e.g. "log yesterday\'s run").',
+            'Optional — only set if the user specified a different time than now (e.g. "log yesterday\'s deposit").',
         },
       },
-      required: ['goalRef', 'nameHint', 'values'],
+      required: ['goalRef', 'nameHint', 'amount'],
     },
   },
   {
@@ -467,25 +387,18 @@ const goalRefSchema = z.object({
   nameHint: z.string().min(1),
 });
 
-const goalFieldRefSchema = z
-  .string()
-  .regex(/^G\d+\.\d+$/, 'must be a field ref like "G1.1", not a database id');
+const ISO_DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 
 const editGoalToolSchema = goalRefSchema.extend({
   name: z.string().trim().min(1).max(60).optional(),
   icon: z.string().trim().max(40).optional(),
-  targetValue: z.number().min(0.0001).optional(),
-  unit: z.string().trim().max(20).optional(),
-  addFields: z.array(goalFieldInputSchema).max(5).optional(),
-  removeFieldRefs: z.array(goalFieldRefSchema).max(20).optional(),
-  renameFields: z.array(z.object({ fieldRef: goalFieldRefSchema, label: z.string().trim().min(1).max(60) })).max(20).optional(),
+  targetValue: z.number().min(0.01).optional(),
+  deadline: z.string().regex(ISO_DATE_REGEX, 'deadline must be an ISO date (YYYY-MM-DD)').optional(),
 });
 
 const logGoalEntryToolSchema = goalRefSchema.extend({
-  values: z
-    .array(z.object({ fieldRef: goalFieldRefSchema, value: z.union([z.number(), z.string(), z.boolean()]) }))
-    .min(1)
-    .max(20),
+  amount: z.number(),
+  note: z.string().trim().max(200).optional(),
   entryAt: z.string().optional(),
 });
 

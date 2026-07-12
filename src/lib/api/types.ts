@@ -137,38 +137,18 @@ export type PostponeTaskInput = {
 };
 
 // --- goals (mirrors server/src/lib/goals/schema.ts) ------------------------
+// v1 ships exactly one goal type — savings. A fixed { type, currency,
+// targetValue, deadline? } definition, no field builder.
 
-export type GoalFieldType = 'number' | 'text' | 'boolean' | 'rating' | 'choice';
-
-export type GoalField = {
-  id: string;
-  label: string;
-  type: GoalFieldType;
-  unit?: string;
-  options?: string[];
-  required?: boolean;
-  archived?: boolean;
-};
-
-export type GoalTarget =
-  | { kind: 'total'; value: number; unit?: string }
-  | { kind: 'count_per_period'; period: 'day' | 'week'; value: number };
-
-export type GoalView =
-  | { kind: 'progress_total' }
-  | { kind: 'streak' }
-  | { kind: 'bars'; bucket: 'day' | 'week'; measure: 'count' | 'sum'; fieldId?: string }
-  | { kind: 'recent_list' };
+export type GoalTemplateKey = 'savings';
 
 export type GoalDefinition = {
-  fields: GoalField[];
-  primaryFieldId?: string;
-  target?: GoalTarget;
-  views: GoalView[];
-  entryNoun?: string;
+  type: 'savings';
+  currency: string;
+  targetValue: number;
+  deadline?: string;
+  checkInCadence?: 'weekly' | 'off';
 };
-
-export type GoalTemplateKey = 'workout' | 'habit' | 'numeric' | 'money' | 'journal';
 
 // What create_goal returns for display before anything is saved — stored on
 // a goal_preview message's meta.preview, and what POST /goals sends back.
@@ -195,55 +175,49 @@ export type ApiGoal = {
   headline?: string;
   sub?: string;
   progress?: number | null;
+  paceLine?: string | null;
   lastEntryAt?: string | null;
 };
+
+export type GoalEntryData = { amount: number; note?: string };
 
 export type ApiGoalEntry = {
   id: string;
   goalId: string;
   recordId: string;
-  data: Record<string, unknown>;
+  data: GoalEntryData;
   entryAt: string;
   createdAt: string;
 };
 
-export type ApiGoalViewData =
-  | { kind: 'progress_total'; total: number | null; targetValue: number | null; unit: string | null; progress: number | null }
-  | { kind: 'streak'; streak: number }
-  | { kind: 'bars'; bucket: 'day' | 'week'; buckets: { label: string; ymd: string; value: number }[] }
-  | { kind: 'recent_list' };
-
 export type ApiGoalDetail = {
-  card: { headline: string; sub: string; progress: number | null };
-  views: ApiGoalViewData[];
+  card: { headline: string; sub: string; progress: number | null; paceLine: string | null };
+  total: number;
+  targetValue: number;
+  currency: string;
+  deadline: string | null;
   entryCount: number;
   lastEntryAt: string | null;
 };
 
 export type CreateGoalParams = {
-  template: GoalTemplateKey;
   name: string;
   icon?: string;
-  unit?: string;
   currency?: string;
-  targetValue?: number;
-  targetPeriod?: 'day' | 'week';
-  extraFields?: { label: string; type: GoalFieldType; unit?: string; options?: string[]; required?: boolean }[];
-  omitFields?: string[];
+  targetValue: number;
+  deadline?: string;
 };
 
 export type EditGoalPatch = {
   name?: string;
   icon?: string;
   targetValue?: number;
-  unit?: string;
-  addFields?: { label: string; type: GoalFieldType; unit?: string; options?: string[]; required?: boolean }[];
-  removeFieldIds?: string[];
-  renameFields?: { fieldId: string; label: string }[];
+  deadline?: string;
 };
 
 export type LogGoalEntryPatch = {
-  values: { fieldId: string; value: number | string | boolean }[];
+  amount: number;
+  note?: string;
   entryAt?: string;
 };
 

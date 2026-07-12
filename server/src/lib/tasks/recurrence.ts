@@ -42,7 +42,10 @@ export function addDaysToYmd(ymd: string, days: number): string {
   return dt.toISOString().slice(0, 10);
 }
 
-function daysBetweenYmd(a: string, b: string): number {
+// Exported for reuse by lib/goals/summary.ts's deadline pace math (days
+// remaining until a goal's target date) — same "no date library, just
+// UTC-noon-anchored ymd strings" approach applies there as it does here.
+export function daysBetweenYmd(a: string, b: string): number {
   const [ay, am, ad] = a.split('-').map(Number) as [number, number, number];
   const [by, bm, bd] = b.split('-').map(Number) as [number, number, number];
   return Math.round((Date.UTC(by, bm - 1, bd) - Date.UTC(ay, am - 1, ad)) / 86_400_000);

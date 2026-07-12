@@ -2,41 +2,15 @@ import { and, desc, eq, inArray, isNull } from 'drizzle-orm';
 
 import { db } from '../../db/client.ts';
 import { records, goalEntries } from '../../db/schema.ts';
-import { addDaysToYmd, formatYmdShort, ymdInTz, weekdayOfYmd } from '../tasks/recurrence.ts';
-import type { Weekday } from '../tasks/schema.ts';
+import { daysBetweenYmd, formatYmdShort, ymdInTz } from '../tasks/recurrence.ts';
 import type { GoalRow } from './executor.ts';
-import type { GoalDefinition, GoalView } from './schema.ts';
+import type { GoalDefinition, GoalEntryData } from './schema.ts';
 
-// All chart/streak/total math lives here, computed once server-side in the
+// All total/pace math lives here, computed once server-side in the
 // account's own timezone — the model and the client both only ever render
 // what this returns (docs/ai-reliability-hardening.md lesson 6: never make
-// either side do the arithmetic itself; lesson 12: keep date-bucketing
-// timezone-consistent between client and server).
-export type LiveEntry = { entryAt: Date; data: Record<string, unknown> };
-
-const WEEKDAY_INDEX: Record<Weekday, number> = { mo: 0, tu: 1, we: 2, th: 3, fr: 4, sa: 5, su: 6 };
-
-function weekStartYmd(ymd: string, tz: string): string {
-  return addDaysToYmd(ymd, -WEEKDAY_INDEX[weekdayOfYmd(ymd, tz)]);
-}
-
-function dayLabel(ymd: string): string {
-  const [y, m, d] = ymd.split('-').map(Number) as [number, number, number];
-  return new Date(Date.UTC(y, m - 1, d, 12)).toLocaleDateString(undefined, {
-    timeZone: 'UTC',
-    weekday: 'short',
-  });
-}
-
-function readNumericValue(data: Record<string, unknown>, fieldId: string | undefined): number {
-  if (!fieldId) return 0;
-  const v = data[fieldId];
-  return typeof v === 'number' ? v : 0;
-}
-
-function sumField(entries: LiveEntry[], fieldId: string): number {
-  return entries.reduce((sum, e) => sum + readNumericValue(e.data, fieldId), 0);
-}
+// either side do the arithmetic itself).
+export type LiveEntry = { entryAt: Date; data: GoalEntryData };
 
 function formatNumber(n: number): string {
   return Number.isInteger(n) ? n.toLocaleString() : n.toLocaleString(undefined, { maximumFractionDigits: 2 });
@@ -53,11 +27,11 @@ async function fetchLiveEntries(goalId: string): Promise<LiveEntry[]> {
     .innerJoin(records, eq(goalEntries.recordId, records.id))
     .where(and(eq(goalEntries.goalId, goalId), isNull(records.revertedAt)))
     .orderBy(desc(goalEntries.entryAt));
-  return rows.map((r) => ({ entryAt: r.entryAt, data: r.data as Record<string, unknown> }));
+  return rows.map((r) => ({ entryAt: r.entryAt, data: r.data as GoalEntryData }));
 }
 
-// Batched form for the goals list — one query for every tool's entries
-// instead of one query per tool (the N+1 the old GET /tools list had).
+// Batched form for the goals list — one query for every goal's entries
+// instead of one query per goal (the N+1 the old GET /tools list had).
 async function fetchLiveEntriesForGoals(goalIds: string[]): Promise<Map<string, LiveEntry[]>> {
   const byGoal = new Map<string, LiveEntry[]>();
   if (goalIds.length === 0) return byGoal;
@@ -69,7 +43,7 @@ async function fetchLiveEntriesForGoals(goalIds: string[]): Promise<Map<string, 
     .orderBy(desc(goalEntries.entryAt));
   for (const r of rows) {
     const list = byGoal.get(r.goalId) ?? [];
-    list.push({ entryAt: r.entryAt, data: r.data as Record<string, unknown> });
+    list.push({ entryAt: r.entryAt, data: r.data as GoalEntryData });
     byGoal.set(r.goalId, list);
   }
   return byGoal;
@@ -77,88 +51,50 @@ async function fetchLiveEntriesForGoals(goalIds: string[]): Promise<Map<string, 
 
 // --- pure computation (no I/O — testable in isolation) ------------------
 
-/**
- * Consecutive days with >=1 live entry, counting back from today. If today
- * has no entry yet, counting starts from yesterday instead — a streak isn't
- * broken until the day has fully elapsed, matching how the tasks executor
- * treats "overdue" (lib/ai/actions.ts's isOverdue reasoning).
- */
-export function computeStreak(entries: LiveEntry[], tz: string, now: Date): number {
-  const daysWithEntry = new Set(entries.map((e) => ymdInTz(e.entryAt, tz)));
-  const todayYmd = ymdInTz(now, tz);
-  let cursor = daysWithEntry.has(todayYmd) ? todayYmd : addDaysToYmd(todayYmd, -1);
-  if (!daysWithEntry.has(cursor)) return 0;
-  let streak = 0;
-  while (daysWithEntry.has(cursor)) {
-    streak += 1;
-    cursor = addDaysToYmd(cursor, -1);
-  }
-  return streak;
+export function computeTotal(entries: LiveEntry[]): number {
+  return entries.reduce((sum, e) => sum + e.data.amount, 0);
 }
 
-export function computeChartBuckets(
-  view: Extract<GoalView, { kind: 'bars' }>,
-  entries: LiveEntry[],
+export type Pace = {
+  perDay: number;
+  daysLeft: number;
+  remaining: number;
+  reached: boolean;
+  overdue: boolean;
+};
+
+/**
+ * Money needed per day to hit `targetValue` by `deadline` — the "$5.2/day to
+ * hit Dec 15" line on a goal card (docs/goals-redesign-plan.md §2.5). Null
+ * when there's no deadline to pace against. `daysLeft` floors at 0 rather
+ * than going negative once the deadline has passed — `overdue` carries that
+ * fact separately so the caller can phrase it honestly instead of showing a
+ * nonsensical negative pace.
+ */
+export function computePace(
+  targetValue: number,
+  total: number,
+  deadline: string | undefined,
   tz: string,
   now: Date,
-): { label: string; ymd: string; value: number }[] {
+): Pace | null {
+  if (!deadline) return null;
+  const remaining = Math.max(0, targetValue - total);
+  const reached = remaining <= 0;
   const todayYmd = ymdInTz(now, tz);
-
-  if (view.bucket === 'day') {
-    const buckets = Array.from({ length: 7 }, (_, i) => {
-      const ymd = addDaysToYmd(todayYmd, -(6 - i));
-      return { ymd, label: dayLabel(ymd), value: 0 };
-    });
-    const byYmd = new Map(buckets.map((b) => [b.ymd, b]));
-    for (const e of entries) {
-      const bucket = byYmd.get(ymdInTz(e.entryAt, tz));
-      if (bucket) bucket.value += view.measure === 'count' ? 1 : readNumericValue(e.data, view.fieldId);
-    }
-    return buckets;
-  }
-
-  const currentWeekStart = weekStartYmd(todayYmd, tz);
-  const buckets = Array.from({ length: 8 }, (_, i) => {
-    const ymd = addDaysToYmd(currentWeekStart, -7 * (7 - i));
-    return { ymd, label: formatYmdShort(ymd), value: 0 };
-  });
-  const byWeekStart = new Map(buckets.map((b) => [b.ymd, b]));
-  for (const e of entries) {
-    const bucket = byWeekStart.get(weekStartYmd(ymdInTz(e.entryAt, tz), tz));
-    if (bucket) bucket.value += view.measure === 'count' ? 1 : readNumericValue(e.data, view.fieldId);
-  }
-  return buckets;
+  const rawDaysLeft = daysBetweenYmd(todayYmd, deadline);
+  const overdue = rawDaysLeft < 0;
+  const daysLeft = Math.max(0, rawDaysLeft);
+  const perDay = reached ? 0 : remaining / Math.max(1, daysLeft);
+  return { perDay, daysLeft, remaining, reached, overdue };
 }
 
 export type GoalCardSummary = {
   headline: string;
   sub: string;
   progress: number | null;
+  paceLine: string | null;
 };
-
-function computeProgress(
-  definition: GoalDefinition,
-  total: number | null,
-  entriesToday: number,
-  entriesThisWeek: number,
-): number | null {
-  const target = definition.target;
-  if (!target) return null;
-  if (target.kind === 'total') {
-    if (total == null) return null;
-    return Math.min(1, Math.max(0, total / target.value));
-  }
-  const count = target.period === 'day' ? entriesToday : entriesThisWeek;
-  return Math.min(1, Math.max(0, count / target.value));
-}
-
-function pluralNoun(noun: string): string {
-  return noun.endsWith('s') ? noun : `${noun}s`;
-}
-
-function countLabel(count: number, noun: string): string {
-  return `${count} ${count === 1 ? noun : pluralNoun(noun)}`;
-}
 
 export function computeCardSummary(
   definition: GoalDefinition,
@@ -166,114 +102,54 @@ export function computeCardSummary(
   tz: string,
   now: Date,
 ): GoalCardSummary {
-  const noun = definition.entryNoun ?? 'entry';
+  const total = computeTotal(entries);
+  const unit = definition.currency;
+  const progress = Math.min(1, Math.max(0, total / definition.targetValue));
+  const pace = computePace(definition.targetValue, total, definition.deadline, tz, now);
+
+  const headline = `${unit}${formatNumber(total)} / ${unit}${formatNumber(definition.targetValue)}`;
   const entryCount = entries.length;
-  const lastEntryAt = entries[0]?.entryAt ?? null;
+  const sub = entryCount === 0 ? 'No entries yet' : `${entryCount} ${entryCount === 1 ? 'entry' : 'entries'} logged`;
 
-  const primaryField = definition.fields.find((f) => f.id === definition.primaryFieldId);
-  const total = primaryField ? sumField(entries, primaryField.id) : null;
+  let paceLine: string | null = null;
+  if (pace) {
+    if (pace.reached) {
+      paceLine = 'Target reached';
+    } else if (pace.overdue) {
+      paceLine = `${unit}${formatNumber(pace.remaining)} to go — past the ${formatYmdShort(definition.deadline!)} deadline`;
+    } else {
+      paceLine = `needs ${unit}${formatNumber(pace.perDay)}/day to hit ${formatYmdShort(definition.deadline!)}`;
+    }
+  }
 
-  const todayYmd = ymdInTz(now, tz);
-  const weekStart = weekStartYmd(todayYmd, tz);
-  const entriesToday = entries.filter((e) => ymdInTz(e.entryAt, tz) === todayYmd).length;
-  const entriesThisWeek = entries.filter((e) => {
-    const ymd = ymdInTz(e.entryAt, tz);
-    return ymd >= weekStart && ymd <= todayYmd;
-  }).length;
-  const streak = computeStreak(entries, tz, now);
-  const progress = computeProgress(definition, total, entriesToday, entriesThisWeek);
-
-  const target = definition.target;
-  if (target?.kind === 'total' && total != null) {
-    const unit = target.unit ? ` ${target.unit}` : '';
-    return {
-      headline: `${formatNumber(total)}${unit} / ${formatNumber(target.value)}${unit}`,
-      sub: countLabel(entryCount, noun) + ' logged',
-      progress,
-    };
-  }
-  if (target?.kind === 'count_per_period') {
-    const count = target.period === 'day' ? entriesToday : entriesThisWeek;
-    const periodLabel = target.period === 'day' ? 'today' : 'this week';
-    return {
-      headline: `${count}/${target.value} ${periodLabel}`,
-      sub: streak > 0 ? `${streak}-day streak` : `${countLabel(entryCount, noun)} logged`,
-      progress,
-    };
-  }
-  if (total != null) {
-    const unit = primaryField?.unit ? ` ${primaryField.unit}` : '';
-    return { headline: `${formatNumber(total)}${unit}`, sub: `${countLabel(entryCount, noun)} logged`, progress };
-  }
-  if (streak > 0) {
-    return { headline: `${streak}-day streak`, sub: `${countLabel(entryCount, noun)} logged`, progress };
-  }
-  if (entryCount === 0) return { headline: 'No entries yet', sub: 'Log your first one', progress: null };
-  return {
-    headline: countLabel(entryCount, noun),
-    sub: lastEntryAt ? `Last ${formatYmdShort(ymdInTz(lastEntryAt, tz))}` : '',
-    progress,
-  };
+  return { headline, sub, progress, paceLine };
 }
 
 // --- I/O-backed entry points ---------------------------------------------
 
-export type GoalViewData =
-  | { kind: 'progress_total'; total: number | null; targetValue: number | null; unit: string | null; progress: number | null }
-  | { kind: 'streak'; streak: number }
-  | { kind: 'bars'; bucket: 'day' | 'week'; buckets: { label: string; ymd: string; value: number }[] }
-  | { kind: 'recent_list' };
-
 export type GoalDetail = {
   card: GoalCardSummary;
-  views: GoalViewData[];
+  total: number;
+  targetValue: number;
+  currency: string;
+  deadline: string | null;
   entryCount: number;
   lastEntryAt: string | null;
 };
-
-function buildViews(definition: GoalDefinition, entries: LiveEntry[], tz: string, now: Date): GoalViewData[] {
-  const primaryField = definition.fields.find((f) => f.id === definition.primaryFieldId);
-  const total = primaryField ? sumField(entries, primaryField.id) : null;
-  const todayYmd = ymdInTz(now, tz);
-  const weekStart = weekStartYmd(todayYmd, tz);
-  const entriesToday = entries.filter((e) => ymdInTz(e.entryAt, tz) === todayYmd).length;
-  const entriesThisWeek = entries.filter((e) => {
-    const ymd = ymdInTz(e.entryAt, tz);
-    return ymd >= weekStart && ymd <= todayYmd;
-  }).length;
-  const progress = computeProgress(definition, total, entriesToday, entriesThisWeek);
-
-  return definition.views.map((view): GoalViewData => {
-    switch (view.kind) {
-      case 'progress_total': {
-        const target = definition.target?.kind === 'total' ? definition.target : null;
-        return {
-          kind: 'progress_total',
-          total,
-          targetValue: target?.value ?? null,
-          unit: target?.unit ?? primaryField?.unit ?? null,
-          progress,
-        };
-      }
-      case 'streak':
-        return { kind: 'streak', streak: computeStreak(entries, tz, now) };
-      case 'bars':
-        return { kind: 'bars', bucket: view.bucket, buckets: computeChartBuckets(view, entries, tz, now) };
-      case 'recent_list':
-        return { kind: 'recent_list' };
-    }
-  });
-}
 
 export async function buildGoalDetail(goal: GoalRow, timezone: string | null): Promise<GoalDetail> {
   const tz = timezone ?? 'UTC';
   const now = new Date();
   const definition = goal.definition as GoalDefinition;
   const entries = await fetchLiveEntries(goal.id);
+  const total = computeTotal(entries);
 
   return {
     card: computeCardSummary(definition, entries, tz, now),
-    views: buildViews(definition, entries, tz, now),
+    total,
+    targetValue: definition.targetValue,
+    currency: definition.currency,
+    deadline: definition.deadline ?? null,
     entryCount: entries.length,
     lastEntryAt: entries[0]?.entryAt.toISOString() ?? null,
   };

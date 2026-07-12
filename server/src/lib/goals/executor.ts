@@ -5,12 +5,10 @@ import { records, goalEntries, goals } from '../../db/schema.ts';
 import type { ActionSource } from '../tasks/executor.ts';
 import {
   goalDefinitionSchema,
-  validateEntryValues,
   type EditGoalPatch,
   type LogGoalEntryPatch,
   type GoalDefinition,
-  type GoalField,
-  type GoalFieldInput,
+  type GoalEntryData,
   type GoalTemplateKey,
 } from './schema.ts';
 
@@ -155,17 +153,11 @@ export async function createGoal(
 
 // --- edit (constrained ops) ---------------------------------------------
 
-function addField(fields: GoalField[], input: GoalFieldInput): GoalField[] {
-  return [...fields, { id: crypto.randomUUID(), ...input }];
-}
-
 /**
- * Applies a constrained edit patch to a goal's current definition. Never
- * resends or reconstructs the whole definition from scratch — only the
- * fields the caller actually touched change (docs/ai-reliability-hardening.md
- * lesson 13: an edit surface that can't faithfully represent a value must
- * never resave a guessed one). Returns an error string instead of throwing
- * so the executor can wrap it consistently as an invalid_input.
+ * Applies a constrained edit patch to a goal's current definition. v1 ops:
+ * targetValue, deadline — nothing else exists to edit yet
+ * (docs/goals-redesign-plan.md §2.2). Returns an error string instead of
+ * throwing so the executor can wrap it consistently as an invalid_input.
  */
 function applyEditOps(
   definition: GoalDefinition,
@@ -174,54 +166,11 @@ function applyEditOps(
   let next = definition;
 
   if (patch.targetValue !== undefined) {
-    if (!next.target) {
-      return { error: 'this goal has no target to change — ask the user if they want to add one' };
-    }
-    next = { ...next, target: { ...next.target, value: patch.targetValue } };
+    next = { ...next, targetValue: patch.targetValue };
   }
 
-  if (patch.unit !== undefined) {
-    if (!next.primaryFieldId) {
-      return { error: 'this goal has no primary numeric field to set a unit on' };
-    }
-    const primaryId = next.primaryFieldId;
-    next = {
-      ...next,
-      fields: next.fields.map((f) => (f.id === primaryId ? { ...f, unit: patch.unit } : f)),
-      target: next.target && next.target.kind === 'total' ? { ...next.target, unit: patch.unit } : next.target,
-    };
-  }
-
-  if (patch.addFields?.length) {
-    if (next.fields.filter((f) => !f.archived).length + patch.addFields.length > 20) {
-      return { error: 'that would be too many fields — remove one first, or ask what to drop' };
-    }
-    next = { ...next, fields: patch.addFields.reduce(addField, next.fields) };
-  }
-
-  if (patch.removeFieldIds?.length) {
-    const removeSet = new Set(patch.removeFieldIds);
-    const missing = patch.removeFieldIds.filter((id) => !next.fields.some((f) => f.id === id));
-    if (missing.length) return { error: `unknown field id(s): ${missing.join(', ')}` };
-    // A field still backing the primary summed total or a chart's summed
-    // measure can't just vanish out from under those — reject rather than
-    // silently breaking the definition; the model can ask the user which to
-    // drop first (the target/view, or pick a different field).
-    if (next.primaryFieldId && removeSet.has(next.primaryFieldId)) {
-      return { error: 'that field backs this goal\'s total — remove the target first, or choose a different field' };
-    }
-    const usedByBars = next.views.some((v) => v.kind === 'bars' && v.fieldId && removeSet.has(v.fieldId));
-    if (usedByBars) {
-      return { error: 'that field backs one of this goal\'s charts — ask the user which to drop first' };
-    }
-    next = { ...next, fields: next.fields.map((f) => (removeSet.has(f.id) ? { ...f, archived: true } : f)) };
-  }
-
-  if (patch.renameFields?.length) {
-    const missing = patch.renameFields.filter((r) => !next.fields.some((f) => f.id === r.fieldId));
-    if (missing.length) return { error: `unknown field id(s): ${missing.map((r) => r.fieldId).join(', ')}` };
-    const labelById = new Map(patch.renameFields.map((r) => [r.fieldId, r.label]));
-    next = { ...next, fields: next.fields.map((f) => (labelById.has(f.id) ? { ...f, label: labelById.get(f.id)! } : f)) };
+  if (patch.deadline !== undefined) {
+    next = { ...next, deadline: patch.deadline };
   }
 
   const parsed = goalDefinitionSchema.safeParse(next);
@@ -292,15 +241,12 @@ export async function logGoalEntry(
     }
 
     const goal = await loadGoal(tx, userId, goalId);
-    const definition = goal.definition as GoalDefinition;
-    const error = validateEntryValues(definition.fields, patch.values);
-    if (error) throw new GoalActionError('invalid_input', error);
 
     // patch.entryAt, when set, has already been normalized to a real UTC
     // instant by the caller (lib/ai/actions.ts, via localDatetimeToUtcIso) —
     // same convention as every dueAt reaching lib/tasks/executor.ts.
     const entryAt = patch.entryAt ? new Date(patch.entryAt) : new Date();
-    const data: Record<string, unknown> = Object.fromEntries(patch.values.map((v) => [v.fieldId, v.value]));
+    const data: GoalEntryData = patch.note ? { amount: patch.amount, note: patch.note } : { amount: patch.amount };
 
     const [record] = await tx
       .insert(records)
