@@ -1,4 +1,4 @@
-import { and, asc, eq, gt, inArray, or } from 'drizzle-orm';
+import { and, asc, eq, gt, inArray, isNull, or } from 'drizzle-orm';
 
 import { db } from '../../db/client.ts';
 import { goals, records, tasks } from '../../db/schema.ts';
@@ -147,7 +147,13 @@ export async function buildRecentChangesFeed(userId: string, since: Date | null)
     const goalIds = [...new Set(linked.map((t) => t.goalId).filter((g): g is string => !!g))];
     const goalNameById = new Map<string, string>();
     if (goalIds.length > 0) {
-      const goalRows = await db.select({ id: goals.id, name: goals.name }).from(goals).where(inArray(goals.id, goalIds));
+      // Archived goals excluded — a completion after the goal was removed
+      // logs nothing (lib/tasks/executor.ts's archived guard), so narrating
+      // "adding $7 to X" for it would describe an entry that doesn't exist.
+      const goalRows = await db
+        .select({ id: goals.id, name: goals.name })
+        .from(goals)
+        .where(and(inArray(goals.id, goalIds), isNull(goals.archivedAt)));
       for (const g of goalRows) goalNameById.set(g.id, g.name);
     }
     for (const t of linked) {

@@ -81,7 +81,7 @@ export async function buildGoalContext(
       ? ` · ${definition.currency}${contribution.contribution}/completion via "${contribution.title}"`
       : '';
 
-    const line = `[${alias}] "${goal.name}" · ${summary.headline}${contributionLabel}${summary.paceLine ? ` · ${summary.paceLine}` : ''}${deadlineLabel} · ${summary.entryCount} entries${lastLabel}`;
+    const line = `[${alias}] "${goal.name}" · ${summary.headline}${contributionLabel}${summary.paceLine ? ` · ${summary.paceLine}` : ''}${deadlineLabel} · ${summary.entryCount} ${summary.entryCount === 1 ? 'entry' : 'entries'}${lastLabel}`;
 
     if (charCount + line.length > MAX_CHARS) {
       truncated = true;

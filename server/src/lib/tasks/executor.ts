@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNull, like, or } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, like, notInArray, or } from 'drizzle-orm';
 
 import { db } from '../../db/client.ts';
 import { records, tasks, goals, goalEntries } from '../../db/schema.ts';
@@ -153,12 +153,20 @@ export async function getTask(userId: string, taskId: string): Promise<TaskRow |
 // alongside something else in the same transaction (goals/executor.ts's
 // starter-task creation — docs/goals-redesign-plan.md §2.3) can share it
 // instead of nesting a second top-level transaction.
+//
+// `skipRecord` is for a caller whose own action record subsumes this create
+// — a goal's Create tap is ONE user action, so its goal_created record (with
+// starterTaskIds in the payload) is the single record for the whole thing,
+// and per-starter task_created records would (a) double-count the action and
+// (b) tie with goal_created on createdAt (Postgres freezes now() at
+// transaction start), making "which record does undo pick" nondeterministic.
 export async function createTaskInTx(
   tx: Tx,
   userId: string,
   input: CreateTaskInput,
   timezone: string | null,
   opts: ActionSource,
+  { skipRecord = false }: { skipRecord?: boolean } = {},
 ): Promise<{ task: TaskRow }> {
   const idempotent = await findIdempotentRecord(tx, userId, opts, 'task_created');
   if (idempotent) {
@@ -193,14 +201,16 @@ export async function createTaskInTx(
     .returning();
   if (!task) throw new Error('task_insert_failed');
 
-  await tx.insert(records).values({
-    userId,
-    kind: 'task_created',
-    payload: { taskId: task.id, title: task.title },
-    source: opts.source,
-    sourceMessageId: opts.sourceMessageId ?? null,
-    toolCallId: opts.toolCallId ?? null,
-  });
+  if (!skipRecord) {
+    await tx.insert(records).values({
+      userId,
+      kind: 'task_created',
+      payload: { taskId: task.id, title: task.title },
+      source: opts.source,
+      sourceMessageId: opts.sourceMessageId ?? null,
+      toolCallId: opts.toolCallId ?? null,
+    });
+  }
 
   let responseTask = task;
   if (input.recurrence) {
@@ -446,8 +456,18 @@ async function applyProgress(
   // `task` was loaded before this update. undo_last_action needs no
   // equivalent cleanup: reverting the record sets its own revertedAt, which
   // already hides the entry via the live-entries join (lib/goals/summary.ts).
+  let goalArchived = false;
+  if (task.goalId && becameDone) {
+    const [linkedGoal] = await tx
+      .select({ archivedAt: goals.archivedAt })
+      .from(goals)
+      .where(eq(goals.id, task.goalId))
+      .limit(1);
+    goalArchived = !linkedGoal || linkedGoal.archivedAt !== null;
+  }
   const goalEntryAction = decideGoalEntryAction({
     goalId: task.goalId,
+    goalArchived,
     goalContribution: (task.config as Record<string, unknown>).goalContribution,
     becameDone,
     becameOpen,
@@ -726,6 +746,14 @@ export async function undoLastAction(userId: string, opts: ActionSource): Promis
           eq(records.userId, userId),
           isNull(records.revertedAt),
           or(like(records.kind, 'task_%'), like(records.kind, 'goal_%')),
+          // The undo bookkeeping records themselves match the task_%/goal_%
+          // prefixes but aren't undoable actions — without excluding them,
+          // a second consecutive "undo that" finds the first undo's own
+          // record and dies on "cannot undo record kind task_undo" instead
+          // of reverting the next-most-recent real action (pre-existing bug,
+          // caught by the as-a-user test pass). Undo-of-undo (redo) stays
+          // deliberately unsupported; consecutive undos walk further back.
+          notInArray(records.kind, ['task_undo', 'goal_undo']),
         ),
       )
       .orderBy(desc(records.createdAt))
@@ -748,6 +776,7 @@ async function undoGoalRecord(
     name?: string;
     prior?: { name: string; icon: string | null; definition: unknown; version: number };
     data?: Record<string, unknown>;
+    starterTaskIds?: string[];
   };
   const goalId = payload.goalId;
   if (!goalId) throw new TaskActionError('not_found', 'the goal for that action no longer exists');
@@ -768,6 +797,28 @@ async function undoGoalRecord(
       const [g] = await tx.update(goals).set({ archivedAt: new Date() }).where(eq(goals.id, goal.id)).returning();
       if (!g) throw new Error('goal_update_failed');
       updated = g;
+      // Starter tasks were created in the same Create-tap transaction as
+      // the goal — undoing the goal's creation takes them (and any open
+      // materialized instances of a recurring starter) with it, the same
+      // cascade shape undoTaskRecord's 'task_created' uses. Without this,
+      // "undo that" right after Create leaves orphaned tasks silently
+      // logging entries to an archived goal.
+      if (payload.starterTaskIds?.length) {
+        await tx
+          .update(tasks)
+          .set({ deletedAt: new Date() })
+          .where(and(inArray(tasks.id, payload.starterTaskIds), isNull(tasks.deletedAt)));
+        await tx
+          .update(tasks)
+          .set({ deletedAt: new Date() })
+          .where(
+            and(
+              inArray(tasks.templateId, payload.starterTaskIds),
+              eq(tasks.status, 'open'),
+              isNull(tasks.deletedAt),
+            ),
+          );
+      }
       break;
     }
     case 'goal_edited': {

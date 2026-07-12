@@ -286,7 +286,11 @@ export async function* streamChatReplyDeepseek(
               summary: result.summary,
               recordKind: result.recordKind,
             };
-            toolResultMessages.push({ role: 'tool', tool_call_id: call.id, content: result.summary });
+            toolResultMessages.push({
+              role: 'tool',
+              tool_call_id: call.id,
+              content: result.modelSummary ?? result.summary,
+            });
           } else {
             toolCallLog.push({ name: call.name, ok: false, error: result.error });
             toolResultMessages.push({ role: 'tool', tool_call_id: call.id, content: result.error });

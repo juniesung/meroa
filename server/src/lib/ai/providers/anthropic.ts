@@ -218,7 +218,7 @@ export async function* streamChatReplyAnthropic(
             toolResults.push({
               type: 'tool_result',
               tool_use_id: block.id,
-              content: result.summary,
+              content: result.modelSummary ?? result.summary,
             });
           } else {
             toolCallLog.push({ name: block.name, ok: false, error: result.error });

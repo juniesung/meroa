@@ -1,7 +1,8 @@
 import { and, desc, eq, isNull } from 'drizzle-orm';
 
 import { db } from '../../db/client.ts';
-import { records, tasks } from '../../db/schema.ts';
+import { goals, records, tasks } from '../../db/schema.ts';
+import type { GoalDefinition } from '../goals/schema.ts';
 import { taskStatusOrder } from '../task-order.ts';
 import {
   describeRecurrence,
@@ -51,6 +52,9 @@ type Row = {
   occurrenceDate: string | null;
   createdAt: Date;
   completedAt: Date | null;
+  goalName: string | null;
+  goalDefinition: unknown;
+  goalArchivedAt: Date | null;
 };
 
 function renderChecklistItems(items: ChecklistItem[], alias: string, refs: TurnRefs, taskId: string): string {
@@ -145,9 +149,13 @@ export async function buildTaskContext(userId: string, timezone: string | null):
       occurrenceDate: tasks.occurrenceDate,
       createdAt: tasks.createdAt,
       completedAt: records.occurredAt,
+      goalName: goals.name,
+      goalDefinition: goals.definition,
+      goalArchivedAt: goals.archivedAt,
     })
     .from(tasks)
     .leftJoin(records, eq(tasks.completedRecordId, records.id))
+    .leftJoin(goals, eq(tasks.goalId, goals.id))
     .where(and(eq(tasks.userId, userId), isNull(tasks.deletedAt)))
     .orderBy(taskStatusOrder, desc(tasks.createdAt))
     .limit(200);
@@ -257,7 +265,18 @@ export async function buildTaskContext(userId: string, timezone: string | null):
           : `due ${shortDateTime(displayRow.dueAt, tz)}`
         : 'no due date');
 
-    const line = `[${alias}] "${displayRow.title}" · ${progressLabel(displayRow.type, (displayRow.config ?? {}) as Record<string, unknown>, alias, refs, displayRow.id)} · ${due}${scheduleNote} · ${displayRow.status}`;
+    // A goal-linked task's line says so explicitly — completing it IS the
+    // logging (the auto-entry in lib/tasks/executor.ts), and without this
+    // the model has no way to know that and can double-record the same
+    // real-world action with a separate log_goal_entry call
+    // (docs/goals-redesign-plan.md §2.3).
+    const contribution = ((displayRow.config ?? {}) as { goalContribution?: unknown }).goalContribution;
+    const goalLabel =
+      displayRow.goalName && !displayRow.goalArchivedAt && typeof contribution === 'number'
+        ? ` · auto-logs ${(displayRow.goalDefinition as GoalDefinition | null)?.currency ?? ''}${contribution} to goal "${displayRow.goalName}" when completed`
+        : '';
+
+    const line = `[${alias}] "${displayRow.title}" · ${progressLabel(displayRow.type, (displayRow.config ?? {}) as Record<string, unknown>, alias, refs, displayRow.id)} · ${due}${scheduleNote}${goalLabel} · ${displayRow.status}`;
 
     if (charCount + line.length > MAX_CHARS) {
       truncated = true;

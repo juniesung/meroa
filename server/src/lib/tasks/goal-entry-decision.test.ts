@@ -6,6 +6,7 @@ describe('decideGoalEntryAction', () => {
   it('does nothing for a task with no linked goal', () => {
     const decision = decideGoalEntryAction({
       goalId: null,
+      goalArchived: false,
       goalContribution: 5,
       becameDone: true,
       becameOpen: false,
@@ -19,6 +20,7 @@ describe('decideGoalEntryAction', () => {
   it('does nothing on completion if the task carries no numeric contribution', () => {
     const decision = decideGoalEntryAction({
       goalId: 'goal-1',
+      goalArchived: false,
       goalContribution: undefined,
       becameDone: true,
       becameOpen: false,
@@ -33,6 +35,7 @@ describe('decideGoalEntryAction', () => {
     const entryAt = new Date('2026-07-01T00:00:00Z');
     const decision = decideGoalEntryAction({
       goalId: 'goal-1',
+      goalArchived: false,
       goalContribution: 5,
       becameDone: true,
       becameOpen: false,
@@ -46,6 +49,7 @@ describe('decideGoalEntryAction', () => {
   it('deletes the entry referencing the prior record when a done task reopens', () => {
     const decision = decideGoalEntryAction({
       goalId: 'goal-1',
+      goalArchived: false,
       goalContribution: 5,
       becameDone: false,
       becameOpen: true,
@@ -59,6 +63,7 @@ describe('decideGoalEntryAction', () => {
   it('does nothing on reopen if there was no prior completed record', () => {
     const decision = decideGoalEntryAction({
       goalId: 'goal-1',
+      goalArchived: false,
       goalContribution: 5,
       becameDone: false,
       becameOpen: true,
@@ -69,9 +74,38 @@ describe('decideGoalEntryAction', () => {
     expect(decision).toEqual({ action: 'none' });
   });
 
+  it('logs nothing when the linked goal has been archived (removed) — but a reopen still cleans up', () => {
+    const completed = decideGoalEntryAction({
+      goalId: 'goal-1',
+      goalArchived: true,
+      goalContribution: 5,
+      becameDone: true,
+      becameOpen: false,
+      newRecordId: 'record-1',
+      priorCompletedRecordId: null,
+      entryAt: new Date('2026-07-01T00:00:00Z'),
+    });
+    expect(completed).toEqual({ action: 'none' });
+
+    // A stale entry from before the archive must still be deleted on reopen
+    // — archive state gates new inserts only, never cleanup.
+    const reopened = decideGoalEntryAction({
+      goalId: 'goal-1',
+      goalArchived: true,
+      goalContribution: 5,
+      becameDone: false,
+      becameOpen: true,
+      newRecordId: 'record-2',
+      priorCompletedRecordId: 'record-1',
+      entryAt: new Date('2026-07-02T00:00:00Z'),
+    });
+    expect(reopened).toEqual({ action: 'delete', recordId: 'record-1' });
+  });
+
   it('does nothing for an incremental progress update that neither completes nor reopens', () => {
     const decision = decideGoalEntryAction({
       goalId: 'goal-1',
+      goalArchived: false,
       goalContribution: 5,
       becameDone: false,
       becameOpen: false,
@@ -97,6 +131,7 @@ describe('decideGoalEntryAction', () => {
     // 1. complete_task -> record-1
     const d1 = decideGoalEntryAction({
       goalId: 'goal-1',
+      goalArchived: false,
       goalContribution: 5,
       becameDone: true,
       becameOpen: false,
@@ -111,6 +146,7 @@ describe('decideGoalEntryAction', () => {
     // 2. un-complete -> record-2, prior completedRecordId was record-1
     const d2 = decideGoalEntryAction({
       goalId: 'goal-1',
+      goalArchived: false,
       goalContribution: 5,
       becameDone: false,
       becameOpen: true,
@@ -124,6 +160,7 @@ describe('decideGoalEntryAction', () => {
     // 3. re-complete -> record-3
     const d3 = decideGoalEntryAction({
       goalId: 'goal-1',
+      goalArchived: false,
       goalContribution: 5,
       becameDone: true,
       becameOpen: false,

@@ -79,7 +79,11 @@ async function verifyTitleHint(
 }
 
 export type TaskActionResult =
-  | { ok: true; toolName: AiToolName; task: TaskRow; summary: string; recordKind: string }
+  // `modelSummary`, when set, is what goes back to the model as the tool
+  // result instead of `summary` — for facts the model needs but the user
+  // must never see persisted (a created task's turn-scoped ref). `summary`
+  // remains the persisted message content / SSE payload.
+  | { ok: true; toolName: AiToolName; task: TaskRow; summary: string; modelSummary?: string; recordKind: string }
   | { ok: true; toolName: AiToolName; tasks: TaskRow[]; summary: string; recordKind: string }
   // A goal action that actually mutated a saved row — edit_goal,
   // log_goal_entry, or an undo_last_action that reverted a goal_% record.
@@ -103,6 +107,17 @@ function describeEntryData(currency: string, data: GoalEntryData): string {
 async function goalHeadline(goal: GoalRow, timezone: string | null): Promise<string> {
   const summaries = await buildGoalCardSummaries([goal], timezone);
   return summaries.get(goal.id)?.headline ?? '';
+}
+
+// Headline plus the recomputed pace ("$14 / $120 — needs $2.41/day to hit
+// Aug 25") — the post-edit fact stated outright so the model never
+// recomputes pace itself (observed live narrating "$2.65/day" from its own
+// arithmetic when the real recomputed pace was $2.41/day; lesson 6).
+async function goalHeadlineWithPace(goal: GoalRow, timezone: string | null): Promise<string> {
+  const summaries = await buildGoalCardSummaries([goal], timezone);
+  const summary = summaries.get(goal.id);
+  if (!summary) return '';
+  return summary.paceLine ? `${summary.headline} — ${summary.paceLine}` : summary.headline;
 }
 
 async function summarizeGoalUndo(
@@ -232,6 +247,53 @@ function resolveTaskRef(
 // title, and target live on the template, not a day's instance.
 function editTarget(ref: ResolvedTaskRef): string {
   return ref.templateId ?? ref.taskId;
+}
+
+/**
+ * A task created mid-turn gets a ref immediately, in the same TurnRefs map
+ * the turn started with — without this, a create→act chain in one turn
+ * always fails: the refs map is built at turn start, so the model's natural
+ * follow-up ("created the counter, now log your current 165") has nothing
+ * to target and guesses the next T-number, which is rejected. Observed
+ * live doing exactly that (guessed "T8", failed, then spiraled into raw
+ * markup leaks and a "glitched on my end" ending). The assigned ref is
+ * appended to the tool-result summary so the model knows it — that summary
+ * is model-facing, and the prompt already forbids repeating refs to the
+ * user.
+ */
+function registerCreatedTaskRef(refs: TurnRefs, task: TaskRow): string {
+  let maxIndex = 0;
+  for (const key of refs.keys()) {
+    const match = /^T(\d+)$/.exec(key);
+    if (match) maxIndex = Math.max(maxIndex, Number(match[1]));
+  }
+  const alias = `T${maxIndex + 1}`;
+
+  if (task.recurrence) {
+    // createTask returned the template itself (recurring, no instance due
+    // today) — same ref shape task-context.ts gives an off-day template.
+    refs.set(alias, { kind: 'task', taskId: task.id, isRecurringSeries: true, templateId: task.id });
+  } else if (task.templateId) {
+    // createTask returned today's freshly-materialized instance.
+    refs.set(alias, {
+      kind: 'task',
+      taskId: task.id,
+      isRecurringSeries: true,
+      instanceId: task.id,
+      templateId: task.templateId,
+    });
+  } else {
+    refs.set(alias, { kind: 'task', taskId: task.id, isRecurringSeries: false });
+  }
+
+  const items = (task.config as { items?: { id: string }[] }).items;
+  if (task.type === 'checklist' && items) {
+    items.forEach((item, idx) => {
+      refs.set(`${alias}.${idx + 1}`, { kind: 'checklist_item', taskId: task.id, itemId: item.id });
+    });
+  }
+
+  return alias;
 }
 
 // complete_task / progress_task / postpone_task are always about a concrete
@@ -388,11 +450,14 @@ async function executeAiToolCallInner(
         }
 
         const { task } = await createTask(userId, input, timezone, source);
+        const alias = registerCreatedTaskRef(refs, task);
+        const summary = summarizeCreate(task, timezone);
         return {
           ok: true,
           toolName,
           task,
-          summary: summarizeCreate(task, timezone),
+          summary,
+          modelSummary: `${summary} Its ref is ${alias} — use that (never a guessed ref) if you need to act on it later this same turn, e.g. to log initial progress.`,
           recordKind: 'task_created',
         };
       }
@@ -644,11 +709,17 @@ async function executeAiToolCallInner(
         };
         const { goal } = await editGoal(userId, goalId, patch, source);
 
+        // Target/deadline edits change the pace — state the recomputed one
+        // so the model quotes it instead of doing its own division.
+        const paceSuffix =
+          validated.data.targetValue !== undefined || validated.data.deadline !== undefined
+            ? await goalHeadlineWithPace(goal, timezone)
+            : '';
         return {
           ok: true,
           toolName,
           goal,
-          summary: describeGoalEdit(before, goal, validated.data),
+          summary: `${describeGoalEdit(before, goal, validated.data)}${paceSuffix ? ` Now: ${paceSuffix}.` : ''}`,
           recordKind: 'goal_edited',
         };
       }

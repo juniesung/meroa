@@ -278,6 +278,66 @@ matched_regex: false`) and appended the corrective segment. Mitigations, cheapes
   below, past the §2.6 mitigations as first shipped — root-caused and fixed (see §4
   results, items 1 and 6 follow-up commit). Not a new bug class, a gap in the first fix.
 
+## As-a-user bug hunt (2026-07-12, after the user's live bench-goal report)
+
+The user hit "asked to log a bench goal to 225, it says it logged it but it didn't" on
+the demo account. Root-caused from the server log + DB, then a full as-a-user pass over
+everything this redesign touched (fresh dev-token account, live deepseek-v4-flash, real
+DB state checked between steps). Found and fixed, each verified live after the fix:
+
+1. **Mid-turn refs (the user's bug).** The model handled "add a goal to hit 225 on
+   bench" *correctly* (explained savings-only, offered a counter task, created it) —
+   then tried to log the user's current 165 with ref "T8", which failed: the TurnRefs
+   map is built at turn start, so a task created mid-turn had no ref, every
+   create→act chain failed, and the model spiraled into raw-markup leaks ending in
+   "glitched on my end." Fix: register a ref for created tasks (and checklist items)
+   immediately, told to the model via a model-only `modelSummary` on the tool result
+   (never persisted user-facing). Re-ran the exact scenario: counter created AND 165
+   logged in one turn; "make a packing list and check off passport" also works now.
+2. **Multi-starter idempotency collision.** N starter tasks on one Create tap created
+   only the first — createTaskInTx's idempotency keyed on (sourceMessageId,
+   'task_created'), identical for every starter. Fix: per-starter toolCallId.
+3. **Chained undo was broken (pre-existing, beyond this redesign).** "undo" twice in a
+   row always failed: the task_undo/goal_undo bookkeeping records themselves matched
+   the undo-candidate query's task_%/goal_% prefixes. Fix: exclude them; consecutive
+   undos now walk back through real actions (redo stays unsupported).
+4. **Nondeterministic undo after a Create tap.** Postgres freezes now() at transaction
+   start, so the goal_created record and its starters' task_created records tied on
+   createdAt and "most recent record" was luck. Fix: one user action = one record —
+   the Create tap writes only goal_created (payload.starterTaskIds); undoing it
+   cascades the starter tasks (and their materialized instances) away with the goal.
+5. **Completions logged entries into archived goals.** Complete a still-linked task
+   after removing its goal → entry written into the archived container, and the
+   recent-changes feed narrated a contribution that renders nowhere. Fix: archived
+   guard in the (unit-tested) entry decision + archived filter in the feed's goal
+   lookup.
+6. **Double-log risk.** The model had no way to know completing a linked task IS the
+   logging — task-context now labels linked tasks ("auto-logs $4 to goal … when
+   completed"), plus an explicit system-prompt rule. Verified live: "just did my $4
+   save" → complete_task only, one entry.
+7. **Classifier false-positive on day recaps.** "how did today go?" recaps ("all
+   checked off", "hit your target") got the "that didn't go through" correction
+   appended — the claim-check classifier read user-activity summaries as assistant
+   action claims. Fix: recap NO-example in the classifier prompt; verified clean.
+8. **Model recomputed pace itself after edits — wrongly.** After a deadline edit it
+   narrated "$2.65/day" from its own division (real: $2.41). Fix: target/deadline
+   edit summaries now append the server-recomputed headline + pace (lesson 6/16);
+   verified quoting it verbatim.
+
+Also verified clean in the same pass (no bugs found): preview revise-then-Create,
+Create double-tap idempotency, multi-goal disambiguation by rough name ("the coat
+fund"), withdrawals (negative amounts), un-complete via chat reversing the auto-entry,
+recurring materialization carrying goalId+contribution (incl. multi-day backfill),
+perfect-day flip + streak on /goals/consistency, and ad-hoc + auto entries coexisting.
+
+Known model-quality observations, not code bugs (ledger for the act/narrate-split
+decision): zero-call preview claims still occur at a high raw rate on flash (now
+reliably caught + truthfully corrected); one transient recap misstatement ("skipped
+today" for a done task) contradicting clear context; one max-tokens empty reply
+("that got cut off"). An aspirational counter ("Bench press 225") is born due-today
+and goes overdue tomorrow — that's the deferred goal type 3 (quantified, indirect)
+use case, pre-existing Phase 3 behavior, not addressed here.
+
 ## §4 results (2026-07-12, deepseek-v4-flash, isolated dev-token account +15555559911)
 
 Ran end-to-end against the live server (not a simulation) — real chat turns through the

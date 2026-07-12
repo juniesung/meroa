@@ -38,7 +38,9 @@ YES — the wording asserts or strongly implies a change (or a preview being sho
 
 NO — the wording only references a task's or goal's state from *before* this reply (created in an earlier turn, already existing), explains a limitation, or offers a conditional choice about the future — without asserting anything changed or was shown just now. Examples: "That's already on your list — T1, tomorrow at 2pm" (referring to something from earlier, not this turn), "No reminder attached" (stating an absence, not a change), "I can remove it if you want" (conditional offer), "I didn't set a reminder and can't add one retroactively" (explicitly says nothing changed), "Which day did you mean?", "Want me to set up a preview for that?" (asking, not claiming one already exists).
 
-The test that matters: does this specific sentence claim something happened or appeared THIS turn, or is it just talking about a task/goal (existing, absent, or hypothetical) without claiming a fresh change? Only YES for the former.`;
+Also NO — a status recap of what the USER already did in the app: summarizing which tasks are done or open, running totals, streaks, or progress ("You crushed it today — packing list all checked off, bench target hit, savings at $14/$120") describes existing state the user created through their own taps, not an action the ASSISTANT performed this turn. Past-tense completion language inside a recap of the user's day is NO, even when enthusiastic.
+
+The test that matters: does this specific sentence claim the ASSISTANT changed or showed something THIS turn, or is it just describing tasks/goals (existing, absent, hypothetical, or the user's own activity) without claiming a fresh change of its own? Only YES for the former.`;
 
 // Lazy singleton — most requests never hit this (see the toolCallLog.length
 // guard in providers/shared.ts), so there's no reason to construct a client

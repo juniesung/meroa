@@ -153,23 +153,25 @@ export async function createGoal(
       .returning();
     if (!goal) throw new Error('goal_insert_failed');
 
-    await tx.insert(records).values({
-      userId,
-      kind: 'goal_created',
-      payload: { goalId: goal.id, name: goal.name },
-      source: opts.source,
-      sourceMessageId: opts.sourceMessageId ?? null,
-      toolCallId: opts.toolCallId ?? null,
-    });
-
     const createdTasks: TaskRow[] = [];
-    for (const starter of input.starterTasks ?? []) {
+    for (const [index, starter] of (input.starterTasks ?? []).entries()) {
       const { task: created } = await createTaskInTx(
         tx,
         userId,
         { type: 'completion', title: starter.title, recurrence: starter.recurrence, reminder: false },
         timezone,
-        opts,
+        // Each starter gets its own toolCallId — createTaskInTx's idempotency
+        // otherwise keys on (sourceMessageId, 'task_created') alone, and with
+        // every starter sharing this create's sourceMessageId, starter #2
+        // would find starter #1's record and silently return it instead of
+        // creating anything (caught by the as-a-user test pass, not live).
+        { ...opts, toolCallId: `starter:${index}` },
+        // The Create tap is one user action — the goal_created record below
+        // (payload.starterTaskIds) is its single record; per-starter
+        // task_created records would tie with it on createdAt (same
+        // transaction, same frozen now()) and make undo's "most recent
+        // record" pick nondeterministic.
+        { skipRecord: true },
       );
       // Recurring: createTaskInTx already materialized and returned *today's*
       // instance, not the template — the template needs the stamp too (every
@@ -205,6 +207,25 @@ export async function createGoal(
         createdTasks.push(updatedInstance);
       }
     }
+
+    // The goal_created record is inserted *after* the starter tasks' own
+    // task_created records, deliberately — undo_last_action reverts the most
+    // recent record, and a user saying "undo that" right after tapping
+    // Create means the whole thing, not just the last starter task. Its
+    // payload carries the starter template ids so undoGoalRecord
+    // (lib/tasks/executor.ts) can cascade them away with the goal.
+    await tx.insert(records).values({
+      userId,
+      kind: 'goal_created',
+      payload: {
+        goalId: goal.id,
+        name: goal.name,
+        starterTaskIds: createdTasks.map((t) => t.templateId ?? t.id),
+      },
+      source: opts.source,
+      sourceMessageId: opts.sourceMessageId ?? null,
+      toolCallId: opts.toolCallId ?? null,
+    });
 
     return { goal, tasks: createdTasks };
   });

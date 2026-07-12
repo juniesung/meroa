@@ -10,6 +10,12 @@ export type GoalEntryDecision =
 
 export function decideGoalEntryAction(params: {
   goalId: string | null;
+  // An archived (removed) goal accepts no new entries anywhere —
+  // logGoalEntry already 404s on archived — so a still-linked task
+  // completing after its goal was removed logs nothing rather than writing
+  // into an archived container. The delete side still runs regardless of
+  // archive state: a stale auto-entry must always be cleaned up on reopen.
+  goalArchived: boolean;
   goalContribution: unknown;
   becameDone: boolean;
   becameOpen: boolean;
@@ -21,7 +27,7 @@ export function decideGoalEntryAction(params: {
 }): GoalEntryDecision {
   if (!params.goalId) return { action: 'none' };
 
-  if (params.becameDone && typeof params.goalContribution === 'number') {
+  if (params.becameDone && !params.goalArchived && typeof params.goalContribution === 'number') {
     return {
       action: 'insert',
       goalId: params.goalId,
