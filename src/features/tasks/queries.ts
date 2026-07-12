@@ -89,6 +89,22 @@ export function useDeleteTask() {
   });
 }
 
+export function useBulkDeleteTasks() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (taskIds: string[]) => api.bulkRemoveTasks(taskIds),
+    onSuccess: (data) => {
+      const removedIds = new Set(data.tasks.map((t) => t.id));
+      queryClient.setQueryData<{ tasks: ApiTask[] }>(tasksQueryKey, (prev) => ({
+        tasks: (prev?.tasks ?? []).filter((t) => !removedIds.has(t.id)),
+      }));
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: tasksQueryKey });
+    },
+  });
+}
+
 export function useUndoLastTaskAction() {
   const queryClient = useQueryClient();
   return useMutation({

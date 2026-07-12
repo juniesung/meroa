@@ -38,6 +38,7 @@ function RootNavigator() {
     <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: theme.bg } }}>
       <Stack.Protected guard={status === 'signedIn'}>
         <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="tool/[id]" options={{ presentation: 'card' }} />
       </Stack.Protected>
       <Stack.Protected guard={status === 'signedOut'}>
         <Stack.Screen name="(auth)" />

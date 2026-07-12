@@ -1,7 +1,8 @@
-import { and, desc, eq, inArray, isNull, like } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, like, or } from 'drizzle-orm';
 
 import { db } from '../../db/client.ts';
-import { records, tasks } from '../../db/schema.ts';
+import { records, tasks, tools } from '../../db/schema.ts';
+import type { ToolRow } from '../tools/executor.ts';
 import { materializeRecurringInstances, rollPastToNextDay, ymdInTz, type Tx } from './recurrence.ts';
 import {
   reduceTaskProgress,
@@ -23,13 +24,25 @@ import {
 } from './schema.ts';
 
 export type TaskRow = typeof tasks.$inferSelect;
+// Shared by the tasks and tools executors (lib/tools/executor.ts) — a tool
+// action sourced from the tool's own UI (a quick-entry sheet, an archive
+// tap) uses 'tool_ui', the same way a Tasks-tab tap uses 'tasks_ui'.
 export type ActionSource = {
-  source: 'chat' | 'tasks_ui';
+  source: 'chat' | 'tasks_ui' | 'tool_ui';
   sourceMessageId?: string;
   // The Anthropic tool_use block id for this specific call — see
   // db/schema.ts's records.toolCallId for why this exists.
   toolCallId?: string;
 };
+
+// `records.payload` round-trips through jsonb — any `Date` stashed in a
+// snapshot comes back as an ISO string, not a Date instance. A bare `as
+// Date` cast doesn't convert it, and Drizzle's timestamp column mapper
+// throws calling `.toISOString()` on a string at write time.
+export function reviveDate(value: unknown): Date | null {
+  if (value == null) return null;
+  return value instanceof Date ? value : new Date(value as string);
+}
 
 export class TaskActionError extends Error {
   code: 'not_found' | 'invalid_input' | 'nothing_to_undo';
@@ -571,35 +584,230 @@ export async function removeTask(
   });
 }
 
-// --- undo ------------------------------------------------------------
+// --- bulk remove -------------------------------------------------------
 
-export async function undoLastAction(userId: string): Promise<{ task: TaskRow; action: string }> {
+// Batched form of removeTask, used by the AI's remove_tasks confirm flow
+// (item 5, docs/ai-reliability-hardening.md) — a single transaction, one
+// records row for the whole batch (kind stays 'task_removed', distinguished
+// by `payload.bulk`) so one undo_last_action restores everything at once
+// instead of one card/tap/record per task. Scope (occurrence vs. series) is
+// already resolved to concrete ids by the caller (lib/ai/actions.ts) — this
+// just removes each id and cascades exactly like removeTask does per item.
+export async function removeTasks(
+  userId: string,
+  taskIds: string[],
+  opts: ActionSource,
+): Promise<{ tasks: TaskRow[] }> {
+  return db.transaction(async (tx) => {
+    const idempotent = await findIdempotentRecord(tx, userId, opts, 'task_removed');
+    if (idempotent) {
+      const payload = idempotent.payload as { bulk?: boolean; tasks?: { taskId: string }[] };
+      if (payload.bulk && payload.tasks) {
+        const rows = await tx
+          .select()
+          .from(tasks)
+          .where(inArray(tasks.id, payload.tasks.map((t) => t.taskId)));
+        return { tasks: rows };
+      }
+    }
+
+    const removed: TaskRow[] = [];
+    const recordTasks: { taskId: string; title: string; cascadedInstanceIds: string[] }[] = [];
+
+    for (const taskId of taskIds) {
+      const task = await loadTaskForUpdate(tx, userId, taskId);
+      const [updated] = await tx
+        .update(tasks)
+        .set({ deletedAt: new Date() })
+        .where(eq(tasks.id, task.id))
+        .returning();
+      if (!updated) throw new Error('task_update_failed');
+      removed.push(updated);
+
+      let cascadedInstanceIds: string[] = [];
+      if (task.recurrence) {
+        const cascaded = await tx
+          .update(tasks)
+          .set({ deletedAt: new Date() })
+          .where(
+            and(eq(tasks.templateId, task.id), eq(tasks.status, 'open'), isNull(tasks.deletedAt)),
+          )
+          .returning({ id: tasks.id });
+        cascadedInstanceIds = cascaded.map((r) => r.id);
+      }
+      recordTasks.push({ taskId: task.id, title: task.title, cascadedInstanceIds });
+    }
+
+    await tx.insert(records).values({
+      userId,
+      kind: 'task_removed',
+      payload: { bulk: true, tasks: recordTasks },
+      source: opts.source,
+      sourceMessageId: opts.sourceMessageId ?? null,
+      toolCallId: opts.toolCallId ?? null,
+    });
+
+    return { tasks: removed };
+  });
+}
+
+// --- undo ------------------------------------------------------------
+//
+// Undo covers both tasks and tools under one entry point (undo_last_action
+// is a single AI tool and a single "undo that" REST route) — the most
+// recent non-reverted records row across either kind gets reverted,
+// whichever domain it belongs to. Tool records are handled by
+// undoToolRecord below; task records keep their existing, unchanged logic.
+
+export type UndoResult = {
+  action: string;
+  task?: TaskRow;
+  tasks?: TaskRow[];
+  tool?: ToolRow;
+  // Only set for a 'tool_entry' undo — the values that were logged, so the
+  // caller can narrate what got removed (docs/ai-reliability-hardening.md
+  // lesson 16: a bare "reverted" summary forces the model to guess).
+  toolEntryData?: Record<string, unknown>;
+};
+
+export async function undoLastAction(userId: string, opts: ActionSource): Promise<UndoResult> {
   return db.transaction(async (tx) => {
     const [record] = await tx
       .select()
       .from(records)
       .where(
-        and(eq(records.userId, userId), isNull(records.revertedAt), like(records.kind, 'task_%')),
+        and(
+          eq(records.userId, userId),
+          isNull(records.revertedAt),
+          or(like(records.kind, 'task_%'), like(records.kind, 'tool_%')),
+        ),
       )
       .orderBy(desc(records.createdAt))
       .limit(1);
     if (!record) throw new TaskActionError('nothing_to_undo', 'nothing to undo');
 
-    const payload = record.payload as {
-      taskId: string;
-      prior?: unknown;
-      reason?: string | null;
-      cascadedInstanceIds?: string[];
-    };
-    const [task] = await tx
-      .select()
-      .from(tasks)
-      .where(eq(tasks.id, payload.taskId))
-      .for('update')
-      .limit(1);
-    if (!task) throw new TaskActionError('not_found', 'the task for that action no longer exists');
+    if (record.kind.startsWith('tool_')) return undoToolRecord(tx, userId, record, opts);
+    return undoTaskRecord(tx, userId, record, opts);
+  });
+}
+
+async function undoToolRecord(
+  tx: Tx,
+  userId: string,
+  record: typeof records.$inferSelect,
+  opts: ActionSource,
+): Promise<UndoResult> {
+  const payload = record.payload as {
+    toolId?: string;
+    name?: string;
+    prior?: { name: string; icon: string | null; definition: unknown; version: number };
+    data?: Record<string, unknown>;
+  };
+  const toolId = payload.toolId;
+  if (!toolId) throw new TaskActionError('not_found', 'the tool for that action no longer exists');
+
+  // Not filtered to isNull(archivedAt) — undoing a tool_archived action must
+  // find the tool while it's still archived.
+  const [tool] = await tx
+    .select()
+    .from(tools)
+    .where(and(eq(tools.id, toolId), eq(tools.userId, userId)))
+    .for('update')
+    .limit(1);
+  if (!tool) throw new TaskActionError('not_found', 'the tool for that action no longer exists');
+
+  let updated: ToolRow;
+  switch (record.kind) {
+    case 'tool_created': {
+      const [t] = await tx.update(tools).set({ archivedAt: new Date() }).where(eq(tools.id, tool.id)).returning();
+      if (!t) throw new Error('tool_update_failed');
+      updated = t;
+      break;
+    }
+    case 'tool_edited': {
+      const prior = payload.prior;
+      if (!prior) throw new Error('tool_edited record missing prior snapshot');
+      const [t] = await tx
+        .update(tools)
+        .set({ name: prior.name, icon: prior.icon, definition: prior.definition, version: prior.version })
+        .where(eq(tools.id, tool.id))
+        .returning();
+      if (!t) throw new Error('tool_update_failed');
+      updated = t;
+      break;
+    }
+    case 'tool_archived': {
+      const [t] = await tx.update(tools).set({ archivedAt: null }).where(eq(tools.id, tool.id)).returning();
+      if (!t) throw new Error('tool_update_failed');
+      updated = t;
+      break;
+    }
+    case 'tool_entry': {
+      // The generic revertedAt flip below on `record` IS the undo for an
+      // entry — lib/tools/summary.ts's entry queries already exclude
+      // reverted records. Nothing else to mutate on the tool row itself.
+      updated = tool;
+      break;
+    }
+    default:
+      throw new TaskActionError('nothing_to_undo', `cannot undo record kind ${record.kind}`);
+  }
+
+  await tx.update(records).set({ revertedAt: new Date() }).where(eq(records.id, record.id));
+
+  // Same reasoning as undoTaskRecord below — undoing is itself an
+  // out-of-band mutation the next chat turn needs to know about.
+  await tx.insert(records).values({
+    userId,
+    kind: 'tool_undo',
+    payload: { undidKind: record.kind, toolId: updated.id, name: updated.name },
+    source: opts.source,
+    sourceMessageId: opts.sourceMessageId ?? null,
+    toolCallId: opts.toolCallId ?? null,
+  });
+
+  return {
+    action: record.kind,
+    tool: updated,
+    toolEntryData: record.kind === 'tool_entry' ? payload.data : undefined,
+  };
+}
+
+async function undoTaskRecord(
+  tx: Tx,
+  userId: string,
+  record: typeof records.$inferSelect,
+  opts: ActionSource,
+): Promise<UndoResult> {
+  const payload = record.payload as {
+    taskId?: string;
+    prior?: unknown;
+    reason?: string | null;
+    cascadedInstanceIds?: string[];
+    bulk?: boolean;
+    tasks?: { taskId: string; title: string; cascadedInstanceIds: string[] }[];
+  };
+  // A bulk removal's record has no top-level taskId — its "primary" task
+  // (the one this function's single-task return value reflects) is just
+  // the first of the batch; every id in the batch still gets restored
+  // below, regardless of which one is returned.
+  const primaryTaskId =
+    payload.bulk && payload.tasks?.length ? payload.tasks[0]!.taskId : payload.taskId;
+  if (!primaryTaskId) throw new TaskActionError('not_found', 'the task for that action no longer exists');
+
+  const [task] = await tx
+    .select()
+    .from(tasks)
+    .where(eq(tasks.id, primaryTaskId))
+    .for('update')
+    .limit(1);
+  if (!task) throw new TaskActionError('not_found', 'the task for that action no longer exists');
 
     let updated: TaskRow;
+    // Only set for a bulk removal's undo — every task actually restored,
+    // not just the "primary" one `updated` reflects, so the caller can
+    // narrate the whole batch instead of implying only one came back.
+    let restoredBulk: TaskRow[] | undefined;
     switch (record.kind) {
       case 'task_created': {
         const [t] = await tx
@@ -644,7 +852,7 @@ export async function undoLastAction(userId: string): Promise<{ task: TaskRow; a
         const updates: Partial<typeof tasks.$inferInsert> = {};
         if ('title' in prior) updates.title = prior.title as string;
         if ('icon' in prior) updates.icon = prior.icon as string | null;
-        if ('dueAt' in prior) updates.dueAt = prior.dueAt as Date | null;
+        if ('dueAt' in prior) updates.dueAt = reviveDate(prior.dueAt);
         if ('recurrence' in prior) updates.recurrence = prior.recurrence as Recurrence | null;
         if ('config' in prior) updates.config = prior.config as Record<string, unknown>;
         const [t] = await tx.update(tasks).set(updates).where(eq(tasks.id, task.id)).returning();
@@ -661,7 +869,7 @@ export async function undoLastAction(userId: string): Promise<{ task: TaskRow; a
         const [t] = await tx
           .update(tasks)
           .set({
-            dueAt: prior.dueAt,
+            dueAt: reviveDate(prior.dueAt),
             status: prior.status,
             ...(prior.config ? { config: prior.config } : {}),
           })
@@ -672,6 +880,17 @@ export async function undoLastAction(userId: string): Promise<{ task: TaskRow; a
         break;
       }
       case 'task_removed': {
+        if (payload.bulk && payload.tasks?.length) {
+          const ids = payload.tasks.flatMap((t) => [t.taskId, ...t.cascadedInstanceIds]);
+          await tx.update(tasks).set({ deletedAt: null }).where(inArray(tasks.id, ids));
+          const primaryIds = payload.tasks.map((t) => t.taskId);
+          const restored = await tx.select().from(tasks).where(inArray(tasks.id, primaryIds));
+          const primary = restored.find((t) => t.id === primaryTaskId) ?? restored[0];
+          if (!primary) throw new Error('task_update_failed');
+          updated = primary;
+          restoredBulk = restored;
+          break;
+        }
         const [t] = await tx
           .update(tasks)
           .set({ deletedAt: null })
@@ -693,6 +912,28 @@ export async function undoLastAction(userId: string): Promise<{ task: TaskRow; a
 
     await tx.update(records).set({ revertedAt: new Date() }).where(eq(records.id, record.id));
 
-    return { task: updated, action: record.kind };
-  });
+    // Undoing an action is itself a real, out-of-band mutation the next
+    // chat turn needs to know about — same reasoning as every other action
+    // here, and the gap this closes was observed live: undoing a bulk
+    // removal via the Tasks-tab (or REST) button restored every task in the
+    // DB, but with no fresh record for it, buildRecentChangesFeed (item 4)
+    // had nothing to surface, and the model kept insisting a task was
+    // "already gone" — its stale belief from before the undo, never
+    // corrected. Marking the reverted record's revertedAt alone isn't
+    // enough; the feed only looks at fresh occurredAt timestamps.
+    await tx.insert(records).values({
+      userId,
+      kind: 'task_undo',
+      payload: {
+        undidKind: record.kind,
+        taskId: updated.id,
+        title: updated.title,
+        tasks: restoredBulk?.map((t) => ({ taskId: t.id, title: t.title })),
+      },
+      source: opts.source,
+      sourceMessageId: opts.sourceMessageId ?? null,
+      toolCallId: opts.toolCallId ?? null,
+    });
+
+  return { task: updated, action: record.kind, tasks: restoredBulk };
 }

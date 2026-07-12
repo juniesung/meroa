@@ -27,9 +27,16 @@ import { MeroaMark } from '@/components/MeroaMark';
 import { TaskCard } from '@/components/TaskCard';
 import { radii, theme } from '@/constants/theme';
 import { type ChatMessage, useMessages, useSendMessage } from '@/features/chat/queries';
-import { useCompleteTask, useDeleteTask, useProgressTask, useTasks } from '@/features/tasks/queries';
+import {
+  useBulkDeleteTasks,
+  useCompleteTask,
+  useDeleteTask,
+  useProgressTask,
+  useTasks,
+} from '@/features/tasks/queries';
+import { useCreateToolFromPreview, useTools } from '@/features/tools/queries';
 import { useTabBarHeight } from '@/hooks/use-tab-bar-inset';
-import type { ApiTask } from '@/lib/api/types';
+import type { ApiTask, ToolPreview } from '@/lib/api/types';
 import { toIconName } from '@/lib/icon';
 import { requestNotificationPermission } from '@/lib/notifications';
 
@@ -164,6 +171,162 @@ function TaskRemovalConfirmCard({ message }: { message: ChatMessage }) {
   );
 }
 
+// remove_tasks' bulk sibling — one card, one Confirm, for the whole batch
+// (POST /tasks/bulk-remove), instead of one remove_task card per task. Any
+// task already removed elsewhere by the time this renders is just dropped
+// from the "still here" set rather than blocking the rest.
+function TaskBulkRemovalConfirmCard({ message }: { message: ChatMessage }) {
+  const { data: tasks } = useTasks();
+  const bulkDeleteTasks = useBulkDeleteTasks();
+  const [dismissed, setDismissed] = useState(false);
+
+  const snapshot = (message.meta.tasks as ApiTask[] | undefined) ?? [];
+  const liveIds = new Set(tasks?.map((t) => t.id) ?? []);
+  const stillLive = snapshot.filter((t) => liveIds.has(t.id));
+  if (snapshot.length === 0) return null;
+
+  const allRemoved = stillLive.length === 0;
+  const statusText = allRemoved
+    ? 'Removed'
+    : dismissed
+      ? "Kept — didn't delete them"
+      : `Delete these ${snapshot.length} tasks?`;
+  const titleList = snapshot.map((t) => t.title).join(', ');
+
+  return (
+    <View style={styles.actionCard}>
+      <View style={styles.removalRow}>
+        <View style={styles.removalIconChip}>
+          <Icon name="trash" size={18} color={theme.dim} stroke={1.9} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.removalTitle} numberOfLines={2}>
+            {titleList}
+          </Text>
+          <Text style={styles.removalStatus}>{statusText}</Text>
+        </View>
+      </View>
+      {!allRemoved && !dismissed && (
+        <View style={styles.removalButtons}>
+          <Pressable onPress={() => setDismissed(true)} style={styles.removalCancelButton} hitSlop={4}>
+            <Text style={styles.removalCancelText}>Keep them</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => {
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
+              // Only ids still actually present — one already gone (removed
+              // elsewhere between this card rendering and the tap) would
+              // otherwise fail the whole batch inside the server's single
+              // transaction and silently leave everyone else undeleted too.
+              bulkDeleteTasks.mutate(stillLive.map((t) => t.id));
+            }}
+            style={styles.removalConfirmButton}
+            hitSlop={4}
+          >
+            <Icon name="trash" size={14} color="#fff" stroke={2.2} />
+            <Text style={styles.removalConfirmText}>Delete all</Text>
+          </Pressable>
+        </View>
+      )}
+    </View>
+  );
+}
+
+// create_tool never saves anything by itself — this card's Create tap is
+// the only confirmation (docs/phase-4-implementation-plan.md §1.3). "Not
+// now" is client-local only, matching TaskRemovalConfirmCard's "Keep it".
+function ToolPreviewCard({ message }: { message: ChatMessage }) {
+  const createToolFromPreview = useCreateToolFromPreview();
+  const [dismissed, setDismissed] = useState(false);
+
+  const preview = message.meta.preview as ToolPreview | undefined;
+  if (!preview) return null;
+
+  const definition = preview.definition;
+  const createdToolId =
+    createToolFromPreview.data?.tool.id ?? (message.meta.createdToolId as string | undefined);
+  const created = !!createdToolId;
+
+  const activeFields = definition.fields.filter((f) => !f.archived);
+  const fieldsLine = activeFields.map((f) => (f.unit ? `${f.label} (${f.unit})` : f.label)).join(' · ');
+  const targetLine =
+    definition.target?.kind === 'total'
+      ? `Goal: ${definition.target.value}${definition.target.unit ? ` ${definition.target.unit}` : ''}`
+      : definition.target?.kind === 'count_per_period'
+        ? `Goal: ${definition.target.value}x per ${definition.target.period}`
+        : null;
+
+  const statusText = created ? 'Created ✓' : dismissed ? 'Not saved' : 'Create this tracker?';
+
+  return (
+    <View style={styles.actionCard}>
+      <View style={styles.removalRow}>
+        <View style={styles.removalIconChip}>
+          <Icon name={toIconName(preview.icon)} size={18} color={theme.blue} stroke={1.9} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.removalTitle} numberOfLines={1}>
+            {preview.name}
+          </Text>
+          <Text style={styles.removalStatus}>{statusText}</Text>
+        </View>
+      </View>
+      <View style={styles.previewBody}>
+        <Text style={styles.previewFields}>{fieldsLine}</Text>
+        {targetLine ? <Text style={styles.previewFields}>{targetLine}</Text> : null}
+      </View>
+      {!created && !dismissed && (
+        <View style={styles.removalButtons}>
+          <Pressable onPress={() => setDismissed(true)} style={styles.removalCancelButton} hitSlop={4}>
+            <Text style={styles.removalCancelText}>Not now</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => {
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+              createToolFromPreview.mutate(message.id);
+            }}
+            style={styles.previewConfirmButton}
+            hitSlop={4}
+          >
+            <Icon name="check" size={14} color="#fff" stroke={2.2} />
+            <Text style={styles.removalConfirmText}>Create</Text>
+          </Pressable>
+        </View>
+      )}
+    </View>
+  );
+}
+
+// Resolves the live tool by id (falls back to the meta snapshot, same
+// live-view-of-the-record pattern as TaskActionCard) — the summary sentence
+// itself already states the concrete post-action fact (docs/ai-reliability-
+// hardening.md lesson 16), so it's shown directly rather than re-derived.
+function ToolActionCard({ message }: { message: ChatMessage }) {
+  const { data: tools } = useTools();
+  const toolId = message.meta.toolId as string | undefined;
+  const snapshot = message.meta.tool as { name: string; icon: string | null } | undefined;
+  const tool = tools?.find((t) => t.id === toolId) ?? snapshot;
+  if (!tool) return null;
+
+  return (
+    <View style={styles.actionCard}>
+      <View style={styles.removalRow}>
+        <View style={styles.removalIconChip}>
+          <Icon name={toIconName(tool.icon)} size={18} color={theme.blue} stroke={1.9} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.removalTitle} numberOfLines={1}>
+            {tool.name}
+          </Text>
+          <Text style={styles.removalStatus} numberOfLines={2}>
+            {message.content}
+          </Text>
+        </View>
+      </View>
+    </View>
+  );
+}
+
 function MessageRow({
   message,
   onRetry,
@@ -180,6 +343,15 @@ function MessageRow({
   }
   if (message.role === 'assistant' && message.meta?.kind === 'task_removal_pending') {
     return <TaskRemovalConfirmCard message={message} />;
+  }
+  if (message.role === 'assistant' && message.meta?.kind === 'task_bulk_removal_pending') {
+    return <TaskBulkRemovalConfirmCard message={message} />;
+  }
+  if (message.role === 'assistant' && message.meta?.kind === 'tool_preview') {
+    return <ToolPreviewCard message={message} />;
+  }
+  if (message.role === 'assistant' && message.meta?.kind === 'tool_action') {
+    return <ToolActionCard message={message} />;
   }
 
   return (
@@ -380,6 +552,18 @@ const styles = StyleSheet.create({
     backgroundColor: theme.danger,
   },
   removalConfirmText: { color: '#fff', fontSize: 14, fontWeight: '600' },
+  previewBody: { paddingHorizontal: 14, paddingBottom: 10, gap: 2 },
+  previewFields: { color: theme.dim, fontSize: 12, lineHeight: 17 },
+  previewConfirmButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    borderRadius: radii.controlTight,
+    backgroundColor: theme.blue,
+  },
   header: {
     flexDirection: 'row',
     alignItems: 'center',

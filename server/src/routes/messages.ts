@@ -7,7 +7,10 @@ import { z } from 'zod';
 import { db } from '../db/client.ts';
 import { messages, users } from '../db/schema.ts';
 import { streamChatReply, type ChatHistoryMessage } from '../lib/ai/chat.ts';
+import { buildRecentChangesFeed } from '../lib/ai/recent-changes.ts';
+import { buildTailBlock } from '../lib/ai/system-prompt.ts';
 import { buildTaskContext } from '../lib/ai/task-context.ts';
+import { buildToolContext } from '../lib/ai/tool-context.ts';
 import { getOrCreateAppConversation, getRecentMessages } from '../lib/conversations.ts';
 import { materializeRecurringInstances } from '../lib/tasks/recurrence.ts';
 import { computeAllowance, withUserChatLock } from '../lib/usage.ts';
@@ -55,7 +58,14 @@ function isChatRole(role: string): role is 'user' | 'assistant' {
 // still carries the conversational continuity.
 function historyContentFor(m: { content: string; meta: unknown }): string {
   const meta = m.meta as { kind?: string } | null;
-  if (meta?.kind === 'task_action' || meta?.kind === 'task_removal_pending') return '';
+  if (
+    meta?.kind === 'task_action' ||
+    meta?.kind === 'task_removal_pending' ||
+    meta?.kind === 'task_bulk_removal_pending' ||
+    meta?.kind === 'tool_action' ||
+    meta?.kind === 'tool_preview'
+  )
+    return '';
   return m.content;
 }
 
@@ -116,9 +126,33 @@ messageRoutes.post('/', zValidator('json', sendSchema), async (c) => {
     .map((m) => ({ role: m.role, content: historyContentFor(m) }));
 
   // The AI action layer needs a settled, up-to-date task list to reference
-  // real ids and see today's recurring instances.
+  // by ref and see today's recurring instances.
   await materializeRecurringInstances(userId, userContext.timezone, db);
   const taskContext = await buildTaskContext(userId, userContext.timezone);
+  // Appends into the same TurnRefs map task context just built — one ref
+  // namespace ("T*"/"L*") covers both tasks and tools for the turn.
+  const toolContext = await buildToolContext(userId, userContext.timezone, taskContext.refs);
+
+  // Out-of-band mutations (a Tasks-tab tap, a removal-card confirm) since
+  // the user's *previous* message are otherwise invisible to the model —
+  // its own history only shows the unresolved "pending" side of the story.
+  // The previous user message is whatever real user turn immediately
+  // precedes the one just inserted above.
+  const priorUserMessages = history.filter((m) => m.role === 'user');
+  const previousUserMessage = priorUserMessages[priorUserMessages.length - 2] ?? null;
+  const recentChangesText = await buildRecentChangesFeed(
+    userId,
+    previousUserMessage?.createdAt ?? null,
+  );
+
+  const tailText = buildTailBlock({
+    now: new Date(),
+    timezone: userContext.timezone,
+    counts: taskContext.counts,
+    taskListText: taskContext.text,
+    toolListText: toolContext.text,
+    recentChangesText,
+  });
 
   return streamSSE(c, async (stream) => {
     await stream.writeSSE({ event: 'user_message', data: JSON.stringify(userMessage) });
@@ -128,10 +162,11 @@ messageRoutes.post('/', zValidator('json', sendSchema), async (c) => {
     // (rare, but possible) would leave the client's typing indicator hanging
     // forever with no error and no retry path.
     try {
-      for await (const event of streamChatReply(chatHistory, userContext, taskContext, {
+      for await (const event of streamChatReply(chatHistory, userContext, tailText, {
         userId,
         timezone: userContext.timezone,
         sourceMessageId: userMessage.id,
+        refs: taskContext.refs,
       })) {
         if (event.type === 'delta') {
           await stream.writeSSE({ event: 'delta', data: JSON.stringify({ text: event.text }) });
@@ -166,6 +201,65 @@ messageRoutes.post('/', zValidator('json', sendSchema), async (c) => {
           await stream.writeSSE({
             event: 'action',
             data: JSON.stringify({ message: assistantMessage, task: event.task }),
+          });
+        } else if (event.type === 'action_preview') {
+          // create_tool never saves — this is a preview card only. Its
+          // meta.preview is exactly what POST /tools {previewMessageId}
+          // re-validates and saves once the user taps Create
+          // (docs/phase-4-implementation-plan.md §1.3).
+          const [assistantMessage] = await db
+            .insert(messages)
+            .values({
+              conversationId: conversation.id,
+              role: 'assistant',
+              content: event.summary,
+              meta: { kind: 'tool_preview', action: event.toolName, preview: event.preview },
+            })
+            .returning();
+          await stream.writeSSE({
+            event: 'action',
+            data: JSON.stringify({ message: assistantMessage, preview: event.preview }),
+          });
+        } else if (event.type === 'action_tool') {
+          const [assistantMessage] = await db
+            .insert(messages)
+            .values({
+              conversationId: conversation.id,
+              role: 'assistant',
+              content: event.summary,
+              meta: {
+                kind: 'tool_action',
+                action: event.toolName,
+                toolId: event.tool.id,
+                tool: event.tool,
+              },
+            })
+            .returning();
+          await stream.writeSSE({
+            event: 'action',
+            data: JSON.stringify({ message: assistantMessage, tool: event.tool }),
+          });
+        } else if (event.type === 'action_bulk') {
+          // remove_tasks — one card, one confirm, for the whole batch. The
+          // client's Confirm button calls POST /tasks/bulk-remove with
+          // every taskId listed here.
+          const [assistantMessage] = await db
+            .insert(messages)
+            .values({
+              conversationId: conversation.id,
+              role: 'assistant',
+              content: event.summary,
+              meta: {
+                kind: 'task_bulk_removal_pending',
+                action: event.toolName,
+                taskIds: event.tasks.map((t) => t.id),
+                tasks: event.tasks,
+              },
+            })
+            .returning();
+          await stream.writeSSE({
+            event: 'action',
+            data: JSON.stringify({ message: assistantMessage, tasks: event.tasks }),
           });
         } else if (event.type === 'stream_end') {
           await stream.writeSSE({ event: 'stream_end', data: JSON.stringify({}) });

@@ -5,6 +5,7 @@ import Animated, { Easing, useAnimatedStyle, useSharedValue, withTiming } from '
 import { LinearGradient } from 'expo-linear-gradient';
 
 import { radii, theme } from '@/constants/theme';
+import { useMe } from '@/features/profile/queries';
 import { useLiveNow } from '@/hooks/use-live-now';
 import type { ApiTask, ChecklistConfig, CounterConfig, DurationConfig } from '@/lib/api/types';
 import { toIconName } from '@/lib/icon';
@@ -16,22 +17,53 @@ function haptic() {
   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
 }
 
+// `undefined` here (not a real IANA name) is deliberate — every timeZone
+// option below passes it straight through to Intl, which treats `undefined`
+// as "use the runtime's own local zone." That's the only sane fallback for a
+// task whose account has no stored timezone yet (a brand-new account, or a
+// test account that never opened the app to trigger useTimezoneSync).
+function tzOrLocal(timezone?: string | null): string | undefined {
+  return timezone ?? undefined;
+}
+
+/** "YYYY-MM-DD" in `timezone` — comparable lexicographically like a real date. */
+function ymdInTz(date: Date, timezone?: string | null): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: tzOrLocal(timezone),
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(date);
+}
+
 /**
  * Overdue only once the *entire calendar day* containing `dueAt` has
  * elapsed — not the instant the due time itself passes. A 9am task stays
  * "due 9am" (and can still fire its on-time notification) through the rest
  * of that day; it only flips to overdue at midnight, same as a task with no
  * explicit time at all.
+ *
+ * `timezone` should be the account's own stored timezone (`me.user.timezone`
+ * from useMe()) — the same value the server uses for this exact
+ * computation (task-context.ts's isOverdue). Falling back to the device's
+ * local zone when omitted matches the old behavior, but the two can disagree
+ * (rare — useTimezoneSync keeps them synced — but real during travel or
+ * before that sync's first run), so callers that have the account's
+ * timezone handy should always pass it.
  */
-export function isOverdue(task: ApiTask): boolean {
+export function isOverdue(task: ApiTask, timezone?: string | null): boolean {
   if (task.status !== 'open' || !task.dueAt) return false;
-  const endOfDueDay = new Date(task.dueAt);
-  endOfDueDay.setHours(23, 59, 59, 999);
-  return Date.now() > endOfDueDay.getTime();
+  const dueYmd = ymdInTz(new Date(task.dueAt), timezone);
+  const todayYmd = ymdInTz(new Date(), timezone);
+  return dueYmd < todayYmd;
 }
 
-function formatTime(iso: string): string {
-  return new Date(iso).toLocaleString(undefined, { hour: 'numeric', minute: '2-digit' });
+function formatTime(iso: string, timezone?: string | null): string {
+  return new Date(iso).toLocaleString(undefined, {
+    timeZone: tzOrLocal(timezone),
+    hour: 'numeric',
+    minute: '2-digit',
+  });
 }
 
 /** False only for AI-created tasks where no clock time was ever given — the
@@ -42,20 +74,24 @@ function hasExplicitDueTime(task: ApiTask): boolean {
   return config.dueTimeExplicit !== false;
 }
 
-/** "tomorrow" / a short weekday+date when `iso` isn't today in local time, else null. */
-function dueDayLabel(iso: string): string | null {
-  const due = new Date(iso);
-  const now = new Date();
-  if (due.toDateString() === now.toDateString()) return null;
-  const tomorrow = new Date(now);
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  if (due.toDateString() === tomorrow.toDateString()) return 'tomorrow';
-  return due.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+/** "tomorrow" / a short weekday+date when `iso` isn't today in `timezone`, else null. */
+function dueDayLabel(iso: string, timezone?: string | null): string | null {
+  const dueYmd = ymdInTz(new Date(iso), timezone);
+  const todayYmd = ymdInTz(new Date(), timezone);
+  if (dueYmd === todayYmd) return null;
+  const tomorrowYmd = ymdInTz(new Date(Date.now() + 24 * 60 * 60 * 1000), timezone);
+  if (dueYmd === tomorrowYmd) return 'tomorrow';
+  return new Date(iso).toLocaleDateString(undefined, {
+    timeZone: tzOrLocal(timezone),
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+  });
 }
 
-function formatDueLabel(iso: string): string {
-  const dayLabel = dueDayLabel(iso);
-  return dayLabel ? `${formatTime(iso)} ${dayLabel}` : formatTime(iso);
+function formatDueLabel(iso: string, timezone?: string | null): string {
+  const dayLabel = dueDayLabel(iso, timezone);
+  return dayLabel ? `${formatTime(iso, timezone)} ${dayLabel}` : formatTime(iso, timezone);
 }
 
 /** "mm:ss" clock format (e.g. 25 minutes -> "25:00") — a running timer's seconds visibly count up between renders. */
@@ -104,16 +140,20 @@ function progressMeta(task: ApiTask, now: number): string | undefined {
   }
 }
 
-function metaText(task: ApiTask, now: number): { text: string; danger: boolean } | undefined {
+function metaText(
+  task: ApiTask,
+  now: number,
+  timezone?: string | null,
+): { text: string; danger: boolean } | undefined {
   const explicit = hasExplicitDueTime(task);
-  if (isOverdue(task)) {
+  if (isOverdue(task, timezone)) {
     return {
-      text: explicit && task.dueAt ? `Overdue · was due ${formatTime(task.dueAt)}` : 'Overdue',
+      text: explicit && task.dueAt ? `Overdue · was due ${formatTime(task.dueAt, timezone)}` : 'Overdue',
       danger: true,
     };
   }
   const progress = progressMeta(task, now);
-  const dueLabel = task.dueAt && explicit ? formatDueLabel(task.dueAt) : undefined;
+  const dueLabel = task.dueAt && explicit ? formatDueLabel(task.dueAt, timezone) : undefined;
   if (progress && dueLabel) return { text: `${progress} · ${dueLabel}`, danger: false };
   if (progress) return { text: progress, danger: false };
   if (dueLabel) return { text: dueLabel, danger: false };
@@ -185,7 +225,8 @@ export function TaskCard({
   // readout visibly counts up — the progress bar itself animates
   // continuously on the UI thread (see LiveDurationBar) independent of this.
   const now = useLiveNow(running);
-  const meta = metaText(task, now);
+  const { data: me } = useMe();
+  const meta = metaText(task, now, me?.user.timezone);
   const rim = useRimHighlight();
 
   // Server-side auto-complete only runs when a progress action actually

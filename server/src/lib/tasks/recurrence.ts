@@ -31,7 +31,11 @@ export function ymdInTz(date: Date, tz: string): string {
   }).format(date);
 }
 
-function addDaysToYmd(ymd: string, days: number): string {
+// Exported for reuse by lib/tools/summary.ts's chart/streak bucketing — the
+// same "no date library, just Intl + UTC-noon-anchored ymd strings"
+// approach applies to weekly/daily tool chart buckets as it does to task
+// recurrence, and duplicating this math risks the two drifting apart.
+export function addDaysToYmd(ymd: string, days: number): string {
   const [y, m, d] = ymd.split('-').map(Number) as [number, number, number];
   const dt = new Date(Date.UTC(y, m - 1, d));
   dt.setUTCDate(dt.getUTCDate() + days);
@@ -44,7 +48,7 @@ function daysBetweenYmd(a: string, b: string): number {
   return Math.round((Date.UTC(by, bm - 1, bd) - Date.UTC(ay, am - 1, ad)) / 86_400_000);
 }
 
-function weekdayOfYmd(ymd: string, tz: string): Weekday {
+export function weekdayOfYmd(ymd: string, tz: string): Weekday {
   const [y, m, d] = ymd.split('-').map(Number) as [number, number, number];
   const noonUtc = new Date(Date.UTC(y, m - 1, d, 12));
   const short = new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'short' })
@@ -286,4 +290,50 @@ export async function materializeRecurringInstances(
       await tx.insert(tasks).values(toInsert).onConflictDoNothing();
     }
   }
+}
+
+/**
+ * The next calendar date (in `tz`) on/after `fromYmd` on which `recurrence`
+ * is due, given the template's own anchor day. Used to annotate an off-day
+ * recurring template in the AI's context ("next: Jul 14") and to explain why
+ * complete/progress/postpone can't act on a template whose alias resolved
+ * with no due instance today. `n` is capped at 365 (recurrenceSchema), so
+ * this always terminates well inside the iteration bound.
+ */
+export function nextOccurrenceYmd(
+  recurrence: Recurrence,
+  template: { dueAt: Date | null; createdAt: Date },
+  fromYmd: string,
+  tz: string,
+): string {
+  const anchorYmd = template.dueAt ? ymdInTz(template.dueAt, tz) : ymdInTz(template.createdAt, tz);
+  let cursor = addDaysToYmd(fromYmd, 1);
+  for (let i = 0; i < 400; i++) {
+    if (isDueOn(recurrence, cursor, anchorYmd, tz)) return cursor;
+    cursor = addDaysToYmd(cursor, 1);
+  }
+  return cursor;
+}
+
+/** "daily at 10:00" / "weekly on mo,we" / "every 3 days" — short prose for a
+ * recurrence, shared by the AI's task-list rendering and its removal-pending
+ * summaries. */
+export function describeRecurrence(recurrence: Recurrence): string {
+  const time = recurrence.time ? ` at ${recurrence.time}` : '';
+  if (recurrence.freq === 'daily') return `daily${time}`;
+  if (recurrence.freq === 'weekly') return `weekly on ${recurrence.byWeekday.join(',')}${time}`;
+  return `every ${recurrence.n} days${time}`;
+}
+
+/**
+ * "Jul 14" from a plain "YYYY-MM-DD" — anchored at UTC noon so no local
+ * timezone offset can shift it onto the adjacent calendar day.
+ */
+export function formatYmdShort(ymd: string): string {
+  const [y, m, d] = ymd.split('-').map(Number) as [number, number, number];
+  return new Date(Date.UTC(y, m - 1, d, 12)).toLocaleDateString(undefined, {
+    timeZone: 'UTC',
+    month: 'short',
+    day: 'numeric',
+  });
 }

@@ -10,6 +10,7 @@ import { Ring } from '@/components/Ring';
 import { SwipeToDelete } from '@/components/SwipeToDelete';
 import { isOverdue, TaskCard, taskProgressFraction } from '@/components/TaskCard';
 import { theme } from '@/constants/theme';
+import { useMe } from '@/features/profile/queries';
 import { TaskFormSheet } from '@/features/tasks/TaskFormSheet';
 import { useCompleteTask, useDeleteTask, useProgressTask, useTasks } from '@/features/tasks/queries';
 import { useLiveNow } from '@/hooks/use-live-now';
@@ -23,6 +24,8 @@ function haptic() {
 
 export default function TasksScreen() {
   const { data: tasks = [], isLoading } = useTasks();
+  const { data: me } = useMe();
+  const timezone = me?.user.timezone;
   const completeTask = useCompleteTask();
   const progressTask = useProgressTask();
   const deleteTask = useDeleteTask();
@@ -39,8 +42,8 @@ export default function TasksScreen() {
   // (complete/delete), never edited.
   const nonTemplates = tasks.filter((t) => t.status !== 'archived' && !t.recurrence);
   const templates = tasks.filter((t) => !!t.recurrence);
-  const overdueTasks = nonTemplates.filter((t) => isOverdue(t));
-  const visibleTasks = nonTemplates.filter((t) => !isOverdue(t));
+  const overdueTasks = nonTemplates.filter((t) => isOverdue(t, timezone));
+  const visibleTasks = nonTemplates.filter((t) => !isOverdue(t, timezone));
 
   const hasRunningTimer = visibleTasks.some(
     (t) => t.type === 'duration' && !!(t.config as { runningSince?: string | null }).runningSince,

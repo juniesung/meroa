@@ -136,6 +136,49 @@ export type PostponeTaskInput = {
   reason?: 'bad_timing' | 'low_energy' | 'avoided' | null;
 };
 
+// --- tools (mirrors server/src/lib/tools/schema.ts) -----------------------
+
+export type ToolFieldType = 'number' | 'text' | 'boolean' | 'rating' | 'choice';
+
+export type ToolField = {
+  id: string;
+  label: string;
+  type: ToolFieldType;
+  unit?: string;
+  options?: string[];
+  required?: boolean;
+  archived?: boolean;
+};
+
+export type ToolTarget =
+  | { kind: 'total'; value: number; unit?: string }
+  | { kind: 'count_per_period'; period: 'day' | 'week'; value: number };
+
+export type ToolView =
+  | { kind: 'progress_total' }
+  | { kind: 'streak' }
+  | { kind: 'bars'; bucket: 'day' | 'week'; measure: 'count' | 'sum'; fieldId?: string }
+  | { kind: 'recent_list' };
+
+export type ToolDefinition = {
+  fields: ToolField[];
+  primaryFieldId?: string;
+  target?: ToolTarget;
+  views: ToolView[];
+  entryNoun?: string;
+};
+
+export type ToolTemplateKey = 'workout' | 'habit' | 'numeric' | 'money' | 'journal';
+
+// What create_tool returns for display before anything is saved — stored on
+// a tool_preview message's meta.preview, and what POST /tools sends back.
+export type ToolPreview = {
+  template: ToolTemplateKey;
+  name: string;
+  icon: string | null;
+  definition: ToolDefinition;
+};
+
 export type ApiTool = {
   id: string;
   userId: string;
@@ -143,10 +186,65 @@ export type ApiTool = {
   name: string;
   icon: string | null;
   version: number;
-  definition: Record<string, unknown>;
+  definition: ToolDefinition;
   createdAt: string;
   archivedAt: string | null;
+  // Card summary fields, precomputed server-side (lib/tools/summary.ts) —
+  // present on the GET /tools list response.
   entryCount: number;
+  headline?: string;
+  sub?: string;
+  progress?: number | null;
+  lastEntryAt?: string | null;
+};
+
+export type ApiToolEntry = {
+  id: string;
+  toolId: string;
+  recordId: string;
+  data: Record<string, unknown>;
+  entryAt: string;
+  createdAt: string;
+};
+
+export type ApiToolViewData =
+  | { kind: 'progress_total'; total: number | null; targetValue: number | null; unit: string | null; progress: number | null }
+  | { kind: 'streak'; streak: number }
+  | { kind: 'bars'; bucket: 'day' | 'week'; buckets: { label: string; ymd: string; value: number }[] }
+  | { kind: 'recent_list' };
+
+export type ApiToolDetail = {
+  card: { headline: string; sub: string; progress: number | null };
+  views: ApiToolViewData[];
+  entryCount: number;
+  lastEntryAt: string | null;
+};
+
+export type CreateToolParams = {
+  template: ToolTemplateKey;
+  name: string;
+  icon?: string;
+  unit?: string;
+  currency?: string;
+  targetValue?: number;
+  targetPeriod?: 'day' | 'week';
+  extraFields?: { label: string; type: ToolFieldType; unit?: string; options?: string[]; required?: boolean }[];
+  omitFields?: string[];
+};
+
+export type EditToolPatch = {
+  name?: string;
+  icon?: string;
+  targetValue?: number;
+  unit?: string;
+  addFields?: { label: string; type: ToolFieldType; unit?: string; options?: string[]; required?: boolean }[];
+  removeFieldIds?: string[];
+  renameFields?: { fieldId: string; label: string }[];
+};
+
+export type LogToolEntryPatch = {
+  values: { fieldId: string; value: number | string | boolean }[];
+  entryAt?: string;
 };
 
 export type BootstrapResponse = {

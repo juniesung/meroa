@@ -3,13 +3,13 @@
 > **Pickup prompt for a fresh session:**
 > _"Read `CLAUDE.md` and `docs/openai-provider-swap.md`. Implement the provider swap per that doc. Plan first and show me the plan before writing code."_
 >
-> Status at time of writing (July 11, 2026): **decision made to switch the in-app chat
-> from Anthropic to an OpenAI model. Exact model tier NOT yet chosen** — blocked on the
-> user personally confirming current pricing at platform.openai.com/pricing (web lookups
-> that day returned conflicting numbers across GPT-5.x mini/nano sub-versions; GPT-4o-mini
-> is no longer on OpenAI's pricing page and should not be used). Everything else below is
-> ready to execute. The server currently still runs `claude-sonnet-5` and works fine —
-> nothing is broken; this is a cost-driven swap.
+> **Status as of July 11, 2026 (second session): dual-provider code shipped and working;
+> `gpt-4o-mini` FAILED the mandatory reliability test (§6 results below) and the swap was
+> rolled back — `AI_PROVIDER=anthropic` in `server/.env` right now, Meroa is back on
+> `claude-sonnet-5`, nothing is broken.** The `providers/anthropic.ts` /
+> `providers/openai.ts` / `chat.ts` dispatcher structure from §4 is fully built — switching
+> tiers or trying DeepSeek next is a config change or a new provider file, not a rewrite.
+> See §6 for exactly what went wrong with gpt-4o-mini and §7 for suggested next steps.
 
 ---
 
@@ -169,7 +169,77 @@ Current Anthropic loop → OpenAI equivalents:
    used repeatedly this session: small `tsx` script in `server/src/`, run, then delete
    the script).
 
-## 7. Related pre-ship items (recorded here so they aren't lost; not blockers for the swap)
+### Results: `gpt-4o-mini` (July 11, 2026, second session) — FAILED, rolled back
+
+Ran through the dev token account (real chat, live server, `AI_PROVIDER=openai`,
+`OPENAI_MODEL=gpt-4o-mini`). Stopped after 9 of 10 planned ops — by then the model had
+already cleared the "materially worse than Sonnet's 0/10" bar decisively enough that
+grinding through the last delete wouldn't have changed the conclusion.
+
+**Two distinct failure modes, not one:**
+
+1. **Deterministic UUID mistranscription.** Asked to edit an existing task
+   (`a5995a56-7058-43e2-8a35-e73fa54bea32`), the model copied it as
+   `a599a56-7058-43e2-8a35-e73fa54bea32` — dropped one digit from a repeated run
+   (`5995` → `599`) — across **three separate attempts, byte-for-byte the same wrong
+   string every time**. `edit_task` rejected it each time (`taskId: Invalid uuid`), the
+   model apologized and said it'd "look again," and never actually fixed it — the edit
+   was never completed in this session. Not random: a different task's id
+   (`60c2dd9a-13b7-4beb-a98c-25c6349cbff9`, no repeated-digit run) was copied correctly
+   every time, including for a checklist-item sub-id. This reads like a real, tokenizer-
+   adjacent weakness of the mini tier on exact-copy of long hex strings with repeated
+   digits — and real task ids are random UUIDs, so a meaningful fraction of a real
+   user's tasks would hit this.
+2. **Announce-then-don't-act, and one confirmed false claim.** Twice (completing a task,
+   removing a task) the model's first-attempt reply was "let me do that / one second" —
+   phrased as about to act — and the turn ended with `toolCalls: []`, no tool ever
+   called. That's short of Haiku's original "claims it's done" pattern (it didn't claim
+   *completion*), but the user still has to notice nothing happened and push again. On
+   the delete case specifically, the *second* attempt escalated into an unambiguous
+   hallucination: `remove_task` was called (with the same corrupted id from #1),
+   correctly errored `ok: false`, and the model still told the user **"it looks like the
+   pushups task has already been removed"** — checked against the real DB via
+   `GET /tasks`: the task was still there, `status: open`, never removed. That is exactly
+   the failure class this whole protocol exists to catch, just with a non-empty
+   `toolCalls` array instead of an empty one (`maybeCorrectFakeAction`'s narrow regex
+   didn't fire on either announce-then-don't-act reply, so the client saw no
+   self-correction — worth widening that pattern if any OpenAI tier is tried again).
+
+**Tally against the 9 ops attempted:** 3 clean creates, 1 undo, 1 postpone, 1 checklist
+check-off succeeded first try. 1 edit never succeeded (3/3 attempts failed on the same
+corrupted id). 1 complete and 1 delete needed a second user nudge to actually go
+through; the delete's second attempt produced a confirmed false "already done" claim.
+**Net: at least 2/9 clear failures (one of them a genuine hallucination), plus a
+distinct, reproducible, blocking correctness bug (#1) that has nothing to do with
+narrative honesty.** Sonnet 5's baseline on this same protocol was 0/10. Per the gate in
+this section: stopped, did not ship, rolled `AI_PROVIDER` back to `anthropic` in
+`server/.env`. Test tasks (`Pushups`, `Call mom`, `Pack for trip`) deleted from the DB
+afterward.
+
+## 7. Next steps after the gpt-4o-mini result
+
+Not decided yet — options, roughly cheapest-to-most-reliable:
+
+- **Try a bigger OpenAI tier** (`gpt-5-mini`, or full `gpt-5.x`) — the dual-provider
+  scaffolding in §4 is built, so this is just `OPENAI_MODEL` + `AI_PROVIDER=openai` in
+  `server/.env` and re-running §6's protocol. User needs to confirm current pricing for
+  whichever tier — the exact GPT-5.x mini/nano pricing lookup that blocked the first
+  session is still unresolved.
+- **DeepSeek** — explicitly still on the table per the user (not permanently rejected
+  for the App Store/regulatory reasons in §1, just deprioritized behind trying OpenAI
+  first). Would need its own `providers/deepseek.ts` (same dual-provider pattern) since
+  it's a different SDK/API shape than OpenAI's.
+- **Stay on Sonnet 5** and revisit the cost problem a different way (e.g. tighter
+  `PLUS_DAILY_MESSAGES`, a cheaper Anthropic tier if one exists, or eating the margin at
+  a higher price point) — the option of last resort, but worth naming since two
+  cheap-tier attempts (Haiku, gpt-4o-mini) have now both failed this exact protocol.
+- If any future OpenAI tier is tried again: widen `maybeCorrectFakeAction` in
+  `providers/shared.ts` to also catch "announce-then-don't-act" replies (intent phrasing
+  like "let me do that" / "one second" with zero tool calls), not just past-tense
+  claims — gpt-4o-mini's failure mode was subtler than Haiku's and slipped past the
+  current regex.
+
+## 8. Related pre-ship items (recorded here so they aren't lost; not blockers for the swap)
 
 - **User must confirm OpenAI pricing + pick the tier** (`OPENAI_MODEL`), then message
   allowances need real values: `PLUS_DAILY_MESSAGES` env default is **1000/day — a dev

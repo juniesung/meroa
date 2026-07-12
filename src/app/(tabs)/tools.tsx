@@ -1,8 +1,9 @@
-import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { router } from 'expo-router';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { Icon } from '@/components/Icon';
-import { radii, theme } from '@/constants/theme';
+import { ToolCard } from '@/components/ToolCard';
+import { theme } from '@/constants/theme';
 import { useTools } from '@/features/tools/queries';
 import { useTabBarHeight } from '@/hooks/use-tab-bar-inset';
 import { toIconName } from '@/lib/icon';
@@ -31,17 +32,14 @@ export default function ToolsScreen() {
         ) : (
           <View style={{ gap: 12, marginTop: 20 }}>
             {tools.map((tool) => (
-              <View key={tool.id} style={styles.card}>
-                <View style={styles.iconChip}>
-                  <Icon name={toIconName(tool.icon)} size={18} color={theme.blue} stroke={1.9} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.cardTitle}>{tool.name}</Text>
-                  <Text style={styles.cardMeta}>
-                    {tool.entryCount} {tool.entryCount === 1 ? 'entry' : 'entries'} logged
-                  </Text>
-                </View>
-              </View>
+              <Pressable key={tool.id} onPress={() => router.push({ pathname: '/tool/[id]', params: { id: tool.id } })}>
+                <ToolCard
+                  icon={toIconName(tool.icon)}
+                  title={tool.name}
+                  subtitle={tool.sub ?? `${tool.entryCount} ${tool.entryCount === 1 ? 'entry' : 'entries'} logged`}
+                  progress={Math.round((tool.progress ?? 0) * 100)}
+                />
+              </Pressable>
             ))}
           </View>
         )}
@@ -58,24 +56,4 @@ const styles = StyleSheet.create({
   loading: { alignItems: 'center', justifyContent: 'center', marginTop: 60 },
   empty: { alignItems: 'center', marginTop: 60, paddingHorizontal: 20 },
   emptyText: { color: theme.dim, fontSize: 14, textAlign: 'center', lineHeight: 20 },
-  card: {
-    backgroundColor: theme.card,
-    borderColor: theme.borderStrong,
-    borderWidth: 1,
-    borderRadius: radii.card,
-    padding: 14,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  iconChip: {
-    width: 34,
-    height: 34,
-    borderRadius: radii.chip,
-    backgroundColor: 'rgba(10,132,255,0.14)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  cardTitle: { color: theme.text, fontSize: 15, fontWeight: '600' },
-  cardMeta: { color: theme.dim, fontSize: 12, marginTop: 2 },
 });

@@ -39,6 +39,18 @@ export function buildDueAtIso(choice: DueChoice, time: string): string | undefin
   return date.toISOString();
 }
 
+/** Same day as `originalIso`, time-of-day swapped to `time` — for editing
+ * just the time on a task whose real due date isn't today/tomorrow (so the
+ * "none/today/tomorrow" chips above can't represent it, and shouldn't be
+ * trusted to reconstruct the date). */
+export function buildDueAtPreservingDay(originalIso: string, time: string): string {
+  const date = new Date(originalIso);
+  const normalized = normalizeTime(time);
+  const [hh, mm] = normalized ? normalized.split(':').map(Number) : [9, 0];
+  date.setHours(hh!, mm!, 0, 0);
+  return date.toISOString();
+}
+
 export function dueChoiceFromIso(iso: string | null): { choice: DueChoice; time: string } {
   if (!iso) return { choice: 'none', time: '' };
   const date = new Date(iso);

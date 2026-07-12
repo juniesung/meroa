@@ -10,6 +10,8 @@ import type {
   ApiEntitlement,
   ApiTask,
   ApiTool,
+  ApiToolDetail,
+  ApiToolEntry,
   ApiUser,
   AuthTokens,
   BootstrapResponse,
@@ -17,6 +19,8 @@ import type {
   CompleteTaskInput,
   CreateTaskInput,
   EditTaskPatch,
+  EditToolPatch,
+  LogToolEntryPatch,
   PostponeTaskInput,
   ProgressInput,
   VerifyOtpResponse,
@@ -199,8 +203,42 @@ export const api = {
 
   deleteTask: (id: string) => request<{ task: ApiTask }>(`/tasks/${id}`, { method: 'DELETE' }),
 
+  bulkRemoveTasks: (taskIds: string[]) =>
+    request<{ tasks: ApiTask[] }>('/tasks/bulk-remove', {
+      method: 'POST',
+      body: JSON.stringify({ taskIds }),
+    }),
+
   undoLastTaskAction: () =>
     request<{ task: ApiTask; action: string }>('/tasks/undo', { method: 'POST' }),
 
   getTools: () => request<{ tools: ApiTool[] }>('/tools'),
+
+  getTool: (id: string) =>
+    request<{ tool: ApiTool; detail: ApiToolDetail; entries: ApiToolEntry[] }>(`/tools/${id}`),
+
+  getToolEntries: (id: string, cursor?: string) =>
+    request<{ entries: ApiToolEntry[] }>(
+      `/tools/${id}/entries${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''}`,
+    ),
+
+  // Confirm-tap for a chat create_tool preview card — create_tool itself
+  // never saves anything (docs/phase-4-implementation-plan.md §1.3); this
+  // is the actual save, using the exact definition the card showed.
+  createToolFromPreview: (previewMessageId: string) =>
+    request<{ tool: ApiTool }>('/tools', {
+      method: 'POST',
+      body: JSON.stringify({ previewMessageId }),
+    }),
+
+  editTool: (id: string, patch: EditToolPatch) =>
+    request<{ tool: ApiTool }>(`/tools/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+
+  logToolEntry: (id: string, patch: LogToolEntryPatch) =>
+    request<{ tool: ApiTool; entry: ApiToolEntry }>(`/tools/${id}/entries`, {
+      method: 'POST',
+      body: JSON.stringify(patch),
+    }),
+
+  archiveTool: (id: string) => request<{ tool: ApiTool }>(`/tools/${id}`, { method: 'DELETE' }),
 };

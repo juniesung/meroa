@@ -8,6 +8,7 @@ import { Sheet } from '@/components/Sheet';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { Icon, type IconName } from '@/components/Icon';
 import { isOverdue } from '@/components/TaskCard';
+import { useMe } from '@/features/profile/queries';
 import { radii, theme } from '@/constants/theme';
 import type {
   ApiTask,
@@ -22,6 +23,7 @@ import type {
 import { useCreateTask, useEditTask, usePostponeTask } from './queries';
 import {
   buildDueAtIso,
+  buildDueAtPreservingDay,
   buildRecurrence,
   dateToHhmm,
   dueChoiceFromIso,
@@ -98,6 +100,7 @@ export function TaskFormSheet({
 function TaskFormBody({ task, onClose }: { task?: ApiTask; onClose: () => void }) {
   const isEdit = !!task;
   const isTemplate = !!task?.recurrence;
+  const { data: me } = useMe();
   const createTask = useCreateTask();
   const editTask = useEditTask();
   const postponeTask = usePostponeTask();
@@ -122,6 +125,15 @@ function TaskFormBody({ task, onClose }: { task?: ApiTask; onClose: () => void }
   const initialRecurrence = recurrenceChoiceFrom(task?.recurrence ?? null);
   const [dueChoice, setDueChoice] = useState<DueChoice>(initialDue.choice);
   const [dueTime, setDueTime] = useState(initialRecurrence.time || initialDue.time);
+  // dueChoiceFromIso can only represent "none/today/tomorrow" — an existing
+  // task due on any other day (or overdue) has no faithful chip to show, and
+  // falls back to 'today'. Saving that guess back would silently overwrite a
+  // real due date the user never touched. Tracked separately from the time
+  // field: touching only the time (e.g. nudging 5pm -> 6pm on a task due in
+  // 3 days) should keep that real day and just swap the time, not also
+  // silently move the date to today.
+  const [dueTouched, setDueTouched] = useState(false);
+  const [dueTimeTouched, setDueTimeTouched] = useState(false);
   const [recurrenceChoice, setRecurrenceChoice] = useState<RecurrenceChoice>(
     initialRecurrence.choice,
   );
@@ -166,14 +178,21 @@ function TaskFormBody({ task, onClose }: { task?: ApiTask; onClose: () => void }
 
   function handleSubmit() {
     if (!canSubmit()) return;
-    const dueAt = buildDueAtIso(dueChoice, dueTime);
     const recurrence =
       isTemplate || !isEdit
         ? buildRecurrence(recurrenceChoice, weekdays, everyN, dueTime)
         : undefined;
 
     if (isEdit && task) {
-      const patch: EditTaskPatch = { title: title.trim(), icon, dueAt: dueAt ?? null, reminder };
+      const patch: EditTaskPatch = { title: title.trim(), icon, reminder };
+      // Only touch dueAt if the user actually changed something about it —
+      // see dueTouched's declaration for why the chips can't be trusted to
+      // reconstruct an untouched due date.
+      if (dueTouched) {
+        patch.dueAt = buildDueAtIso(dueChoice, dueTime) ?? null;
+      } else if (dueTimeTouched && task.dueAt) {
+        patch.dueAt = buildDueAtPreservingDay(task.dueAt, dueTime);
+      }
       if (isTemplate) patch.recurrence = recurrence ?? null;
       if (task.type === 'completion') patch.note = note.trim();
       if (task.type === 'checklist') {
@@ -195,6 +214,7 @@ function TaskFormBody({ task, onClose }: { task?: ApiTask; onClose: () => void }
       return;
     }
 
+    const dueAt = buildDueAtIso(dueChoice, dueTime);
     const shared = { title: title.trim(), icon, dueAt, recurrence, reminder };
     let input: CreateTaskInput;
     switch (type) {
@@ -239,7 +259,7 @@ function TaskFormBody({ task, onClose }: { task?: ApiTask; onClose: () => void }
       keyboardShouldPersistTaps="handled"
       style={{ maxHeight: '100%' }}
     >
-      {isEdit && task && isOverdue(task) && (
+      {isEdit && task && isOverdue(task, me?.user.timezone) && (
         <View style={styles.recoveryBand}>
           <Text style={styles.recoveryTitle}>What happened with this one?</Text>
           <View style={styles.chipRow}>
@@ -390,21 +410,36 @@ function TaskFormBody({ task, onClose }: { task?: ApiTask; onClose: () => void }
         <Chip
           label="No due date"
           selected={dueChoice === 'none'}
-          onPress={() => setDueChoice('none')}
+          onPress={() => {
+            setDueChoice('none');
+            setDueTouched(true);
+          }}
         />
         <Chip
           label="Today"
           selected={dueChoice === 'today'}
-          onPress={() => setDueChoice('today')}
+          onPress={() => {
+            setDueChoice('today');
+            setDueTouched(true);
+          }}
         />
         <Chip
           label="Tomorrow"
           selected={dueChoice === 'tomorrow'}
-          onPress={() => setDueChoice('tomorrow')}
+          onPress={() => {
+            setDueChoice('tomorrow');
+            setDueTouched(true);
+          }}
         />
       </View>
       {(dueChoice !== 'none' || recurrenceChoice !== 'none') && (
-        <TimeField time={dueTime} onChange={setDueTime} />
+        <TimeField
+          time={dueTime}
+          onChange={(t) => {
+            setDueTime(t);
+            setDueTimeTouched(true);
+          }}
+        />
       )}
 
       {(!isEdit || isTemplate) && (

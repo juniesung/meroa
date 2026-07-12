@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback } from 'react';
 
 import { tasksQueryKey } from '@/features/tasks/queries';
+import { toolDetailQueryKey, toolsQueryKey } from '@/features/tools/queries';
 import { api } from '@/lib/api/client';
 import { streamMessage } from '@/lib/api/stream';
 import type { ApiMessage } from '@/lib/api/types';
@@ -118,9 +119,16 @@ export function useSendMessage() {
               placeholderAssistantMessage(nextId),
             ]);
             currentAssistantId = nextId;
-            // Same record, two views (CLAUDE.md §2) — the Tasks tab must
-            // reflect this the instant the card appears in chat.
-            queryClient.invalidateQueries({ queryKey: tasksQueryKey });
+            // Same record, two views (CLAUDE.md §2) — the Tasks/Tools tab
+            // must reflect this the instant the card appears in chat.
+            const kind = persisted.meta?.kind as string | undefined;
+            if (kind === 'tool_action' || kind === 'tool_preview') {
+              queryClient.invalidateQueries({ queryKey: toolsQueryKey });
+              const toolId = event.tool?.id ?? (persisted.meta?.toolId as string | undefined);
+              if (toolId) queryClient.invalidateQueries({ queryKey: toolDetailQueryKey(toolId) });
+            } else {
+              queryClient.invalidateQueries({ queryKey: tasksQueryKey });
+            }
           } else if (event.type === 'stream_end') {
             // The last segment always leaves one trailing, never-filled
             // placeholder behind (created in anticipation of a segment that

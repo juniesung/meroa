@@ -13,6 +13,8 @@ import {
   users,
 } from './db/schema.ts';
 import { logger } from './logger.ts';
+import { buildTemplateDefinition } from './lib/tools/templates.ts';
+import type { ToolField } from './lib/tools/schema.ts';
 
 // Same demo number as DEMO_PHONE_E164 in lib/constants.ts — kept as a literal
 // here so the seed script has no dependency on the OTP flow's internals.
@@ -164,6 +166,18 @@ async function main() {
   ]);
 
   // --- a workout tool with history, so Tools isn't empty on first open ---
+  // Uses the same template builder create_tool does (lib/tools/templates.ts)
+  // so this stays schema-valid as ToolDefinition evolves, instead of an
+  // ad-hoc shape drifting out of sync with it (a stale ad-hoc { unit,
+  // exercises } shape here once crashed every chat turn's tool-context
+  // build, since computeCardSummary assumes definition.fields exists).
+  const workoutDefinition = buildTemplateDefinition({
+    template: 'workout',
+    name: 'Strength tracker',
+    unit: 'lb',
+  });
+  const fieldByLabel = new Map<string, ToolField>(workoutDefinition.fields.map((f) => [f.label, f]));
+
   const [workoutTool] = await db
     .insert(tools)
     .values({
@@ -171,7 +185,7 @@ async function main() {
       template: 'workout',
       name: 'Strength tracker',
       icon: 'dumbbell',
-      definition: { unit: 'lb', exercises: ['Bench Press', 'Squat'] },
+      definition: workoutDefinition,
     })
     .returning();
   if (!workoutTool) throw new Error('seed_tool_insert_failed');
@@ -183,18 +197,28 @@ async function main() {
 
   for (const entry of entries) {
     const occurredAt = new Date(Date.now() - entry.daysAgo * dayMs);
-    const payload = { exercise: entry.exercise, weight: entry.weight, reps: entry.reps };
+    const data = {
+      [fieldByLabel.get('Exercise')!.id]: entry.exercise,
+      [fieldByLabel.get('Weight')!.id]: entry.weight,
+      [fieldByLabel.get('Reps')!.id]: entry.reps,
+    };
 
     const [record] = await db
       .insert(records)
-      .values({ userId: user.id, kind: 'tool_entry', payload, source: 'tool_ui', occurredAt })
+      .values({
+        userId: user.id,
+        kind: 'tool_entry',
+        payload: { toolId: workoutTool.id, name: workoutTool.name, data, entryAt: occurredAt.toISOString() },
+        source: 'tool_ui',
+        occurredAt,
+      })
       .returning();
     if (!record) throw new Error('seed_record_insert_failed');
 
     await db.insert(toolEntries).values({
       toolId: workoutTool.id,
       recordId: record.id,
-      data: payload,
+      data,
       entryAt: occurredAt,
     });
   }

@@ -8,7 +8,7 @@ import {
 } from '@/lib/api/client';
 import { getCachedAccessToken, loadTokens } from '@/lib/auth/tokenStore';
 
-import type { ApiMessage, ApiTask } from './types';
+import type { ApiMessage, ApiTask, ApiTool, ToolPreview } from './types';
 
 const BASE_URL = process.env.EXPO_PUBLIC_API_URL;
 if (!BASE_URL) {
@@ -19,7 +19,12 @@ export type ChatStreamEvent =
   | { type: 'user_message'; message: ApiMessage }
   | { type: 'delta'; text: string }
   | { type: 'segment'; message: ApiMessage }
-  | { type: 'action'; message: ApiMessage; task: ApiTask }
+  // remove_tasks (a single confirm for several at once) sends `tasks`
+  // instead of `task` on the same SSE event name — the client only ever
+  // reads `message` off this event, so both share one type here too. A tool
+  // (tracker) action sends `tool`; create_tool's preview sends `preview`
+  // (nothing saved yet).
+  | { type: 'action'; message: ApiMessage; task?: ApiTask; tasks?: ApiTask[]; tool?: ApiTool; preview?: ToolPreview }
   | { type: 'stream_end' }
   | { type: 'error'; retryable: boolean; message: string }
   | { type: 'limit_reached'; plan: 'free' | 'plus'; limit: number };
@@ -106,7 +111,14 @@ export async function* streamMessage(
         yield { type: 'segment', message: parsed.message };
         break;
       case 'action':
-        yield { type: 'action', message: parsed.message, task: parsed.task };
+        yield {
+          type: 'action',
+          message: parsed.message,
+          task: parsed.task,
+          tasks: parsed.tasks,
+          tool: parsed.tool,
+          preview: parsed.preview,
+        };
         break;
       case 'stream_end':
         yield { type: 'stream_end' };

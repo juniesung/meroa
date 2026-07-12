@@ -21,6 +21,7 @@ import {
   postponeTask,
   progressTask,
   removeTask,
+  removeTasks,
   TaskActionError,
   undoLastAction,
 } from '../lib/tasks/executor.ts';
@@ -145,10 +146,27 @@ taskRoutes.delete('/:id', async (c) => {
   }
 });
 
+const bulkRemoveSchema = z.object({ taskIds: z.array(z.string().uuid()).min(1).max(50) });
+
+// Confirm-tap target for the AI's remove_tasks pending card — one Confirm
+// removes every task in the batch (and cascades any recurring template's
+// open instances with it), as a single undoable records row.
+taskRoutes.post('/bulk-remove', zValidator('json', bulkRemoveSchema), async (c) => {
+  const userId = c.get('userId');
+  const { taskIds } = c.req.valid('json');
+  try {
+    const { tasks } = await removeTasks(userId, taskIds, { source: 'tasks_ui' });
+    return c.json({ tasks });
+  } catch (err) {
+    const { status, body } = actionErrorResponse(err);
+    return c.json(body, status);
+  }
+});
+
 taskRoutes.post('/undo', async (c) => {
   const userId = c.get('userId');
   try {
-    const { task, action } = await undoLastAction(userId);
+    const { task, action } = await undoLastAction(userId, { source: 'tasks_ui' });
     return c.json({ task, action });
   } catch (err) {
     const { status, body } = actionErrorResponse(err);

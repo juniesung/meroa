@@ -1,0 +1,280 @@
+import { router, Stack, useLocalSearchParams } from 'expo-router';
+import * as Haptics from 'expo-haptics';
+import { useState } from 'react';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+
+import { BarChart } from '@/components/BarChart';
+import { Icon } from '@/components/Icon';
+import { Progress } from '@/components/Progress';
+import { Ring } from '@/components/Ring';
+import { radii, theme } from '@/constants/theme';
+import { useArchiveTool, useTool } from '@/features/tools/queries';
+import { ToolEntrySheet } from '@/features/tools/ToolEntrySheet';
+import type { ApiToolEntry, ApiToolViewData, ToolDefinition } from '@/lib/api/types';
+import { toIconName } from '@/lib/icon';
+
+function formatNumber(n: number): string {
+  return Number.isInteger(n) ? n.toLocaleString() : n.toLocaleString(undefined, { maximumFractionDigits: 2 });
+}
+
+function formatEntryLine(definition: ToolDefinition, data: Record<string, unknown>): string {
+  const fieldsById = new Map(definition.fields.map((f) => [f.id, f]));
+  const parts: string[] = [];
+  for (const [fieldId, value] of Object.entries(data)) {
+    const field = fieldsById.get(fieldId);
+    if (!field) continue;
+    const unit = field.unit ? ` ${field.unit}` : '';
+    parts.push(field.id === definition.primaryFieldId ? `${value}${unit}` : `${field.label}: ${value}${unit}`);
+  }
+  return parts.join(' · ') || 'Entry';
+}
+
+function formatEntryDate(iso: string): string {
+  const d = new Date(iso);
+  const date = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  const time = d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  return `${date} · ${time}`;
+}
+
+function ProgressTotalView({ view }: { view: Extract<ApiToolViewData, { kind: 'progress_total' }> }) {
+  const pct = Math.round((view.progress ?? 0) * 100);
+  const unit = view.unit ? ` ${view.unit}` : '';
+  return (
+    <View style={styles.viewCard}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+        <Ring value={pct} size={56} stroke={5} label={`${pct}%`} />
+        <View style={{ flex: 1 }}>
+          <Text style={styles.viewHeadline}>
+            {view.total != null ? `${formatNumber(view.total)}${unit}` : `0${unit}`}
+            {view.targetValue != null ? ` / ${formatNumber(view.targetValue)}${unit}` : ''}
+          </Text>
+          <Text style={styles.viewSub}>Total logged</Text>
+        </View>
+      </View>
+      {view.targetValue != null ? <Progress value={pct} /> : null}
+    </View>
+  );
+}
+
+function StreakView({ view }: { view: Extract<ApiToolViewData, { kind: 'streak' }> }) {
+  return (
+    <View style={[styles.viewCard, { flexDirection: 'row', alignItems: 'center', gap: 10 }]}>
+      <Icon name="flame" size={20} color={theme.blue} stroke={2} />
+      <Text style={styles.viewHeadline}>{view.streak > 0 ? `${view.streak}-day streak` : 'No streak yet'}</Text>
+    </View>
+  );
+}
+
+function BarsView({ view }: { view: Extract<ApiToolViewData, { kind: 'bars' }> }) {
+  return (
+    <View style={styles.viewCard}>
+      <Text style={styles.viewSub}>{view.bucket === 'day' ? 'Last 7 days' : 'Last 8 weeks'}</Text>
+      <BarChart buckets={view.buckets} />
+    </View>
+  );
+}
+
+export default function ToolDetailScreen() {
+  const { id } = useLocalSearchParams<{ id: string }>();
+  const { data, isLoading } = useTool(id);
+  const archiveTool = useArchiveTool();
+  const [entrySheetOpen, setEntrySheetOpen] = useState(false);
+  const [confirmingRemove, setConfirmingRemove] = useState(false);
+
+  if (isLoading || !data) {
+    return (
+      <SafeAreaView style={styles.safe}>
+        <Stack.Screen options={{ headerShown: false }} />
+        <View style={styles.loading}>
+          <ActivityIndicator color={theme.dim} />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  const { tool, detail, entries } = data;
+  const definition = tool.definition;
+
+  return (
+    <SafeAreaView style={styles.safe} edges={['top']}>
+      <Stack.Screen options={{ headerShown: false }} />
+
+      <View style={styles.header}>
+        <Pressable onPress={() => router.back()} style={styles.backButton} hitSlop={8}>
+          <View style={{ transform: [{ rotate: '180deg' }] }}>
+            <Icon name="chevron" size={18} color={theme.text} stroke={2.2} />
+          </View>
+        </Pressable>
+        <View style={styles.iconChip}>
+          <Icon name={toIconName(tool.icon)} size={20} color={theme.blue} stroke={1.9} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.title} numberOfLines={1}>
+            {tool.name}
+          </Text>
+          <Text style={styles.subtitle}>{detail.card.sub}</Text>
+        </View>
+      </View>
+
+      <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 120, gap: 12 }}>
+        <Text style={styles.headline}>{detail.card.headline}</Text>
+
+        {detail.views.map((view, idx) => {
+          if (view.kind === 'progress_total') return <ProgressTotalView key={idx} view={view} />;
+          if (view.kind === 'streak') return <StreakView key={idx} view={view} />;
+          if (view.kind === 'bars') return <BarsView key={idx} view={view} />;
+          return null;
+        })}
+
+        <Text style={styles.sectionTitle}>History</Text>
+        {entries.length === 0 ? (
+          <Text style={styles.emptyText}>No entries yet — log your first one.</Text>
+        ) : (
+          <View style={{ gap: 8 }}>
+            {entries.map((entry: ApiToolEntry) => (
+              <View key={entry.id} style={styles.entryRow}>
+                <Text style={styles.entryLine} numberOfLines={1}>
+                  {formatEntryLine(definition, entry.data)}
+                </Text>
+                <Text style={styles.entryDate}>{formatEntryDate(entry.entryAt)}</Text>
+              </View>
+            ))}
+          </View>
+        )}
+
+        <View style={{ marginTop: 24, alignItems: 'center' }}>
+          {confirmingRemove ? (
+            <View style={styles.removeConfirmRow}>
+              <Pressable onPress={() => setConfirmingRemove(false)} style={styles.removeCancelButton} hitSlop={8}>
+                <Text style={styles.removeCancelText}>Keep it</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => {
+                  Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
+                  archiveTool.mutate(tool.id, { onSuccess: () => router.back() });
+                }}
+                style={styles.removeConfirmButton}
+                hitSlop={8}
+              >
+                <Text style={styles.removeConfirmText}>Remove tracker</Text>
+              </Pressable>
+            </View>
+          ) : (
+            <Pressable onPress={() => setConfirmingRemove(true)} hitSlop={8}>
+              <Text style={styles.removeLink}>Remove this tracker</Text>
+            </Pressable>
+          )}
+        </View>
+      </ScrollView>
+
+      <Pressable
+        onPress={() => {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+          setEntrySheetOpen(true);
+        }}
+        style={styles.logButton}
+      >
+        <Icon name="plus" size={18} color="#fff" stroke={2.2} />
+        <Text style={styles.logButtonText}>Log</Text>
+      </Pressable>
+
+      <ToolEntrySheet visible={entrySheetOpen} onClose={() => setEntrySheetOpen(false)} tool={tool} />
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  safe: { flex: 1, backgroundColor: theme.bg },
+  loading: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 14,
+    paddingBottom: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.border,
+  },
+  backButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 999,
+    backgroundColor: theme.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  iconChip: {
+    width: 34,
+    height: 34,
+    borderRadius: radii.chip,
+    backgroundColor: 'rgba(10,132,255,0.14)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  title: { color: theme.text, fontSize: 16, fontWeight: '700' },
+  subtitle: { color: theme.dim, fontSize: 12, marginTop: 1 },
+  headline: { color: theme.text, fontSize: 26, fontWeight: '700', letterSpacing: -0.5, marginBottom: 4 },
+  viewCard: {
+    backgroundColor: theme.card,
+    borderColor: theme.borderStrong,
+    borderWidth: 1,
+    borderRadius: radii.card,
+    padding: 14,
+    gap: 10,
+  },
+  viewHeadline: { color: theme.text, fontSize: 17, fontWeight: '700' },
+  viewSub: { color: theme.dim, fontSize: 12 },
+  sectionTitle: { color: theme.text, fontSize: 15, fontWeight: '700', marginTop: 10 },
+  emptyText: { color: theme.dim, fontSize: 13 },
+  entryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: theme.card,
+    borderColor: theme.border,
+    borderWidth: 1,
+    borderRadius: radii.controlTight,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  entryLine: { color: theme.text, fontSize: 14, flex: 1, marginRight: 10 },
+  entryDate: { color: theme.faint, fontSize: 11 },
+  removeLink: { color: theme.faint, fontSize: 13 },
+  removeConfirmRow: { flexDirection: 'row', gap: 10, width: '100%' },
+  removeCancelButton: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    borderRadius: radii.controlTight,
+    borderWidth: 1,
+    borderColor: theme.borderStrong,
+  },
+  removeCancelText: { color: theme.text, fontSize: 14, fontWeight: '600' },
+  removeConfirmButton: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    borderRadius: radii.controlTight,
+    backgroundColor: theme.danger,
+  },
+  removeConfirmText: { color: '#fff', fontSize: 14, fontWeight: '600' },
+  logButton: {
+    position: 'absolute',
+    right: 20,
+    bottom: 30,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    borderRadius: radii.pill,
+    backgroundColor: theme.blue,
+    shadowColor: theme.blue,
+    shadowOpacity: 0.5,
+    shadowRadius: 10,
+  },
+  logButtonText: { color: '#fff', fontSize: 15, fontWeight: '700' },
+});
