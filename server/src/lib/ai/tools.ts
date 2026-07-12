@@ -48,6 +48,27 @@ const GOAL_NAME_HINT_PROPERTY = {
     "The goal's name exactly as it appears in the goals list in context — checked against the real goal before this runs, so it must match what goalRef actually points to.",
 };
 
+// Shared shape for attaching a task to a goal, used by both create_task and
+// edit_task — completing a goal-linked task auto-logs to it (docs/goals-
+// redesign-plan.md's post-creation task→goal linking). SAVINGS goals need
+// contribution; a HABIT goal needs no amount (completing IS the check-in,
+// and the task must repeat); an INDIRECT goal never takes one (a linked
+// task is supporting activity only, never a logged number).
+const GOAL_LINK_PROPERTY = {
+  type: 'object' as const,
+  description:
+    'Only if the user wants this task\'s completions to count toward an existing goal, e.g. "make this count toward my savings" — omit entirely otherwise; most tasks aren\'t goal-linked. For a savings goal, contribution is required (ask if the user didn\'t say an amount). For a habit goal, omit contribution — completing the task IS the check-in — and the task must repeat (make it recurring first if it doesn\'t). For any other goal type, omit contribution — a linked task never logs a number.',
+  properties: {
+    goalRef: GOAL_REF_PROPERTY,
+    goalNameHint: GOAL_NAME_HINT_PROPERTY,
+    contribution: {
+      type: 'number',
+      description: 'SAVINGS goals only: the amount completing this task logs each time. Never set for any other goal type.',
+    },
+  },
+  required: ['goalRef', 'goalNameHint'],
+};
+
 // Six allow-listed task actions, per phase-3-tasks.md. Field names are kept
 // identical to the corresponding zod schema in lib/tasks/schema.ts wherever
 // possible, so validating a tool call is a direct `schema.safeParse(input)`
@@ -122,6 +143,7 @@ export const AI_TOOLS: Anthropic.Tool[] = [
           type: 'boolean',
           description: 'True if the user wants a check-in around the due time.',
         },
+        goalLink: GOAL_LINK_PROPERTY,
       },
       required: ['title', 'type'],
     },
@@ -129,7 +151,7 @@ export const AI_TOOLS: Anthropic.Tool[] = [
   {
     name: 'edit_task',
     description:
-      "Edit an existing task's title, icon, due date, or type-specific fields (checklist items, target, target minutes). Use the task's ref from the task list in context — never guess one. For a recurring task, this always edits the whole series (the schedule, title, or target), never a single occurrence.",
+      "Edit an existing task's title, icon, due date, or type-specific fields (checklist items, target, target minutes) — or attach/move/remove its link to a goal (goalLink to link or move it to a different goal, unlinkGoal: true to remove the link without setting a new one). Use the task's ref from the task list in context — never guess one. For a recurring task, this always edits the whole series (the schedule, title, or target), never a single occurrence. If the task is already marked done today, linking it to a savings goal also credits that same-day completion — say so when you confirm.",
     input_schema: {
       type: 'object',
       properties: {
@@ -147,6 +169,11 @@ export const AI_TOOLS: Anthropic.Tool[] = [
         target: { type: 'number', description: 'counter tasks only.' },
         unit: { type: 'string', description: 'counter tasks only.' },
         targetMinutes: { type: 'number', description: 'duration tasks only.' },
+        goalLink: GOAL_LINK_PROPERTY,
+        unlinkGoal: {
+          type: 'boolean',
+          description: "True to remove this task's link to whatever goal it currently counts toward, without linking it to a new one. Never combine with goalLink.",
+        },
       },
       required: ['taskRef', 'titleHint'],
     },
@@ -453,6 +480,20 @@ const progressTaskToolSchema = z.discriminatedUnion('action', [
 
 const removeTasksItemSchema = z.object({ taskRef: z.string().regex(/^T\d+$/), titleHint: z.string().min(1) });
 
+// The wire-level shape the model sends for GOAL_LINK_PROPERTY — turn-scoped
+// refs, resolved to a real goalId by lib/ai/actions.ts before reaching the
+// executor (same resolve-then-verify pattern as taskRefSchema/goalRefSchema
+// below). Distinct from EditTaskPatch/CreateTaskInput's own `goalId` field,
+// which is the already-resolved id the REST routes and the AI layer both
+// eventually call the executor with.
+const goalLinkToolSchema = z
+  .object({
+    goalRef: z.string().regex(/^G\d+$/, 'must be a goal ref like "G2", not a database id'),
+    goalNameHint: z.string().min(1),
+    contribution: z.number().min(0.01).optional(),
+  })
+  .strict();
+
 // goalRef: a turn-scoped alias ("G2"), never a raw database id — same
 // resolve-then-verify pattern as taskRefSchema above, just against
 // lib/ai/goal-context.ts's goal refs instead of task refs.
@@ -477,8 +518,10 @@ const logGoalEntryToolSchema = goalRefSchema.extend({
 });
 
 export const AI_TOOL_SCHEMAS = {
-  create_task: createTaskInputSchema,
-  edit_task: taskRefSchema.merge(editTaskPatchSchema),
+  create_task: createTaskInputSchema.and(z.object({ goalLink: goalLinkToolSchema.optional() }).strict()),
+  edit_task: taskRefSchema
+    .merge(editTaskPatchSchema)
+    .extend({ goalLink: goalLinkToolSchema.optional(), unlinkGoal: z.boolean().optional() }),
   complete_task: taskRefSchema.extend({
     value: z.number().optional(),
     itemRefs: z.array(itemRefSchema).optional(),

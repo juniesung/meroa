@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { decideGoalEntryAction } from './goal-entry-decision.ts';
+import { decideGoalEntryAction, decideRetroGoalEntry } from './goal-entry-decision.ts';
 
 describe('decideGoalEntryAction', () => {
   it('does nothing for a task with no linked goal', () => {
@@ -172,5 +172,81 @@ describe('decideGoalEntryAction', () => {
     expect(liveEntries.size).toBe(1); // exactly one, never two
     expect(liveEntries.get('record-3')).toBe(5);
     expect(liveEntries.has('record-1')).toBe(false);
+  });
+});
+
+// Post-creation task→goal linking's retro-credit rule (locked with the
+// user): linking a task already completed *today* also credits that
+// completion; a task completed on an earlier day is left alone — no silent
+// rewrite of older history.
+describe('decideRetroGoalEntry', () => {
+  const base = {
+    goalId: 'goal-1',
+    goalType: 'savings' as const,
+    goalArchived: false,
+    contribution: 5,
+    taskStatus: 'done',
+    completedRecordId: 'record-1',
+    completedYmd: '2026-07-12',
+    todayYmd: '2026-07-12',
+    completedRecordOccurredAt: new Date('2026-07-12T09:00:00Z'),
+    alreadyCredited: false,
+  };
+
+  it('inserts an entry for a task completed today', () => {
+    const decision = decideRetroGoalEntry(base);
+    expect(decision).toEqual({
+      action: 'insert',
+      goalId: 'goal-1',
+      recordId: 'record-1',
+      amount: 5,
+      entryAt: base.completedRecordOccurredAt,
+    });
+  });
+
+  it('does nothing for a task completed yesterday', () => {
+    const decision = decideRetroGoalEntry({ ...base, completedYmd: '2026-07-11' });
+    expect(decision).toEqual({ action: 'none' });
+  });
+
+  it('does nothing for a task that is still open', () => {
+    const decision = decideRetroGoalEntry({
+      ...base,
+      taskStatus: 'open',
+      completedRecordId: null,
+      completedYmd: null,
+      completedRecordOccurredAt: null,
+    });
+    expect(decision).toEqual({ action: 'none' });
+  });
+
+  it('does nothing when linking to an archived goal', () => {
+    const decision = decideRetroGoalEntry({ ...base, goalArchived: true });
+    expect(decision).toEqual({ action: 'none' });
+  });
+
+  it('does nothing for a habit goal — streaks derive from completions directly, no entry needed', () => {
+    const decision = decideRetroGoalEntry({ ...base, goalType: 'habit', contribution: undefined });
+    expect(decision).toEqual({ action: 'none' });
+  });
+
+  it('does nothing for an indirect goal — a linked task never auto-logs a number', () => {
+    const decision = decideRetroGoalEntry({ ...base, goalType: 'indirect', contribution: undefined });
+    expect(decision).toEqual({ action: 'none' });
+  });
+
+  it('does nothing without a stated contribution', () => {
+    const decision = decideRetroGoalEntry({ ...base, contribution: undefined });
+    expect(decision).toEqual({ action: 'none' });
+  });
+
+  it('does nothing when relinking to a goal that already has a live entry for this record (idempotent)', () => {
+    const decision = decideRetroGoalEntry({ ...base, alreadyCredited: true });
+    expect(decision).toEqual({ action: 'none' });
+  });
+
+  it('does nothing when not linking at all (no goalId)', () => {
+    const decision = decideRetroGoalEntry({ ...base, goalId: null });
+    expect(decision).toEqual({ action: 'none' });
   });
 });

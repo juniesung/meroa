@@ -43,3 +43,57 @@ export function decideGoalEntryAction(params: {
 
   return { action: 'none' };
 }
+
+// Pure decision core for post-creation task→goal linking's retro-credit rule
+// (docs/goals-redesign-plan.md session 2, locked with the user): linking a
+// task that's already completed *today* also credits that completion —
+// linking one completed yesterday or earlier does not (no silent rewrite of
+// older history). Habit goals need no entry at all (streaks are derived from
+// the linked task's completions, automatically covering any already-done
+// day); indirect goals never auto-log from a task by design. Split out of
+// lib/tasks/executor.ts's editTask so the matrix (done-today / done-earlier /
+// open / archived goal / habit / indirect / relink / already-credited) is
+// unit-testable without a database — the caller does the DB reads and passes
+// in only the facts this needs to decide.
+export type RetroGoalEntryDecision =
+  | { action: 'insert'; goalId: string; recordId: string; amount: number; entryAt: Date }
+  | { action: 'none' };
+
+export function decideRetroGoalEntry(params: {
+  // The goal being linked to, resolved and validated by the caller — null
+  // means this edit isn't a link (an unlink or unrelated edit).
+  goalId: string | null;
+  goalType: 'savings' | 'habit' | 'indirect' | undefined;
+  goalArchived: boolean;
+  // The contribution being set on this same link — retro-credit only ever
+  // applies to a savings goal, which always carries one.
+  contribution: number | undefined;
+  taskStatus: string;
+  completedRecordId: string | null;
+  // ymd (account timezone) the completion record actually occurred, vs.
+  // today's ymd in the same timezone — both precomputed by the caller so
+  // this function stays pure.
+  completedYmd: string | null;
+  todayYmd: string;
+  completedRecordOccurredAt: Date | null;
+  // True if a live goal_entries row already exists for (goalId, recordId) —
+  // guards a retried/idempotent edit from inserting a second entry for the
+  // same completion.
+  alreadyCredited: boolean;
+}): RetroGoalEntryDecision {
+  if (!params.goalId || params.goalArchived) return { action: 'none' };
+  if (params.goalType !== 'savings') return { action: 'none' };
+  if (typeof params.contribution !== 'number') return { action: 'none' };
+  if (params.taskStatus !== 'done' || !params.completedRecordId || !params.completedRecordOccurredAt) {
+    return { action: 'none' };
+  }
+  if (params.completedYmd !== params.todayYmd) return { action: 'none' };
+  if (params.alreadyCredited) return { action: 'none' };
+  return {
+    action: 'insert',
+    goalId: params.goalId,
+    recordId: params.completedRecordId,
+    amount: params.contribution,
+    entryAt: params.completedRecordOccurredAt,
+  };
+}

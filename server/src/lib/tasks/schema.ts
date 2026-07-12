@@ -113,6 +113,14 @@ const sharedCreateFields = {
   // end-of-day because none was given. The UI form always passes true
   // implicitly (createTask defaults to true when omitted).
   dueTimeExplicit: z.boolean().optional(),
+  // Resolved goal link (a real id, not a turn-scoped ref) — the AI action
+  // layer resolves goalLink.goalRef to this before calling createTaskInTx;
+  // the UI form (goal picker in TaskFormSheet) sends it directly, since it
+  // already has real goal ids. goalContribution is required by the executor
+  // when the target is a savings goal, forbidden for habit/indirect — see
+  // validateGoalLinkTarget in lib/tasks/executor.ts.
+  goalId: z.string().uuid().optional(),
+  goalContribution: z.number().min(0.01).optional(),
 };
 
 export const createTaskInputSchema = z.discriminatedUnion('type', [
@@ -168,15 +176,23 @@ export const editTaskPatchSchema = z
     unit: z.string().trim().max(20).optional(),
     // duration
     targetMinutes: z.number().min(1).optional(),
+    // Goal link — same resolved-id convention as sharedCreateFields above.
+    // null explicitly unlinks; undefined leaves the current link untouched.
+    // Cross-field rules (contribution required for savings, forbidden for
+    // habit/indirect, habit requires a recurring task) are enforced in
+    // lib/tasks/executor.ts's editTask, not here — they depend on the
+    // target goal's live type, which a static schema can't see.
+    goalId: z.string().uuid().nullable().optional(),
+    goalContribution: z.number().min(0.01).optional(),
   })
   .strict();
 export type EditTaskPatch = z.infer<typeof editTaskPatchSchema>;
 
 const EDIT_KEYS_BY_TYPE: Record<TaskType, ReadonlyArray<keyof EditTaskPatch>> = {
-  completion: ['title', 'icon', 'dueAt', 'note', 'recurrence', 'reminder'],
-  checklist: ['title', 'icon', 'dueAt', 'recurrence', 'items', 'reminder'],
-  counter: ['title', 'icon', 'dueAt', 'recurrence', 'target', 'unit', 'reminder'],
-  duration: ['title', 'icon', 'dueAt', 'recurrence', 'targetMinutes', 'reminder'],
+  completion: ['title', 'icon', 'dueAt', 'note', 'recurrence', 'reminder', 'goalId', 'goalContribution'],
+  checklist: ['title', 'icon', 'dueAt', 'recurrence', 'items', 'reminder', 'goalId', 'goalContribution'],
+  counter: ['title', 'icon', 'dueAt', 'recurrence', 'target', 'unit', 'reminder', 'goalId', 'goalContribution'],
+  duration: ['title', 'icon', 'dueAt', 'recurrence', 'targetMinutes', 'reminder', 'goalId', 'goalContribution'],
 };
 
 export function validateEditPatchForType(type: TaskType, patch: EditTaskPatch): string | null {

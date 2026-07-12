@@ -255,6 +255,37 @@ function summarizeComplete(task: TaskRow): string {
     : `Logged progress on "${task.title}".`;
 }
 
+// Confirms a task→goal link/unlink/relink the same way describeGoalEdit
+// confirms an edit_goal op — the concrete goal name and, for savings, the
+// server-recomputed headline + pace, never left for the model to derive
+// (lesson 6). retroCredited states the same-day-completion fact plainly so
+// the model doesn't have to infer it happened.
+async function describeGoalLinkChange(
+  userId: string,
+  timezone: string | null,
+  task: TaskRow,
+  linked: boolean,
+  unlinked: boolean,
+  retroCredited: boolean,
+): Promise<string> {
+  if (unlinked) return ' Unlinked from its goal.';
+  if (!linked || !task.goalId) return '';
+  const goal = await getGoalRow(userId, task.goalId);
+  if (!goal) return '';
+  const definition = goal.definition as GoalDefinition;
+  if (definition.type === 'habit') {
+    return ` Linked to habit "${goal.name}" — completing it is now the check-in.`;
+  }
+  if (definition.type !== 'savings') {
+    return ` Linked to "${goal.name}" as supporting activity — it won't log a number itself.`;
+  }
+  const contribution = (task.config as { goalContribution?: unknown }).goalContribution;
+  if (typeof contribution !== 'number') return ` Linked to "${goal.name}".`;
+  const fact = await goalHeadlineWithPace(goal, timezone);
+  const retroNote = retroCredited ? " Today's completion was credited too." : '';
+  return ` Linked to "${goal.name}" — completing it logs ${definition.currency}${contribution}.${retroNote} Now ${fact}.`;
+}
+
 // The AI reasons about times as local wall-clock ("7am") and often emits a
 // datetime with no timezone designator — see localDatetimeToUtcIso for why
 // that can't just be handed to `new Date()`. Every dueAt/newDueAt from a
@@ -469,8 +500,24 @@ async function executeAiToolCallInner(
         const validated = validateToolInput('create_task', rawInput);
         if (!validated.ok) return { ok: false, error: validated.error };
 
-        let input: typeof validated.data & { dueTimeExplicit: boolean };
-        if (validated.data.recurrence) {
+        let goalId: string | undefined;
+        let goalContribution: number | undefined;
+        if (validated.data.goalLink) {
+          const goalResolved = resolveGoalRef(refs, validated.data.goalLink.goalRef);
+          if (!goalResolved.ok) return { ok: false, error: goalResolved.error };
+          const goalHintCheck = await verifyNameHint(
+            userId,
+            goalResolved.ref.goalId,
+            validated.data.goalLink.goalNameHint,
+          );
+          if (goalHintCheck) return { ok: false, error: goalHintCheck.error };
+          goalId = goalResolved.ref.goalId;
+          goalContribution = validated.data.goalLink.contribution;
+        }
+
+        const { goalLink: _goalLink, ...taskFields } = validated.data;
+        let input: typeof taskFields & { dueTimeExplicit: boolean; goalId?: string; goalContribution?: number };
+        if (taskFields.recurrence) {
           // The model is unreliable about which calendar date a repeating
           // task's first occurrence should land on — it sometimes picks
           // "tomorrow" even when the given time-of-day hasn't passed yet
@@ -482,9 +529,15 @@ async function executeAiToolCallInner(
           // dueAt is dropped entirely for a repeating task rather than
           // trusted as the anchor. The UI's own today/tomorrow due-date
           // chip is a separate, deliberate user choice and isn't affected.
-          input = { ...validated.data, dueAt: undefined, dueTimeExplicit: !!validated.data.recurrence.time };
+          input = {
+            ...taskFields,
+            dueAt: undefined,
+            dueTimeExplicit: !!taskFields.recurrence.time,
+            goalId,
+            goalContribution,
+          };
         } else {
-          const dueAt = normalizeDueAt(validated.data.dueAt, timezone);
+          const dueAt = normalizeDueAt(taskFields.dueAt, timezone);
           if ('error' in dueAt) return { ok: false, error: dueAt.error };
           // The model was told to leave dueAt unset rather than invent a
           // clock time (tools.ts) — that doesn't mean "no deadline at all",
@@ -494,12 +547,19 @@ async function executeAiToolCallInner(
           const tz = timezone ?? 'UTC';
           const defaultedDueAt =
             dueAt.value ?? ymdEndOfDayToUtcDate(ymdInTz(new Date(), tz), tz).toISOString();
-          input = { ...validated.data, dueAt: defaultedDueAt, dueTimeExplicit: dueAt.value != null };
+          input = {
+            ...taskFields,
+            dueAt: defaultedDueAt,
+            dueTimeExplicit: dueAt.value != null,
+            goalId,
+            goalContribution,
+          };
         }
 
         const { task } = await createTask(userId, input, timezone, source);
         const alias = registerCreatedTaskRef(refs, task);
-        const summary = summarizeCreate(task, timezone);
+        const linkSummary = await describeGoalLinkChange(userId, timezone, task, !!goalId, false, false);
+        const summary = `${summarizeCreate(task, timezone)}${linkSummary}`;
         return {
           ok: true,
           toolName,
@@ -519,19 +579,54 @@ async function executeAiToolCallInner(
         if (hintCheck) return { ok: false, error: hintCheck.error };
         const dueAt = normalizeDueAt(validated.data.dueAt, timezone);
         if ('error' in dueAt) return { ok: false, error: dueAt.error };
-        const { taskRef: _taskRef, titleHint: _titleHint, ...patch } = validated.data;
-        const { task } = await editTask(
+
+        // Never trust a raw goalId/goalContribution the zod backstop happens
+        // to allow through (editTaskPatchSchema carries those for the REST/
+        // client goal-picker path) — the AI path only ever links via a
+        // resolved goalRef, verified against its nameHint the same as every
+        // other goal reference. goalLink and unlinkGoal are mutually
+        // exclusive by construction here (an unlink wins if the model
+        // somehow sent both, which the tool description forbids).
+        const {
+          taskRef: _taskRef,
+          titleHint: _titleHint,
+          goalLink,
+          unlinkGoal,
+          goalId: _rawGoalId,
+          goalContribution: _rawContribution,
+          ...patch
+        } = validated.data;
+        let goalPatch: { goalId?: string | null; goalContribution?: number } = {};
+        if (goalLink) {
+          const goalResolved = resolveGoalRef(refs, goalLink.goalRef);
+          if (!goalResolved.ok) return { ok: false, error: goalResolved.error };
+          const goalHintCheck = await verifyNameHint(userId, goalResolved.ref.goalId, goalLink.goalNameHint);
+          if (goalHintCheck) return { ok: false, error: goalHintCheck.error };
+          goalPatch = { goalId: goalResolved.ref.goalId, goalContribution: goalLink.contribution };
+        } else if (unlinkGoal) {
+          goalPatch = { goalId: null };
+        }
+
+        const { task, retroCredited } = await editTask(
           userId,
           taskId,
-          { ...patch, dueAt: dueAt.value },
+          { ...patch, ...goalPatch, dueAt: dueAt.value },
           timezone,
           source,
+        );
+        const linkSummary = await describeGoalLinkChange(
+          userId,
+          timezone,
+          task,
+          !!goalLink,
+          !!unlinkGoal,
+          retroCredited,
         );
         return {
           ok: true,
           toolName,
           task,
-          summary: `Updated "${task.title}".`,
+          summary: `Updated "${task.title}".${linkSummary}`,
           recordKind: 'task_edited',
         };
       }

@@ -3,8 +3,9 @@ import { and, desc, eq, inArray, isNull, like, notInArray, or } from 'drizzle-or
 import { db } from '../../db/client.ts';
 import { records, tasks, goals, goalEntries } from '../../db/schema.ts';
 import type { GoalRow } from '../goals/executor.ts';
+import type { GoalDefinition } from '../goals/schema.ts';
 import { materializeRecurringInstances, rollPastToNextDay, ymdInTz, type Tx } from './recurrence.ts';
-import { decideGoalEntryAction } from './goal-entry-decision.ts';
+import { decideGoalEntryAction, decideRetroGoalEntry } from './goal-entry-decision.ts';
 import {
   reduceTaskProgress,
   resolveCompleteInput,
@@ -147,6 +148,66 @@ export async function getTask(userId: string, taskId: string): Promise<TaskRow |
   return task ?? null;
 }
 
+// --- goal link validation ------------------------------------------------
+
+// Single source of truth for the cross-field rules a task→goal link must
+// satisfy — used by both createTaskInTx (link at creation) and editTask
+// (post-creation link/relink), so a REST client and the AI action layer get
+// identical validation. These depend on the target goal's live type (a DB
+// read), which a static zod schema can't express — see
+// docs/goals-redesign-plan.md's task→goal linking session. Throws
+// TaskActionError with a message the AI can act on (ask the user, or
+// correct itself) rather than guessing.
+async function validateGoalLinkTarget(
+  tx: Tx,
+  userId: string,
+  goalId: string,
+  contribution: number | undefined,
+  willBeRecurring: boolean,
+  taskTitle: string,
+): Promise<GoalRow> {
+  const [goal] = await tx
+    .select()
+    .from(goals)
+    .where(and(eq(goals.id, goalId), eq(goals.userId, userId), isNull(goals.archivedAt)))
+    .limit(1);
+  if (!goal) {
+    throw new TaskActionError(
+      'invalid_input',
+      "that goal doesn't exist or has been removed — check the goals list.",
+    );
+  }
+  const definition = goal.definition as GoalDefinition;
+  if (definition.type === 'savings') {
+    if (contribution === undefined) {
+      throw new TaskActionError(
+        'invalid_input',
+        `linking to a savings goal needs a contribution amount — ask the user how much completing "${taskTitle}" should log, rather than guessing.`,
+      );
+    }
+  } else if (definition.type === 'habit') {
+    if (contribution !== undefined) {
+      throw new TaskActionError(
+        'invalid_input',
+        'a habit check-in task has no contribution amount — completing it IS the check-in; omit the contribution.',
+      );
+    }
+    if (!willBeRecurring) {
+      throw new TaskActionError(
+        'invalid_input',
+        `"${taskTitle}" needs to repeat to be a habit goal's check-in — make it recurring, or link a different recurring task.`,
+      );
+    }
+  } else if (contribution !== undefined) {
+    // indirect (and any future non-numeric type)
+    throw new TaskActionError(
+      'invalid_input',
+      'that goal never logs a number from a task — omit the contribution; linking just marks this as supporting activity.',
+    );
+  }
+  return goal;
+}
+
 // --- create ----------------------------------------------------------
 
 // Transaction-parameterized core, so a caller that needs to create a task
@@ -179,10 +240,15 @@ export async function createTaskInTx(
     if (existingTask) return { task: existingTask };
   }
 
+  if (input.goalId) {
+    await validateGoalLinkTarget(tx, userId, input.goalId, input.goalContribution, !!input.recurrence, input.title);
+  }
+
   const config = {
     ...buildInitialConfig(input),
     reminder: input.reminder ?? false,
     dueTimeExplicit: input.dueTimeExplicit ?? true,
+    ...(input.goalContribution !== undefined ? { goalContribution: input.goalContribution } : {}),
   };
   const dueAt = input.dueAt ? rollPastToNextDay(new Date(input.dueAt), timezone ?? 'UTC') : null;
 
@@ -195,6 +261,7 @@ export async function createTaskInTx(
       icon: input.icon ?? null,
       config,
       recurrence: input.recurrence ?? null,
+      goalId: input.goalId ?? null,
       dueAt,
       createdFromMessageId: opts.source === 'chat' ? (opts.sourceMessageId ?? null) : null,
     })
@@ -244,7 +311,7 @@ export async function editTask(
   patch: EditTaskPatch,
   timezone: string | null,
   opts: ActionSource,
-): Promise<{ task: TaskRow }> {
+): Promise<{ task: TaskRow; retroCredited: boolean }> {
   return db.transaction(async (tx) => {
     const idempotent = await findIdempotentRecord(
       tx,
@@ -253,7 +320,7 @@ export async function editTask(
       'task_edited',
       taskId,
     );
-    if (idempotent) return { task: await loadTask(tx, userId, taskId) };
+    if (idempotent) return { task: await loadTask(tx, userId, taskId), retroCredited: false };
 
     const task = await loadTaskForUpdate(tx, userId, taskId);
     const type = task.type as TaskType;
@@ -277,6 +344,124 @@ export async function editTask(
     // Whether the task is (or is becoming, via this same patch) a recurring
     // template — determines how patch.dueAt is handled just below.
     const willBeRecurring = patch.recurrence !== undefined ? !!patch.recurrence : !!task.recurrence;
+
+    // --- goal link / unlink / relink -------------------------------------
+    // Retro-credited entry (if any), stamped onto this edit's own record so
+    // undo can find and delete it (locked decision: linking a task already
+    // completed *today* also credits that completion; earlier days are left
+    // alone — no silent rewrite of older history).
+    let retroEntry: { goalId: string; recordId: string } | null = null;
+    if (patch.goalId !== undefined) {
+      prior.goalId = task.goalId;
+      updates.goalId = patch.goalId;
+
+      if (patch.goalId === null) {
+        if (patch.goalContribution !== undefined) {
+          throw new TaskActionError(
+            'invalid_input',
+            'goalContribution requires a goalId — set both together, or omit both to unlink.',
+          );
+        }
+        if ('goalContribution' in config) {
+          const { goalContribution: _drop, ...rest } = config;
+          config = rest;
+          configChanged = true;
+        }
+      } else {
+        await validateGoalLinkTarget(tx, userId, patch.goalId, patch.goalContribution, willBeRecurring, task.title);
+        if (patch.goalContribution !== undefined) {
+          config = { ...config, goalContribution: patch.goalContribution };
+        } else if ('goalContribution' in config) {
+          // Relinking without a fresh amount stated — don't silently carry
+          // the old goal's contribution over to the new one.
+          const { goalContribution: _drop, ...rest } = config;
+          config = rest;
+        }
+        configChanged = true;
+
+        // Retro-credit: only meaningful for a savings link with a stated
+        // contribution — habit streaks are derived from the task's
+        // completions directly (already-done days count with no entry
+        // needed), and indirect goals never auto-log from a task.
+        if (patch.goalContribution !== undefined) {
+          const tz = timezone ?? 'UTC';
+          const todayYmd = ymdInTz(new Date(), tz);
+          // A recurring ref always resolves to the template (editTarget in
+          // lib/ai/actions.ts) — the template itself is never 'done', so
+          // "already completed today" means today's materialized instance.
+          let targetRow: TaskRow | null = task;
+          if (task.recurrence) {
+            const [instance] = await tx
+              .select()
+              .from(tasks)
+              .where(and(eq(tasks.templateId, task.id), eq(tasks.occurrenceDate, todayYmd)))
+              .limit(1);
+            targetRow = instance ?? null;
+          }
+          if (targetRow?.status === 'done' && targetRow.completedRecordId) {
+            const [completionRecord] = await tx
+              .select({ occurredAt: records.occurredAt })
+              .from(records)
+              .where(eq(records.id, targetRow.completedRecordId))
+              .limit(1);
+            const [existingEntry] = completionRecord
+              ? await tx
+                  .select({ id: goalEntries.id })
+                  .from(goalEntries)
+                  .where(
+                    and(
+                      eq(goalEntries.recordId, targetRow.completedRecordId),
+                      eq(goalEntries.goalId, patch.goalId),
+                    ),
+                  )
+                  .limit(1)
+              : [];
+            const decision = decideRetroGoalEntry({
+              goalId: patch.goalId,
+              goalType: 'savings',
+              goalArchived: false, // validateGoalLinkTarget above already rejected an archived goal
+              contribution: patch.goalContribution,
+              taskStatus: targetRow.status,
+              completedRecordId: targetRow.completedRecordId,
+              completedYmd: completionRecord ? ymdInTz(completionRecord.occurredAt, tz) : null,
+              todayYmd,
+              completedRecordOccurredAt: completionRecord?.occurredAt ?? null,
+              alreadyCredited: !!existingEntry,
+            });
+            if (decision.action === 'insert') {
+              await tx.insert(goalEntries).values({
+                goalId: decision.goalId,
+                recordId: decision.recordId,
+                data: { amount: decision.amount },
+                entryAt: decision.entryAt,
+              });
+              retroEntry = { goalId: decision.goalId, recordId: decision.recordId };
+              // The retro-credited instance needs its own goalId/config
+              // stamped too — otherwise un-completing it later can't find
+              // its goal (decideGoalEntryAction's delete path requires
+              // task.goalId to be set) and the entry would orphan.
+              if (targetRow.id !== task.id) {
+                await tx
+                  .update(tasks)
+                  .set({
+                    goalId: patch.goalId,
+                    config: { ...(targetRow.config as Record<string, unknown>), goalContribution: patch.goalContribution },
+                  })
+                  .where(eq(tasks.id, targetRow.id));
+              }
+            }
+          }
+        }
+      }
+    } else if (patch.goalContribution !== undefined) {
+      // Contribution-only edit ("make it $10 per completion") — goalId
+      // unchanged, the task must already be linked.
+      if (!task.goalId) {
+        throw new TaskActionError('invalid_input', "this task isn't linked to a goal — nothing to set a contribution on.");
+      }
+      config = { ...config, goalContribution: patch.goalContribution };
+      configChanged = true;
+    }
 
     if (patch.dueAt !== undefined) {
       prior.dueAt = task.dueAt;
@@ -342,7 +527,7 @@ export async function editTask(
       updates.config = config;
     }
 
-    if (Object.keys(updates).length === 0) return { task };
+    if (Object.keys(updates).length === 0) return { task, retroCredited: false };
 
     const [updated] = await tx.update(tasks).set(updates).where(eq(tasks.id, task.id)).returning();
     if (!updated) throw new Error('task_update_failed');
@@ -369,16 +554,50 @@ export async function editTask(
       }
     }
 
+    // Same reasoning as the reminder cascade above — a goal link only
+    // otherwise reaches instances materialized *after* the edit
+    // (resetConfigForNewInstance reads goalContribution off the template at
+    // generation time), which would leave today's already-materialized
+    // instance uncounted until tomorrow. Only *open* instances are touched;
+    // a done one either got the retro-credit stamp above or is history that
+    // keeps its prior link. Not separately undoable, same as the reminder
+    // cascade — only the template's own edit (prior.goalId/prior.config) is.
+    if (patch.goalId !== undefined && task.recurrence) {
+      const instances = await tx
+        .select({ id: tasks.id, config: tasks.config })
+        .from(tasks)
+        .where(
+          and(eq(tasks.templateId, task.id), eq(tasks.status, 'open'), isNull(tasks.deletedAt)),
+        );
+      for (const inst of instances) {
+        const instConfig = inst.config as Record<string, unknown>;
+        let nextConfig = instConfig;
+        if (patch.goalId === null || patch.goalContribution === undefined) {
+          if ('goalContribution' in instConfig) {
+            const { goalContribution: _drop, ...rest } = instConfig;
+            nextConfig = rest;
+          }
+        }
+        if (patch.goalId !== null && patch.goalContribution !== undefined) {
+          nextConfig = { ...instConfig, goalContribution: patch.goalContribution };
+        }
+        await tx
+          .update(tasks)
+          .set({ goalId: patch.goalId, config: nextConfig })
+          .where(eq(tasks.id, inst.id));
+      }
+    }
+
     await tx.insert(records).values({
       userId,
       kind: 'task_edited',
-      payload: { taskId: task.id, prior },
+      payload: { taskId: task.id, prior, retroEntry },
       source: opts.source,
       sourceMessageId: opts.sourceMessageId ?? null,
       toolCallId: opts.toolCallId ?? null,
     });
 
-    return { task: updated };
+    return { task: updated, retroCredited: !!retroEntry };
   });
 }
 
@@ -1032,6 +1251,10 @@ async function undoTaskRecord(
     cascadedInstanceIds?: string[];
     bulk?: boolean;
     tasks?: { taskId: string; title: string; cascadedInstanceIds: string[] }[];
+    // task_edited only — set when the edit that's being undone retro-
+    // credited an already-done-today completion; undoing the link removes
+    // that entry too, the same way un-completing does.
+    retroEntry?: { goalId: string; recordId: string } | null;
   };
   // A bulk removal's record has no top-level taskId — its "primary" task
   // (the one this function's single-task return value reflects) is just
@@ -1101,9 +1324,20 @@ async function undoTaskRecord(
         if ('dueAt' in prior) updates.dueAt = reviveDate(prior.dueAt);
         if ('recurrence' in prior) updates.recurrence = prior.recurrence as Recurrence | null;
         if ('config' in prior) updates.config = prior.config as Record<string, unknown>;
+        if ('goalId' in prior) updates.goalId = prior.goalId as string | null;
         const [t] = await tx.update(tasks).set(updates).where(eq(tasks.id, task.id)).returning();
         if (!t) throw new Error('task_update_failed');
         updated = t;
+        if (payload.retroEntry) {
+          await tx
+            .delete(goalEntries)
+            .where(
+              and(
+                eq(goalEntries.recordId, payload.retroEntry.recordId),
+                eq(goalEntries.goalId, payload.retroEntry.goalId),
+              ),
+            );
+        }
         break;
       }
       case 'task_postponed': {
