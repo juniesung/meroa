@@ -17,6 +17,19 @@ function formatNumber(n: number): string {
   return Number.isInteger(n) ? n.toLocaleString() : n.toLocaleString(undefined, { maximumFractionDigits: 2 });
 }
 
+// Money always shows two decimals once it has any fraction at all — an
+// integer dollar amount still reads as "$5" (no forced ".00"), but a
+// fractional one always pads to cents ("$0.50", never the observed "$0.5")
+// so a currency value never looks like it's missing a digit. Reused
+// everywhere else a currency amount renders (lib/ai/actions.ts,
+// lib/ai/goal-context.ts, lib/ai/pending-preview.ts) so the app never shows
+// two different renderings of the same amount.
+export function formatMoney(n: number): string {
+  return Number.isInteger(n)
+    ? n.toLocaleString()
+    : n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
 // --- fetch (live entries = goal_entries whose backing record was never
 // undone; summary.ts is the only place that reads entries for display, so
 // this filter is the single source of truth for "still counts") ----------
@@ -111,7 +124,7 @@ export function computeCardSummary(
   const progress = Math.min(1, Math.max(0, total / definition.targetValue));
   const pace = computePace(definition.targetValue, total, definition.deadline, tz, now);
 
-  const headline = `${unit}${formatNumber(total)} / ${unit}${formatNumber(definition.targetValue)}`;
+  const headline = `${unit}${formatMoney(total)} / ${unit}${formatMoney(definition.targetValue)}`;
   const entryCount = entries.length;
   const sub = entryCount === 0 ? 'No entries yet' : `${entryCount} ${entryCount === 1 ? 'entry' : 'entries'} logged`;
 
@@ -120,9 +133,9 @@ export function computeCardSummary(
     if (pace.reached) {
       paceLine = 'Target reached';
     } else if (pace.overdue) {
-      paceLine = `${unit}${formatNumber(pace.remaining)} to go — past the ${formatYmdShort(definition.deadline!)} deadline`;
+      paceLine = `${unit}${formatMoney(pace.remaining)} to go — past the ${formatYmdShort(definition.deadline!)} deadline`;
     } else {
-      paceLine = `needs ${unit}${formatNumber(pace.perDay)}/day to hit ${formatYmdShort(definition.deadline!)}`;
+      paceLine = `needs ${unit}${formatMoney(pace.perDay)}/day to hit ${formatYmdShort(definition.deadline!)}`;
     }
   }
 

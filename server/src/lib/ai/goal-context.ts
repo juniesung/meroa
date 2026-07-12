@@ -4,7 +4,7 @@ import { db } from '../../db/client.ts';
 import { goals, tasks } from '../../db/schema.ts';
 import { formatYmdShort, ymdInTz } from '../tasks/recurrence.ts';
 import type { GoalDefinition } from '../goals/schema.ts';
-import { buildGoalCardSummaries } from '../goals/summary.ts';
+import { buildGoalCardSummaries, formatMoney } from '../goals/summary.ts';
 import type { TurnRefs } from './task-context.ts';
 
 const MAX_ROWS = 10;
@@ -103,7 +103,7 @@ export async function buildGoalContext(
       const contribution = contributions.get(goal.id);
       const contributionLabel =
         contribution && contribution.contribution !== null
-          ? ` · ${definition.currency}${contribution.contribution}/completion via "${contribution.title}"`
+          ? ` · ${definition.currency}${formatMoney(contribution.contribution)}/completion via "${contribution.title}"`
           : '';
       line = `[${alias}] "${goal.name}" · ${summary.headline}${contributionLabel}${summary.paceLine ? ` · ${summary.paceLine}` : ''}${deadlineLabel} · ${summary.entryCount} ${summary.entryCount === 1 ? 'entry' : 'entries'}${lastLabel}`;
     }

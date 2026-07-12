@@ -1,4 +1,5 @@
 import type { GoalPreview, StarterTask } from '../goals/schema.ts';
+import { formatMoney } from '../goals/summary.ts';
 
 // The one kind of state that exists nowhere but the conversation: a
 // create_goal preview that hasn't been saved yet (create_goal deliberately
@@ -49,7 +50,9 @@ function describeStarter(starter: StarterTask, currency: string | null): string 
           ? ` every ${starter.recurrence.n} days`
           : '';
   const amount =
-    starter.contribution !== undefined && currency !== null ? ` (${currency}${starter.contribution}/completion)` : '';
+    starter.contribution !== undefined && currency !== null
+      ? ` (${currency}${formatMoney(starter.contribution)}/completion)`
+      : '';
   return `"${starter.title}"${cadence}${amount}`;
 }
 
@@ -60,7 +63,7 @@ export function renderPendingPreview(preview: GoalPreview | null): string {
   const currency = d.type === 'savings' ? d.currency : null;
   const facts =
     d.type === 'savings'
-      ? ` · ${d.currency}${d.targetValue}${d.deadline ? ` · by ${d.deadline}` : ''}`
+      ? ` · ${d.currency}${formatMoney(d.targetValue)}${d.deadline ? ` · by ${d.deadline}` : ''}`
       : d.type === 'indirect'
         ? ` · indirect (${d.unit}${d.targetValue !== undefined ? `, target ${d.targetValue}${d.unit}` : ', no target'}${d.deadline ? ` · by ${d.deadline}` : ''})`
         : ' · habit (daily check-in streak, no target amount)';

@@ -77,7 +77,9 @@ describe('renderPendingPreview', () => {
   it('renders the full proposal — name, target, deadline, starter cadence', () => {
     const line = renderPendingPreview(PORTUGAL);
     expect(line).toContain('"Portugal trip"');
-    expect(line).toContain('$1500');
+    // formatMoney adds the thousands separator (consistent with every other
+    // money rendering in the app — lib/goals/summary.ts's card headline).
+    expect(line).toContain('$1,500');
     expect(line).toContain('by 2026-12-25');
     expect(line).toContain('"Save $60" weekly on su ($60/completion)');
     expect(line).toContain('NOT saved yet');

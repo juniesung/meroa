@@ -14,6 +14,7 @@ import { radii, theme } from '@/constants/theme';
 import { useGoals } from '@/features/goals/queries';
 import { useMe } from '@/features/profile/queries';
 import { useLiveNow } from '@/hooks/use-live-now';
+import { formatMoney } from '@/lib/format';
 import type { ApiTask, ChecklistConfig, CounterConfig, DurationConfig } from '@/lib/api/types';
 import { toIconName } from '@/lib/icon';
 import { useRimHighlight } from './AnimatedPressable';
@@ -179,7 +180,7 @@ function goalLinkLabel(
   if (!goal) return null;
   const contribution = (task.config as { goalContribution?: number }).goalContribution;
   if (goal.definition.type === 'savings' && typeof contribution === 'number') {
-    return `${goal.definition.currency}${contribution} → ${goal.name}`;
+    return `${goal.definition.currency}${formatMoney(contribution)} → ${goal.name}`;
   }
   return `→ ${goal.name}`;
 }

@@ -5,8 +5,27 @@ import {
   computeIndirectCardSummary,
   computeIndirectPace,
   computeIndirectProgress,
+  formatMoney,
 } from './summary.ts';
 import type { IndirectGoalDefinition } from './schema.ts';
+
+// The "$0.5" bug: a fractional amount must always show two decimals, an
+// integer amount never a forced ".00".
+describe('formatMoney', () => {
+  it('pads a fractional amount to two decimals', () => {
+    expect(formatMoney(0.5)).toBe('0.50');
+    expect(formatMoney(1500.5)).toBe('1,500.50');
+  });
+
+  it('rounds to two decimals when there are more', () => {
+    expect(formatMoney(45.256)).toBe('45.26');
+  });
+
+  it('leaves a whole amount unpadded, with thousands separators', () => {
+    expect(formatMoney(5)).toBe('5');
+    expect(formatMoney(1500)).toBe('1,500');
+  });
+});
 
 // Pure card copy for habit goals — the streak IS the headline, and there is
 // never a progress fraction or pace to fake (docs/goals-redesign-plan.md §1).

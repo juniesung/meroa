@@ -159,7 +159,10 @@ export function rollPastToNextDay(date: Date, tz: string): Date {
   return ymdAndTimeToUtcDate(nextYmd, time, tz);
 }
 
-function isDueOn(recurrence: Recurrence, ymd: string, anchorYmd: string, tz: string): boolean {
+// Exported for reuse by lib/goals/starter-pace.ts's shortfall projection —
+// same "is this recurrence due on this calendar day" question, asked over a
+// future date range instead of a materialization cursor.
+export function isDueOn(recurrence: Recurrence, ymd: string, anchorYmd: string, tz: string): boolean {
   if (recurrence.freq === 'daily') return true;
   if (recurrence.freq === 'weekly') return recurrence.byWeekday.includes(weekdayOfYmd(ymd, tz));
   const diff = daysBetweenYmd(anchorYmd, ymd);

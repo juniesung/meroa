@@ -36,7 +36,8 @@ import {
   type LogGoalEntryPatch,
 } from '../goals/schema.ts';
 import { buildGoalScopedStreaks } from '../goals/consistency.ts';
-import { buildGoalCardSummaries } from '../goals/summary.ts';
+import { buildGoalCardSummaries, formatMoney } from '../goals/summary.ts';
+import { checkStarterPace } from '../goals/starter-pace.ts';
 import type { TurnRef, TurnRefs } from './task-context.ts';
 import { isAiToolName, validateToolInput, type AiToolName } from './tools.ts';
 
@@ -102,7 +103,7 @@ export type TaskActionResult =
 function describeEntryData(definition: GoalDefinition, data: GoalEntryData): string {
   const value =
     definition.type === 'savings'
-      ? `${definition.currency}${data.amount}`
+      ? `${definition.currency}${formatMoney(data.amount)}`
       : definition.type === 'indirect'
         ? `${data.amount}${definition.unit}`
         : `${data.amount}`;
@@ -186,10 +187,11 @@ async function goalImpactSuffix(
   const contribution = (after.config as { goalContribution?: unknown }).goalContribution;
   if (typeof contribution !== 'number') return '';
   const currency = definition.currency;
+  const amount = formatMoney(contribution);
   const fact = await goalHeadlineWithPace(goal, timezone);
   return becameDone
-    ? ` Auto-logged ${currency}${contribution} to "${goal.name}" — now ${fact}.`
-    : ` Removed today's ${currency}${contribution} auto-entry from "${goal.name}" — back to ${fact}.`;
+    ? ` Auto-logged ${currency}${amount} to "${goal.name}" — now ${fact}.`
+    : ` Removed today's ${currency}${amount} auto-entry from "${goal.name}" — back to ${fact}.`;
 }
 
 async function summarizeGoalUndo(
@@ -235,7 +237,7 @@ function describeGoalEdit(
   // narrowing never drops real info.
   if (beforeDef.type === 'savings' && afterDef.type === 'savings') {
     if (input.targetValue !== undefined) {
-      parts.push(`target is now ${afterDef.currency}${afterDef.targetValue} (was ${beforeDef.currency}${beforeDef.targetValue})`);
+      parts.push(`target is now ${afterDef.currency}${formatMoney(afterDef.targetValue)} (was ${beforeDef.currency}${formatMoney(beforeDef.targetValue)})`);
     }
     if (input.deadline !== undefined) {
       parts.push(
@@ -330,7 +332,7 @@ async function describeGoalLinkChange(
   if (typeof contribution !== 'number') return ` Linked to "${goal.name}".`;
   const fact = await goalHeadlineWithPace(goal, timezone);
   const retroNote = retroCredited ? " Today's completion was credited too." : '';
-  return ` Linked to "${goal.name}" — completing it logs ${definition.currency}${contribution}.${retroNote} Now ${fact}.`;
+  return ` Linked to "${goal.name}" — completing it logs ${definition.currency}${formatMoney(contribution)}.${retroNote} Now ${fact}.`;
 }
 
 // The AI reasons about times as local wall-clock ("7am") and often emits a
@@ -945,12 +947,32 @@ async function executeAiToolCallInner(
           definition,
           starterTasks: validated.data.starterTasks,
         };
+
+        // Advisory-only: a savings goal with a deadline whose proposed
+        // starter pace can't actually reach the target by then (small-nits
+        // ledger — "$5/day starter against $1000/7-day goal"). Never blocks
+        // the preview; just tells the model so it can propose a better pace
+        // before the user taps Create.
+        let paceNote = '';
+        if (definition.type === 'savings' && definition.deadline && validated.data.starterTasks?.length) {
+          const tz = timezone ?? 'UTC';
+          const shortfall = checkStarterPace(
+            definition.targetValue,
+            definition.deadline,
+            validated.data.starterTasks,
+            ymdInTz(new Date(), tz),
+            tz,
+          );
+          if (shortfall) {
+            paceNote = ` Heads up: at this pace the starter tasks only reach ${definition.currency}${formatMoney(shortfall.projectedTotal)} by ${definition.deadline}, short of the ${definition.currency}${formatMoney(definition.targetValue)} target by ${definition.currency}${formatMoney(shortfall.shortfall)} — consider proposing a bigger contribution or a later deadline before the user taps Create (they can still create it as-is if they want).`;
+          }
+        }
+
         return {
           ok: true,
           toolName,
           preview,
-          summary:
-            'Preview card shown — nothing is saved yet; the user taps Create on the card to save it. Do not ask them to confirm in chat text.',
+          summary: `Preview card shown — nothing is saved yet; the user taps Create on the card to save it. Do not ask them to confirm in chat text.${paceNote}`,
           recordKind: 'goal_preview',
         };
       }

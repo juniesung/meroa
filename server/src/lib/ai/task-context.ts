@@ -3,6 +3,7 @@ import { and, desc, eq, isNull } from 'drizzle-orm';
 import { db } from '../../db/client.ts';
 import { goals, records, tasks } from '../../db/schema.ts';
 import type { GoalDefinition } from '../goals/schema.ts';
+import { formatMoney } from '../goals/summary.ts';
 import { taskStatusOrder } from '../task-order.ts';
 import {
   describeRecurrence,
@@ -277,7 +278,7 @@ export async function buildTaskContext(userId: string, timezone: string | null):
       if (linkedDefinition?.type === 'habit') {
         goalLabel = ` · the daily check-in for habit goal "${displayRow.goalName}" (completing = checking in)`;
       } else if (typeof contribution === 'number') {
-        goalLabel = ` · auto-logs ${linkedDefinition?.type === 'savings' ? linkedDefinition.currency : ''}${contribution} to goal "${displayRow.goalName}" when completed`;
+        goalLabel = ` · auto-logs ${linkedDefinition?.type === 'savings' ? linkedDefinition.currency : ''}${formatMoney(contribution)} to goal "${displayRow.goalName}" when completed`;
       } else if (linkedDefinition?.type === 'indirect') {
         // Supporting activity only — completing it NEVER logs a number
         // (locked decision). Stated explicitly so the model doesn't assume

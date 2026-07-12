@@ -37,6 +37,7 @@ import {
 import { useCreateGoalFromPreview, useGoalConsistency, useGoals } from '@/features/goals/queries';
 import { useTabBarHeight } from '@/hooks/use-tab-bar-inset';
 import type { ApiTask, GoalPreview, StarterTask } from '@/lib/api/types';
+import { formatMoney } from '@/lib/format';
 import { toIconName } from '@/lib/icon';
 import { requestNotificationPermission } from '@/lib/notifications';
 
@@ -268,7 +269,7 @@ function GoalPreviewCard({ message }: { message: ChatMessage }) {
   const isSavings = definition.type === 'savings';
   const isIndirect = definition.type === 'indirect';
   const targetLine = isSavings
-    ? `Target: ${definition.currency}${definition.targetValue}`
+    ? `Target: ${definition.currency}${formatMoney(definition.targetValue)}`
     : isIndirect
       ? definition.targetValue !== undefined
         ? `Target: ${definition.targetValue}${definition.unit}`
@@ -305,7 +306,7 @@ function GoalPreviewCard({ message }: { message: ChatMessage }) {
           <Text key={idx} style={styles.previewFields}>
             ✓ {task.title}
             {isSavings && task.contribution !== undefined
-              ? ` — ${definition.currency}${task.contribution}`
+              ? ` — ${definition.currency}${formatMoney(task.contribution)}`
               : ''}
             {describeStarterTaskRecurrence(task.recurrence)}
           </Text>

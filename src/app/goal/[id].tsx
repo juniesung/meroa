@@ -12,17 +12,14 @@ import { radii, theme } from '@/constants/theme';
 import { useArchiveGoal, useGoal } from '@/features/goals/queries';
 import { GoalEntrySheet } from '@/features/goals/GoalEntrySheet';
 import type { ApiGoalDetail, ApiGoalEntry } from '@/lib/api/types';
+import { formatMoney, formatNumber } from '@/lib/format';
 import { toIconName } from '@/lib/icon';
-
-function formatNumber(n: number): string {
-  return Number.isInteger(n) ? n.toLocaleString() : n.toLocaleString(undefined, { maximumFractionDigits: 2 });
-}
 
 function formatEntryLine(detail: ApiGoalDetail, data: { amount: number; note?: string }): string {
   const value =
     detail.type === 'indirect'
       ? `${formatNumber(data.amount)}${detail.unit ?? ''}`
-      : `${detail.currency ?? ''}${formatNumber(data.amount)}`;
+      : `${detail.currency ?? ''}${formatMoney(data.amount)}`;
   return data.note ? `${value} — ${data.note}` : value;
 }
 
@@ -41,7 +38,7 @@ function TotalView({ detail }: { detail: ApiGoalDetail }) {
         <Ring value={pct} size={56} stroke={5} label={`${pct}%`} />
         <View style={{ flex: 1 }}>
           <Text style={styles.viewHeadline}>
-            {detail.currency}{formatNumber(detail.total ?? 0)} / {detail.currency}{formatNumber(detail.targetValue ?? 0)}
+            {detail.currency}{formatMoney(detail.total ?? 0)} / {detail.currency}{formatMoney(detail.targetValue ?? 0)}
           </Text>
           {detail.card.paceLine ? <Text style={styles.viewSub}>{detail.card.paceLine}</Text> : null}
         </View>
