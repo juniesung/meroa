@@ -1,6 +1,6 @@
 import * as Haptics from 'expo-haptics';
 import { useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Animated from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -10,6 +10,7 @@ import { Ring } from '@/components/Ring';
 import { SwipeToDelete } from '@/components/SwipeToDelete';
 import { isOverdue, TaskCard, taskProgressFraction } from '@/components/TaskCard';
 import { theme } from '@/constants/theme';
+import { useGoals } from '@/features/goals/queries';
 import { useMe } from '@/features/profile/queries';
 import { TaskFormSheet } from '@/features/tasks/TaskFormSheet';
 import { useCompleteTask, useDeleteTask, useProgressTask, useTasks } from '@/features/tasks/queries';
@@ -24,6 +25,7 @@ function haptic() {
 
 export default function TasksScreen() {
   const { data: tasks = [], isLoading } = useTasks();
+  const { data: goals = [] } = useGoals();
   const { data: me } = useMe();
   const timezone = me?.user.timezone;
   const completeTask = useCompleteTask();
@@ -31,6 +33,42 @@ export default function TasksScreen() {
   const deleteTask = useDeleteTask();
   const tabBarHeight = useTabBarHeight();
   const addFeedback = useTapFeedback(0.9);
+
+  // Deleting a goal-linked recurring task is never a silent swipe
+  // (user rule): a template takes its goal with it (the server cascade in
+  // lib/tasks/executor.ts), so it gets an explicit "removes the goal too"
+  // confirm; a day instance only skips today and comes back tomorrow, so
+  // its confirm just says that. Everything else deletes on swipe as before.
+  function confirmDelete(t: ApiTask) {
+    const linkedGoal = t.goalId ? goals.find((g) => g.id === t.goalId) : undefined;
+    if (!linkedGoal) {
+      deleteTask.mutate(t.id);
+      return;
+    }
+    if (t.recurrence) {
+      Alert.alert(
+        'This task powers a goal',
+        `"${t.title}" is the repeating task behind "${linkedGoal.name}". Deleting it removes the goal too.`,
+        [
+          { text: 'Keep it', style: 'cancel' },
+          { text: 'Delete both', style: 'destructive', onPress: () => deleteTask.mutate(t.id) },
+        ],
+      );
+      return;
+    }
+    if (t.templateId) {
+      Alert.alert(
+        'Skip today?',
+        `"${t.title}" is linked to "${linkedGoal.name}". Deleting removes it just for today — it'll be back tomorrow.`,
+        [
+          { text: 'Keep it', style: 'cancel' },
+          { text: 'Skip today', style: 'destructive', onPress: () => deleteTask.mutate(t.id) },
+        ],
+      );
+      return;
+    }
+    deleteTask.mutate(t.id);
+  }
 
   const [createVisible, setCreateVisible] = useState(false);
   const [editingTemplate, setEditingTemplate] = useState<ApiTask | null>(null);
@@ -68,7 +106,7 @@ export default function TasksScreen() {
 
   function renderTaskCard(t: ApiTask) {
     return (
-      <SwipeToDelete key={t.id} onDelete={() => deleteTask.mutate(t.id)}>
+      <SwipeToDelete key={t.id} onDelete={() => confirmDelete(t)}>
         <TaskCard
           task={t}
           onToggleComplete={() => completeTask.mutate({ id: t.id })}
@@ -138,7 +176,7 @@ export default function TasksScreen() {
             <Text style={styles.sectionTitle}>REPEATING</Text>
             <View style={{ gap: 10, marginTop: 10 }}>
               {templates.map((t) => (
-                <SwipeToDelete key={t.id} onDelete={() => deleteTask.mutate(t.id)}>
+                <SwipeToDelete key={t.id} onDelete={() => confirmDelete(t)}>
                   <TemplateRow task={t} onPress={() => setEditingTemplate(t)} />
                 </SwipeToDelete>
               ))}

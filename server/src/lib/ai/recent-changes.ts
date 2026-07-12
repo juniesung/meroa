@@ -62,6 +62,60 @@ function describeUndo(undidKind: string, title: string): string {
   }
 }
 
+// One noun phrase per undoable record kind — what undo_last_action would
+// take back, phrased as the action itself ("removing goal X"), not its
+// effect, so the state line below reads as "the next undo reverts <this>".
+function describeUndoable(kind: string, title: string): string {
+  switch (kind) {
+    case 'task_created':
+      return `creating task "${title}"`;
+    case 'task_completion':
+      return `completing "${title}"`;
+    case 'task_progress':
+      return `the last progress update on "${title}"`;
+    case 'task_edited':
+      return `the last edit to "${title}"`;
+    case 'task_postponed':
+      return `postponing "${title}"`;
+    case 'task_removed':
+      return `removing "${title}"`;
+    case 'goal_created':
+      return `creating goal "${title}" (its starter tasks go too)`;
+    case 'goal_edited':
+      return `the last edit to goal "${title}"`;
+    case 'goal_entry':
+      return `the last entry logged to "${title}"`;
+    case 'goal_archived':
+      return `removing goal "${title}" (restores the goal AND its linked tasks)`;
+    default:
+      return `the last change to "${title}"`;
+  }
+}
+
+/**
+ * The state line for lib/tasks/executor.ts's peekUndoTarget: exactly what
+ * undo_last_action would revert right now. The recent-changes feed below
+ * narrates what happened; this states what undo DOES — without it, an
+ * action that happened out-of-band (a Tasks-tab swipe) left the model's
+ * conversational memory saying "nothing was ever saved", and it refused
+ * "undo that" as nothing-to-undo (observed live). '' when there's nothing
+ * undoable.
+ */
+export function renderUndoTarget(
+  target: { kind: string; payload: unknown; source: string } | null,
+): string {
+  if (!target) return '';
+  const payload = target.payload as {
+    title?: string;
+    name?: string;
+    tasks?: { title: string }[];
+  };
+  const desc = payload.tasks?.length
+    ? `removing ${payload.tasks.map((t) => `"${t.title}"`).join(', ')}`
+    : describeUndoable(target.kind, payload.title ?? payload.name ?? 'the last change');
+  return `If the user asks to undo: undo_last_action currently reverts ${desc}. This includes actions taken in the app outside this chat — never claim there's nothing to undo while this line is present.`;
+}
+
 /**
  * Out-of-band task/goal mutations — a Tasks-tab tap, a goal preview
  * Create-tap, a quick-entry log — are otherwise invisible to the model: its

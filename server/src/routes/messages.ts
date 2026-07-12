@@ -7,13 +7,14 @@ import { z } from 'zod';
 import { db } from '../db/client.ts';
 import { messages, users } from '../db/schema.ts';
 import { streamChatReply, type ChatHistoryMessage } from '../lib/ai/chat.ts';
-import { buildRecentChangesFeed } from '../lib/ai/recent-changes.ts';
+import { buildRecentChangesFeed, renderUndoTarget } from '../lib/ai/recent-changes.ts';
 import { buildTailBlock } from '../lib/ai/system-prompt.ts';
 import { buildTaskContext } from '../lib/ai/task-context.ts';
 import { buildGoalContext } from '../lib/ai/goal-context.ts';
 import { findPendingPreview, renderPendingPreview } from '../lib/ai/pending-preview.ts';
 import { buildGoalConsistency } from '../lib/goals/consistency.ts';
 import { getOrCreateAppConversation, getRecentMessages } from '../lib/conversations.ts';
+import { peekUndoTarget } from '../lib/tasks/executor.ts';
 import { materializeRecurringInstances } from '../lib/tasks/recurrence.ts';
 import { computeAllowance, withUserChatLock } from '../lib/usage.ts';
 import { logger } from '../logger.ts';
@@ -163,6 +164,11 @@ messageRoutes.post('/', zValidator('json', sendSchema), async (c) => {
   // must resolve against state rather than deep history.
   const pendingPreviewText = renderPendingPreview(findPendingPreview(history));
 
+  // "undo that" must work even when the thing to undo happened in the app,
+  // not in chat — state it as a fact rather than leaving the model to infer
+  // it from the recent-changes narrative (it didn't, observed live).
+  const undoTargetText = renderUndoTarget(await peekUndoTarget(userId));
+
   const tailText = buildTailBlock({
     now: new Date(),
     timezone: userContext.timezone,
@@ -172,6 +178,7 @@ messageRoutes.post('/', zValidator('json', sendSchema), async (c) => {
     recentChangesText,
     streakText,
     pendingPreviewText,
+    undoTargetText,
   });
 
   return streamSSE(c, async (stream) => {

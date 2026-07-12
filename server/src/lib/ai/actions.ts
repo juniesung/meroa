@@ -693,9 +693,17 @@ async function executeAiToolCallInner(
               "no removal happened — that task ref doesn't match any current task; it may already be gone or the ref may be wrong. Check the task list.",
           };
         const scope = validated.data.scope ?? 'series';
+        // Removing a goal-linked series removes the goal with it (the
+        // executor's cascade rule) — the confirmation tap has to say so, or
+        // the user is consenting to less than what happens.
+        let goalNote = '';
+        if (resolved.ref.isRecurringSeries && scope === 'series' && task.recurrence && task.goalId) {
+          const linkedGoal = await getGoalRow(userId, task.goalId);
+          if (linkedGoal) goalNote = ` This task powers goal "${linkedGoal.name}" — removing it removes the goal too.`;
+        }
         const summary =
           resolved.ref.isRecurringSeries && scope === 'series' && task.recurrence
-            ? `Tap to confirm removing "${task.title}" — repeats, removes the whole series.`
+            ? `Tap to confirm removing "${task.title}" — repeats, removes the whole series.${goalNote}`
             : resolved.ref.isRecurringSeries && scope === 'occurrence'
               ? `Tap to confirm skipping today's "${task.title}" — the schedule keeps going.`
               : `Tap to confirm removing "${task.title}".`;
@@ -718,6 +726,7 @@ async function executeAiToolCallInner(
         // versa, in a batch that mixes both.
         const skippedTitles: string[] = [];
         const removedTitles: string[] = [];
+        const cascadedGoalNames = new Set<string>();
         for (const item of validated.data.items) {
           const resolved = resolveTaskRef(refs, item.taskRef);
           if (!resolved.ok) return { ok: false, error: `${item.taskRef}: ${resolved.error}` };
@@ -735,10 +744,20 @@ async function executeAiToolCallInner(
           resolvedTasks.push(task);
           const isOccurrenceSkip = resolved.ref.isRecurringSeries && scope === 'occurrence';
           (isOccurrenceSkip ? skippedTitles : removedTitles).push(`"${task.title}"`);
+          // Same disclosure as remove_task: a goal-linked series in the
+          // batch takes its goal with it, and the confirm text must say so.
+          if (!isOccurrenceSkip && task.recurrence && task.goalId) {
+            const linkedGoal = await getGoalRow(userId, task.goalId);
+            if (linkedGoal) cascadedGoalNames.add(linkedGoal.name);
+          }
         }
 
         const parts: string[] = [];
         if (removedTitles.length) parts.push(`remove ${removedTitles.join(', ')} for good`);
+        if (cascadedGoalNames.size)
+          parts.push(
+            `this also removes ${[...cascadedGoalNames].map((n) => `goal "${n}"`).join(' and ')} (powered by those tasks)`,
+          );
         if (skippedTitles.length)
           parts.push(`skip today's occurrence of ${skippedTitles.join(', ')} — the schedule keeps going`);
         return {

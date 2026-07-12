@@ -224,7 +224,7 @@ export const AI_TOOLS: Anthropic.Tool[] = [
   {
     name: 'remove_task',
     description:
-      "Request removing a task the user no longer wants tracked — this does NOT delete it immediately. It shows the user a card with the real task on it so they can confirm or cancel themselves; nothing is removed until they tap confirm. Call this as soon as you know which task they mean — don't ask the user to confirm in chat text first; the tap on the card IS the confirmation, so asking again in words just makes them confirm twice. Only ever target a task actually present in the task list in context right now — if the user's wording could describe something from earlier in the conversation that's already gone, edited, or was never a match to begin with, say so rather than guessing a different real task just because it happens to share a title, time, or schedule. For a single task, use this; for several at once, use remove_tasks instead.",
+      "Request removing a task the user no longer wants tracked — this does NOT delete it immediately. It shows the user a card with the real task on it so they can confirm or cancel themselves; nothing is removed until they tap confirm. Call this as soon as you know which task they mean — don't ask the user to confirm in chat text first; the tap on the card IS the confirmation, so asking again in words just makes them confirm twice. Only ever target a task actually present in the task list in context right now — if the user's wording could describe something from earlier in the conversation that's already gone, edited, or was never a match to begin with, say so rather than guessing a different real task just because it happens to share a title, time, or schedule. Removing a goal-linked repeating task with series scope removes its goal along with it (the confirmation card says so) — 'occurrence' scope just skips today and leaves the goal alone; a repeating task can't be removed while keeping its goal, so if that's what the user wants, say so instead of calling this. For a single task, use this; for several at once, use remove_tasks instead.",
     input_schema: {
       type: 'object',
       properties: {
@@ -243,7 +243,7 @@ export const AI_TOOLS: Anthropic.Tool[] = [
   {
     name: 'remove_tasks',
     description:
-      'Request removing several tasks at once — same pending-confirmation flow as remove_task (nothing is removed until the user taps Confirm), but a single card and a single tap for all of them. Call this as soon as you know which tasks they mean — don\'t ask the user to confirm in chat text first; the tap on the card IS the confirmation. Use this instead of calling remove_task repeatedly whenever the user wants more than one task gone in the same request (e.g. "remove all my tasks", "clear the finished ones", "delete the water and pushups tasks").',
+      'Request removing several tasks at once — same pending-confirmation flow as remove_task (nothing is removed until the user taps Confirm), but a single card and a single tap for all of them. Call this as soon as you know which tasks they mean — don\'t ask the user to confirm in chat text first; the tap on the card IS the confirmation. Goal-linked repeating tasks in the batch take their goals with them (the confirmation card says so). Use this instead of calling remove_task repeatedly whenever the user wants more than one task gone in the same request (e.g. "remove all my tasks", "clear the finished ones", "delete the water and pushups tasks").',
     input_schema: {
       type: 'object',
       properties: {

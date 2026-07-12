@@ -567,3 +567,49 @@ not new to habit.
 
 *Deferred, same as savings:* post-creation task→goal linking; `checkInCadence`
 acted on in Phase 6; indirect + milestone types in their own passes.
+
+## Recurring-task delete semantics (2026-07-12) — built, tested, shipped
+
+User-specified rules, all verified live end to end:
+
+1. **Deleting a day instance** (daily list) only skips that day — the template
+   and any linked goal survive, and the next day's instance materializes
+   normally. Already true mechanically (the materialization cursor counts
+   deleted instances as handled days); verified live including a simulated
+   next-day rematerialization.
+2. **Deleting a repeating task** (REPEATING section) removes it from the daily
+   list too (open instances cascade — pre-existing) and nothing materializes
+   after; done instances stay as history.
+3. **Goal-linked recurring deletes are never a silent swipe.** The Tasks tab
+   now confirms first (`confirmDelete` in tasks.tsx): a goal-linked *template*
+   gets "…is the repeating task behind ‹goal›. Deleting it removes the goal
+   too." with Keep it / Delete both; a goal-linked *instance* gets "skips
+   today — it'll be back tomorrow." The AI's pending-removal card discloses
+   the same ("this also removes goal ‹X› (powered by those tasks)") — by the
+   time DELETE reaches the server, the user has consented to the full effect.
+4. **Deleting a goal-linked template deletes its goal**, with exactly
+   remove_goal's semantics: `archiveGoalCascadeInTx` (new, in
+   lib/tasks/executor.ts — shared with goals/executor's archiveGoal, placed
+   there to avoid a runtime import cycle) archives the goal, cascades every
+   linked task, and writes ONE goal_archived record so "undo" restores goal +
+   tasks as a unit. Wired into removeTask and removeTasks; bulk batches
+   dedupe tasks a same-batch cascade already deleted (verified live with a
+   duplicate-template-id batch from the model), and a batch fully absorbed by
+   cascades writes no empty task_removed record.
+5. **Deleting a goal deletes all its linked tasks** — pre-existing cascade,
+   re-verified.
+
+**Found & fixed along the way:** "undo that" in chat right after an *app*
+(non-chat) deletion was refused as "nothing to undo" — the model's
+conversational memory ("nothing was ever saved") outweighed the
+recent-changes narrative. Fix: a deterministic undo-target state line in the
+tail (`peekUndoTarget` in tasks/executor — same candidate query as
+undoLastAction so it can't disagree — rendered by `renderUndoTarget`):
+"undo_last_action currently reverts removing goal X… never claim there's
+nothing to undo while this line is present." Re-tested live: the same undo
+that failed now restores goal + template + instances. New unit suite covers
+the renderer (45/45 total).
+
+*Known wobble:* given "undo that delete" after two separate deletions, the
+model chained two undo calls in one turn (restored both) — over-eager but
+state-correct; same narrate-wobble ledger as before.

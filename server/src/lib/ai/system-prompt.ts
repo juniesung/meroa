@@ -90,6 +90,10 @@ export type TailBlockInput = {
   // conversation: an un-tapped create_goal preview
   // (lib/ai/pending-preview.ts). '' when nothing is pending.
   pendingPreviewText: string;
+  // What undo_last_action would revert right now (lib/ai/recent-changes.ts's
+  // renderUndoTarget) — covers actions taken in the app outside chat, which
+  // the model's own history can't see. '' when nothing is undoable.
+  undoTargetText: string;
 };
 
 /**
@@ -127,6 +131,7 @@ export function buildTailBlock(input: TailBlockInput): string {
   ];
   if (input.pendingPreviewText) parts.push('', '# Pending preview', input.pendingPreviewText);
   if (input.recentChangesText) parts.push('', input.recentChangesText);
+  if (input.undoTargetText) parts.push('', input.undoTargetText);
   parts.push(
     '',
     'Any task or goal mentioned earlier in this conversation but absent from the lists above no longer exists.',

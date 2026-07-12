@@ -594,6 +594,77 @@ export async function postponeTask(
 
 // --- remove ----------------------------------------------------------
 
+/**
+ * Archive a goal and cascade its linked tasks inside an existing
+ * transaction — the single implementation behind goals/executor's
+ * archiveGoal (remove_goal / DELETE /goals/:id) AND the goal-linked
+ * template removal rule in removeTask/removeTasks below. Lives here rather
+ * than in goals/executor because tasks/executor may not value-import it
+ * (goals/executor already value-imports createTaskInTx from here — the
+ * reverse edge would be a runtime cycle), same reason undoGoalRecord lives
+ * here. Recurring templates cascade regardless of status (they're never
+ * 'done'); instances and standalone linked tasks only while open — a done
+ * instance is history and keeps its record. Writes the one goal_archived
+ * record whose payload.cascadedTaskIds lets undo restore the whole unit.
+ */
+export async function archiveGoalCascadeInTx(
+  tx: Tx,
+  userId: string,
+  goal: GoalRow,
+  opts: ActionSource,
+): Promise<{ goal: GoalRow; cascadedTaskIds: string[]; cascadedTaskTitles: string[] }> {
+  const [updated] = await tx
+    .update(goals)
+    .set({ archivedAt: new Date() })
+    .where(eq(goals.id, goal.id))
+    .returning();
+  if (!updated) throw new Error('goal_update_failed');
+
+  const linked = await tx
+    .select({ id: tasks.id, title: tasks.title, recurrence: tasks.recurrence, status: tasks.status })
+    .from(tasks)
+    .where(and(eq(tasks.goalId, goal.id), isNull(tasks.deletedAt)));
+  const toCascade = linked.filter((t) => t.recurrence !== null || t.status === 'open');
+  const cascadedTaskIds = toCascade.map((t) => t.id);
+  if (cascadedTaskIds.length) {
+    await tx.update(tasks).set({ deletedAt: new Date() }).where(inArray(tasks.id, cascadedTaskIds));
+  }
+  // One title per template/task, not per materialized instance — for the
+  // "removed along with …" summary.
+  const cascadedTaskTitles = [...new Set(toCascade.map((t) => t.title))];
+
+  await tx.insert(records).values({
+    userId,
+    kind: 'goal_archived',
+    payload: { goalId: goal.id, name: goal.name, cascadedTaskIds },
+    source: opts.source,
+    sourceMessageId: opts.sourceMessageId ?? null,
+    toolCallId: opts.toolCallId ?? null,
+  });
+
+  return { goal: updated, cascadedTaskIds, cascadedTaskTitles };
+}
+
+// A repeating task that powers a goal doesn't outlive it: removing the
+// TEMPLATE removes the goal too, with exactly remove_goal's semantics (the
+// cascade above deletes the template alongside everything else linked and
+// leaves one goal_archived record, so "undo" restores goal + tasks as a
+// unit). Instances never trigger this (their recurrence is null) — deleting
+// today's check-in just skips today, and tomorrow materializes normally.
+// The client warns + double-confirms before calling DELETE on such a
+// template; the AI's pending-removal card says it in the tap-to-confirm
+// text — by the time either reaches here, the user has said yes to the
+// goal going too.
+async function loadLiveLinkedGoal(tx: Tx, task: TaskRow): Promise<GoalRow | null> {
+  if (!task.recurrence || !task.goalId) return null;
+  const [goal] = await tx
+    .select()
+    .from(goals)
+    .where(and(eq(goals.id, task.goalId), isNull(goals.archivedAt)))
+    .limit(1);
+  return goal ?? null;
+}
+
 export async function removeTask(
   userId: string,
   taskId: string,
@@ -610,6 +681,16 @@ export async function removeTask(
     if (idempotent) return { task: await loadTask(tx, userId, taskId) };
 
     const task = await loadTaskForUpdate(tx, userId, taskId);
+
+    const linkedGoal = await loadLiveLinkedGoal(tx, task);
+    if (linkedGoal) {
+      await archiveGoalCascadeInTx(tx, userId, linkedGoal, opts);
+      // The cascade deleted this template (it's linked) — return the
+      // deleted row directly; loadTask would 404 on it now.
+      const [removedRow] = await tx.select().from(tasks).where(eq(tasks.id, task.id)).limit(1);
+      if (!removedRow) throw new Error('task_update_failed');
+      return { task: removedRow };
+    }
 
     const [updated] = await tx
       .update(tasks)
@@ -679,9 +760,34 @@ export async function removeTasks(
 
     const removed: TaskRow[] = [];
     const recordTasks: { taskId: string; title: string; cascadedInstanceIds: string[] }[] = [];
+    // Tasks a goal cascade in this same batch already deleted — a batch can
+    // contain both a goal-linked template and its instance (or two tasks of
+    // the same goal); the second must not 404 or double-delete.
+    const cascadeDeleted = new Set<string>();
 
     for (const taskId of taskIds) {
+      if (cascadeDeleted.has(taskId)) {
+        const [row] = await tx.select().from(tasks).where(eq(tasks.id, taskId)).limit(1);
+        if (row) removed.push(row);
+        continue;
+      }
       const task = await loadTaskForUpdate(tx, userId, taskId);
+
+      const linkedGoal = await loadLiveLinkedGoal(tx, task);
+      if (linkedGoal) {
+        // Goal-linked template: same rule as removeTask — the goal goes
+        // with it, one goal_archived record of its own (inserted before
+        // the batch's task_removed record below, so chained undos peel
+        // the batch first, then the goal). This item is deliberately NOT
+        // in recordTasks: restoring it belongs to the goal record.
+        const cascade = await archiveGoalCascadeInTx(tx, userId, linkedGoal, opts);
+        for (const id of cascade.cascadedTaskIds) cascadeDeleted.add(id);
+        const [row] = await tx.select().from(tasks).where(eq(tasks.id, task.id)).limit(1);
+        if (!row) throw new Error('task_update_failed');
+        removed.push(row);
+        continue;
+      }
+
       const [updated] = await tx
         .update(tasks)
         .set({ deletedAt: new Date() })
@@ -704,14 +810,19 @@ export async function removeTasks(
       recordTasks.push({ taskId: task.id, title: task.title, cascadedInstanceIds });
     }
 
-    await tx.insert(records).values({
-      userId,
-      kind: 'task_removed',
-      payload: { bulk: true, tasks: recordTasks },
-      source: opts.source,
-      sourceMessageId: opts.sourceMessageId ?? null,
-      toolCallId: opts.toolCallId ?? null,
-    });
+    // A batch fully absorbed by goal cascades writes no task_removed record
+    // of its own — the goal_archived records already cover every deletion,
+    // and an empty bulk record would be a no-op undo target.
+    if (recordTasks.length) {
+      await tx.insert(records).values({
+        userId,
+        kind: 'task_removed',
+        payload: { bulk: true, tasks: recordTasks },
+        source: opts.source,
+        sourceMessageId: opts.sourceMessageId ?? null,
+        toolCallId: opts.toolCallId ?? null,
+      });
+    }
 
     return { tasks: removed };
   });
@@ -735,6 +846,35 @@ export type UndoResult = {
   // lesson 16: a bare "reverted" summary forces the model to guess).
   goalEntryData?: Record<string, unknown>;
 };
+
+/**
+ * What undo_last_action would revert right now, without reverting anything —
+ * rendered as a state line in the AI tail (lib/ai/recent-changes.ts's
+ * renderUndoTarget). Out-of-band actions (a Tasks-tab swipe, a Goals-tab
+ * removal) are invisible to the model's conversation history, and observed
+ * live that made it refuse "undo that" as "nothing to undo" right after a
+ * UI deletion; a deterministic state fact beats hoping it infers one from
+ * the recent-changes narrative. Same candidate query as undoLastAction
+ * below so the line can never disagree with what undo would actually do.
+ */
+export async function peekUndoTarget(
+  userId: string,
+): Promise<{ kind: string; payload: unknown; source: string } | null> {
+  const [record] = await db
+    .select({ kind: records.kind, payload: records.payload, source: records.source })
+    .from(records)
+    .where(
+      and(
+        eq(records.userId, userId),
+        isNull(records.revertedAt),
+        or(like(records.kind, 'task_%'), like(records.kind, 'goal_%')),
+        notInArray(records.kind, ['task_undo', 'goal_undo']),
+      ),
+    )
+    .orderBy(desc(records.createdAt))
+    .limit(1);
+  return record ?? null;
+}
 
 export async function undoLastAction(userId: string, opts: ActionSource): Promise<UndoResult> {
   return db.transaction(async (tx) => {
