@@ -107,25 +107,31 @@ export default function TasksScreen() {
   function renderTaskCard(t: ApiTask) {
     return (
       <SwipeToDelete key={t.id} onDelete={() => confirmDelete(t)}>
-        <TaskCard
-          task={t}
-          onToggleComplete={() => completeTask.mutate({ id: t.id })}
-          onCounterIncrement={() =>
-            progressTask.mutate({ id: t.id, input: { kind: 'counter_increment' } })
-          }
-          onCounterDecrement={() =>
-            progressTask.mutate({ id: t.id, input: { kind: 'counter_increment', amount: -1 } })
-          }
-          onTimerStart={() => {
-            void requestNotificationPermission();
-            progressTask.mutate({ id: t.id, input: { kind: 'duration_start' } });
-          }}
-          onTimerStop={() => progressTask.mutate({ id: t.id, input: { kind: 'duration_stop' } })}
-          onDurationReopen={() => progressTask.mutate({ id: t.id, input: { kind: 'reopen' } })}
-          onToggleItem={(itemId) =>
-            progressTask.mutate({ id: t.id, input: { kind: 'checklist_toggle', itemId } })
-          }
-        />
+        {(guardPress) => (
+          <TaskCard
+            task={t}
+            onToggleComplete={guardPress(() => completeTask.mutate({ id: t.id }))}
+            onCounterIncrement={guardPress(() =>
+              progressTask.mutate({ id: t.id, input: { kind: 'counter_increment' } }),
+            )}
+            onCounterDecrement={guardPress(() =>
+              progressTask.mutate({ id: t.id, input: { kind: 'counter_increment', amount: -1 } }),
+            )}
+            onTimerStart={guardPress(() => {
+              void requestNotificationPermission();
+              progressTask.mutate({ id: t.id, input: { kind: 'duration_start' } });
+            })}
+            onTimerStop={guardPress(() =>
+              progressTask.mutate({ id: t.id, input: { kind: 'duration_stop' } }),
+            )}
+            onDurationReopen={guardPress(() =>
+              progressTask.mutate({ id: t.id, input: { kind: 'reopen' } }),
+            )}
+            onToggleItem={guardPress((itemId: string) =>
+              progressTask.mutate({ id: t.id, input: { kind: 'checklist_toggle', itemId } }),
+            )}
+          />
+        )}
       </SwipeToDelete>
     );
   }
@@ -177,7 +183,9 @@ export default function TasksScreen() {
             <View style={{ gap: 10, marginTop: 10 }}>
               {templates.map((t) => (
                 <SwipeToDelete key={t.id} onDelete={() => confirmDelete(t)}>
-                  <TemplateRow task={t} onPress={() => setEditingTemplate(t)} />
+                  {(guardPress) => (
+                    <TemplateRow task={t} onPress={guardPress(() => setEditingTemplate(t))} />
+                  )}
                 </SwipeToDelete>
               ))}
             </View>

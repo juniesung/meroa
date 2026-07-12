@@ -89,9 +89,21 @@ export function useDeleteTask() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api.deleteTask(id),
+    // Deleting a recurring TEMPLATE cascades its OPEN instances server-side
+    // (lib/tasks/executor.ts's removeTask) — a done instance deliberately
+    // survives as history. The response only carries the template row
+    // itself, so without also dropping any cached OPEN row whose
+    // templateId points at what was just deleted, today's materialized
+    // instance stayed visible until the onSettled refetch happened to land
+    // (observed live as "the daily task doesn't disappear"). Scoped to
+    // status === 'open' here too — an unconditional filter would instead
+    // flash-hide a genuinely-preserved done instance until that same
+    // refetch corrected it back.
     onSuccess: (data) => {
       queryClient.setQueryData<{ tasks: ApiTask[] }>(tasksQueryKey, (prev) => ({
-        tasks: (prev?.tasks ?? []).filter((t) => t.id !== data.task.id),
+        tasks: (prev?.tasks ?? []).filter(
+          (t) => t.id !== data.task.id && !(t.templateId === data.task.id && t.status === 'open'),
+        ),
       }));
     },
     onSettled: () => {
@@ -105,10 +117,17 @@ export function useBulkDeleteTasks() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (taskIds: string[]) => api.bulkRemoveTasks(taskIds),
+    // Same cascaded-instance gap as useDeleteTask above, batched — and the
+    // same status === 'open' scoping so a done instance of a removed
+    // template isn't optimistically (and wrongly) hidden.
     onSuccess: (data) => {
       const removedIds = new Set(data.tasks.map((t) => t.id));
       queryClient.setQueryData<{ tasks: ApiTask[] }>(tasksQueryKey, (prev) => ({
-        tasks: (prev?.tasks ?? []).filter((t) => !removedIds.has(t.id)),
+        tasks: (prev?.tasks ?? []).filter(
+          (t) =>
+            !removedIds.has(t.id) &&
+            !(t.templateId && removedIds.has(t.templateId) && t.status === 'open'),
+        ),
       }));
     },
     onSettled: () => {

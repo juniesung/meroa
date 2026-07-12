@@ -302,41 +302,44 @@ export function TaskCard({
 
   return (
     <View style={styles.card}>
-      <View style={styles.headerRow}>
-        <Pressable
-          onPress={handleBannerPress}
-          onPressIn={rim.onPressIn}
-          onPressOut={rim.onPressOut}
-          style={styles.headerTappable}
-        >
-          <Animated.View pointerEvents="none" style={[styles.rimHighlight, rim.highlightStyle]} />
-          <View style={styles.iconChip}>
-            <Icon name={toIconName(task.icon)} size={18} color={theme.blue} stroke={1.9} />
+      {/* A direct child of the card, not the Pressable below — sized to hug
+          the card's own outer border (same pattern as tasks.tsx's
+          TemplateRow) rather than a smaller inset box around just the
+          icon/title, which used to leave the trailing checkbox and the rest
+          of the banner looking unhighlighted and untappable on press. */}
+      <Animated.View pointerEvents="none" style={[styles.rimHighlight, rim.highlightStyle]} />
+      <Pressable
+        onPress={handleBannerPress}
+        onPressIn={rim.onPressIn}
+        onPressOut={rim.onPressOut}
+        style={styles.headerRow}
+      >
+        <View style={styles.iconChip}>
+          <Icon name={toIconName(task.icon)} size={18} color={theme.blue} stroke={1.9} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <View style={styles.titleRow}>
+            <Text style={[styles.title, done && styles.strike]} numberOfLines={1}>
+              {task.title}
+            </Text>
+            {task.templateId && <Icon name="repeat" size={12} color={theme.faint} stroke={2.2} />}
           </View>
-          <View style={{ flex: 1 }}>
-            <View style={styles.titleRow}>
-              <Text style={[styles.title, done && styles.strike]} numberOfLines={1}>
-                {task.title}
+          {meta && <Text style={[styles.meta, meta.danger && styles.metaDanger]}>{meta.text}</Text>}
+          {goalLabel && (
+            <View style={styles.goalChip}>
+              <Icon name="goals" size={10} color={theme.blue} stroke={2.4} />
+              <Text style={styles.goalChipText} numberOfLines={1}>
+                {goalLabel}
               </Text>
-              {task.templateId && <Icon name="repeat" size={12} color={theme.faint} stroke={2.2} />}
             </View>
-            {meta && <Text style={[styles.meta, meta.danger && styles.metaDanger]}>{meta.text}</Text>}
-            {goalLabel && (
-              <View style={styles.goalChip}>
-                <Icon name="goals" size={10} color={theme.blue} stroke={2.4} />
-                <Text style={styles.goalChipText} numberOfLines={1}>
-                  {goalLabel}
-                </Text>
-              </View>
-            )}
-          </View>
-        </Pressable>
+          )}
+        </View>
 
         {task.type === 'completion' && <StatusDot done={done} />}
         {task.type === 'counter' && <StatusDot done={done} />}
         {task.type === 'checklist' && <StatusDot done={done} />}
         {task.type === 'duration' && <DurationStatusDot done={done} running={running} />}
-      </View>
+      </Pressable>
 
       {task.type === 'checklist' && (
         <ChecklistBody config={task.config as ChecklistConfig} expanded={expanded} onToggleItem={onToggleItem} />
@@ -498,20 +501,13 @@ const styles = StyleSheet.create({
     padding: 14,
   },
   headerRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  headerTappable: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    position: 'relative',
-  },
   rimHighlight: {
     position: 'absolute',
-    top: -8,
-    left: -8,
-    right: -8,
-    bottom: -8,
-    borderRadius: radii.controlTight,
+    top: -1,
+    left: -1,
+    right: -1,
+    bottom: -1,
+    borderRadius: radii.card,
     borderWidth: 1.5,
     borderColor: theme.blue,
     backgroundColor: 'rgba(10,132,255,0.10)',
