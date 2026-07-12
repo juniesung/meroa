@@ -134,12 +134,15 @@ messageRoutes.post('/', zValidator('json', sendSchema), async (c) => {
   // namespace ("T*"/"G*") covers both tasks and goals for the turn.
   const goalContext = await buildGoalContext(userId, userContext.timezone, taskContext.refs);
   const consistency = await buildGoalConsistency(userId, userContext.timezone);
+  // Always a concrete sentence, never '' — with nothing here, "do I have a
+  // streak?" left the model to invent an explanation (observed live:
+  // "none of your tasks are set up for it", which isn't how streaks work).
   const streakText =
     consistency.current > 0
       ? `${consistency.current}-day perfect streak (longest: ${consistency.longest}).`
       : consistency.longest > 0
-        ? `No streak right now (longest: ${consistency.longest}).`
-        : '';
+        ? `No streak right now (longest: ${consistency.longest}) — it resumes the next day every due task gets done.`
+        : 'No completion streak yet — one starts automatically the first day every due task gets done.';
 
   // Out-of-band mutations (a Tasks-tab tap, a removal-card confirm) since
   // the user's *previous* message are otherwise invisible to the model —

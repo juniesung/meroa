@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull, lt } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, lt } from 'drizzle-orm';
 
 import { db } from '../../db/client.ts';
 import { records, goalEntries, goals, tasks } from '../../db/schema.ts';
@@ -390,24 +390,49 @@ export async function listGoalEntries(
 
 // --- archive ---------------------------------------------------------
 
-export async function archiveGoal(userId: string, goalId: string, opts: ActionSource): Promise<{ goal: GoalRow }> {
+export async function archiveGoal(
+  userId: string,
+  goalId: string,
+  opts: ActionSource,
+): Promise<{ goal: GoalRow; cascadedTaskTitles: string[] }> {
   return db.transaction(async (tx) => {
     const idempotent = await findIdempotentGoalRecord(tx, userId, opts, 'goal_archived', goalId);
-    if (idempotent) return { goal: await loadGoal(tx, userId, goalId) };
+    if (idempotent) return { goal: await loadGoal(tx, userId, goalId), cascadedTaskTitles: [] };
 
     const goal = await loadGoalForUpdate(tx, userId, goalId);
     const [updated] = await tx.update(goals).set({ archivedAt: new Date() }).where(eq(goals.id, goal.id)).returning();
     if (!updated) throw new Error('goal_update_failed');
 
+    // Linked tasks go with the goal — without this, removing a goal leaves
+    // its "Save $5 daily" nagging forever: still due every day, dragging
+    // every day's consistency verdict to "missed", while completing it logs
+    // nothing (the archived-entry guard). Recurring templates cascade
+    // regardless of status (they're never 'done'); instances and standalone
+    // linked tasks only while open — a done instance is history and keeps
+    // its record. The undo of goal_archived restores exactly this set
+    // (payload.cascadedTaskIds), tasks included.
+    const linked = await tx
+      .select({ id: tasks.id, title: tasks.title, recurrence: tasks.recurrence, status: tasks.status })
+      .from(tasks)
+      .where(and(eq(tasks.goalId, goal.id), isNull(tasks.deletedAt)));
+    const toCascade = linked.filter((t) => t.recurrence !== null || t.status === 'open');
+    const cascadedTaskIds = toCascade.map((t) => t.id);
+    if (cascadedTaskIds.length) {
+      await tx.update(tasks).set({ deletedAt: new Date() }).where(inArray(tasks.id, cascadedTaskIds));
+    }
+    // One title per template/task, not per materialized instance — for the
+    // "removed along with …" summary.
+    const cascadedTaskTitles = [...new Set(toCascade.map((t) => t.title))];
+
     await tx.insert(records).values({
       userId,
       kind: 'goal_archived',
-      payload: { goalId: goal.id, name: goal.name },
+      payload: { goalId: goal.id, name: goal.name, cascadedTaskIds },
       source: opts.source,
       sourceMessageId: opts.sourceMessageId ?? null,
       toolCallId: opts.toolCallId ?? null,
     });
 
-    return { goal: updated };
+    return { goal: updated, cascadedTaskTitles };
   });
 }

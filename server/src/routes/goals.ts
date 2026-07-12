@@ -136,7 +136,18 @@ goalRoutes.post('/', zValidator('json', createFromPreviewSchema), async (c) => {
     createdGoalId?: string;
   };
   if (meta.createdGoalId) {
-    const existing = await getGoal(userId, meta.createdGoalId);
+    // Deliberately NOT filtered to non-archived (unlike getGoal): one
+    // preview creates at most one goal, ever. Without the archived rows
+    // here, a tap on a stale card whose goal was since undone/removed fell
+    // through and created a duplicate (its goal_created record is reverted,
+    // so the executor's idempotency check misses too — caught by the
+    // as-a-user pass). If they want it back, that's a fresh preview or an
+    // undo, not a re-tap.
+    const [existing] = await db
+      .select()
+      .from(goals)
+      .where(and(eq(goals.id, meta.createdGoalId), eq(goals.userId, userId)))
+      .limit(1);
     if (existing) return c.json({ goal: existing, tasks: [] }, 200);
   }
   if (meta.kind !== 'goal_preview' || !meta.preview) {

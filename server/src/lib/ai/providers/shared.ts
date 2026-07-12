@@ -153,7 +153,7 @@ const PREVIEW_CLAIM_PATTERN =
 // system-prompt or history string still using the pre-rename names
 // (docs/goals-redesign-plan.md §2.1).
 const TOOL_NAME_LEAK_PATTERN =
-  /\[(create_task|edit_task|complete_task|progress_task|postpone_task|remove_task|remove_tasks|create_goal|edit_goal|log_goal_entry|create_tool|edit_tool|log_tool_entry)\b/i;
+  /\[(create_task|edit_task|complete_task|progress_task|postpone_task|remove_task|remove_tasks|create_goal|edit_goal|log_goal_entry|remove_goal|create_tool|edit_tool|log_tool_entry)\b/i;
 
 // Observed on DeepSeek v4-flash: instead of a structured tool_calls delta,
 // the model occasionally emits its own function-call templating as literal

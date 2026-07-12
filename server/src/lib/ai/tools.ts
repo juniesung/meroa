@@ -154,7 +154,7 @@ export const AI_TOOLS: Anthropic.Tool[] = [
   {
     name: 'complete_task',
     description:
-      'Mark a task complete, or log measurable progress toward it. For a plain completion task this toggles done/open. For counter/duration, pass `value` as the absolute amount achieved (e.g. "20 minutes" -> value: 20) — if omitted it completes fully. For checklist, pass `itemRefs` to mark specific items done, or omit to mark the whole list done. For a recurring task, this always acts on today\'s occurrence — if there isn\'t one due today, it fails rather than touching the schedule.',
+      'Mark a task complete, or log measurable progress toward it. For counter/duration, pass `value` as the absolute amount achieved (e.g. "20 minutes" -> value: 20) — if omitted it completes fully. For checklist, pass `itemRefs` to mark specific items done, or omit to mark the whole list done. A task that is already done stays done — re-completing is rejected rather than silently reversing it; to genuinely un-mark a task the user says they did NOT do after all ("actually I didn\'t do it"), pass `reopen: true`. For a recurring task, this always acts on today\'s occurrence — if there isn\'t one due today, it fails rather than touching the schedule.',
     input_schema: {
       type: 'object',
       properties: {
@@ -169,6 +169,11 @@ export const AI_TOOLS: Anthropic.Tool[] = [
           items: { type: 'string' },
           description:
             "Specific checklist item refs to mark done — use the exact refs listed under that task's [items: ...] in context (e.g. \"T2.1\"), never a guess or the item text.",
+        },
+        reopen: {
+          type: 'boolean',
+          description:
+            'True ONLY when the user is un-marking a done task ("actually I didn\'t do it", "unmark that") — reopens it (and removes any goal amount its completion auto-logged). Never set this when the user is reporting that they did something.',
         },
       },
       required: ['taskRef', 'titleHint'],
@@ -361,9 +366,22 @@ export const AI_TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: 'remove_goal',
+    description:
+      'Remove a goal the user no longer wants, along with its linked tasks (the "Save $5 daily"-style tasks feeding it). Applies immediately — there is no confirmation card for goals — so only call this once the user has clearly said they want the goal gone, not on a maybe ("should I drop it?" gets a question back first, not a removal). It is fully reversible: undo_last_action restores the goal, its history, and its linked tasks. Use the goal\'s ref from the goals list in context, never a guess.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        goalRef: GOAL_REF_PROPERTY,
+        nameHint: GOAL_NAME_HINT_PROPERTY,
+      },
+      required: ['goalRef', 'nameHint'],
+    },
+  },
+  {
     name: 'undo_last_action',
     description:
-      'Reverse the most recent action (a task create/complete/edit/postpone/remove, or a goal create/edit/entry) across chat, the Tasks tab, and the Goals tab. Call this when the user says something like "undo that" or "undo the last thing".',
+      'Reverse the most recent action (a task create/complete/edit/postpone/remove, or a goal create/edit/entry/remove) across chat, the Tasks tab, and the Goals tab. Call this when the user says something like "undo that" or "undo the last thing".',
     input_schema: { type: 'object', properties: {} },
   },
 ];
@@ -434,6 +452,7 @@ export const AI_TOOL_SCHEMAS = {
   complete_task: taskRefSchema.extend({
     value: z.number().optional(),
     itemRefs: z.array(itemRefSchema).optional(),
+    reopen: z.boolean().optional(),
   }),
   progress_task: progressTaskToolSchema,
   postpone_task: taskRefSchema.merge(postponeInputSchema),
@@ -442,6 +461,7 @@ export const AI_TOOL_SCHEMAS = {
   create_goal: createGoalParamsSchema,
   edit_goal: editGoalToolSchema,
   log_goal_entry: logGoalEntryToolSchema,
+  remove_goal: goalRefSchema,
   undo_last_action: z.object({}),
 } as const;
 

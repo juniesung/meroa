@@ -19,6 +19,7 @@ import {
   type TaskRow,
 } from '../tasks/executor.ts';
 import {
+  archiveGoal,
   createGoal,
   editGoal,
   getGoal as getGoalRow,
@@ -118,6 +119,33 @@ async function goalHeadlineWithPace(goal: GoalRow, timezone: string | null): Pro
   const summary = summaries.get(goal.id);
   if (!summary) return '';
   return summary.paceLine ? `${summary.headline} — ${summary.paceLine}` : summary.headline;
+}
+
+// The connected loop's side effect, stated as a fact on the completion/
+// reopen summary itself — without it, complete_task's result says nothing
+// about the goal, and the model does its own money math (observed live
+// announcing "$220.50" while the real total was $100.50; lesson 6/16).
+// Empty when the task isn't goal-linked, when the status didn't cross the
+// done boundary, or when the goal is archived (the entry hook skipped it).
+async function goalImpactSuffix(
+  userId: string,
+  timezone: string | null,
+  priorStatus: string | undefined,
+  after: TaskRow,
+): Promise<string> {
+  if (!after.goalId) return '';
+  const contribution = (after.config as { goalContribution?: unknown }).goalContribution;
+  if (typeof contribution !== 'number') return '';
+  const becameDone = after.status === 'done' && priorStatus !== 'done';
+  const becameOpen = after.status !== 'done' && priorStatus === 'done';
+  if (!becameDone && !becameOpen) return '';
+  const goal = await getGoalRow(userId, after.goalId);
+  if (!goal) return '';
+  const currency = (goal.definition as GoalDefinition).currency;
+  const fact = await goalHeadlineWithPace(goal, timezone);
+  return becameDone
+    ? ` Auto-logged ${currency}${contribution} to "${goal.name}" — now ${fact}.`
+    : ` Removed today's ${currency}${contribution} auto-entry from "${goal.name}" — back to ${fact}.`;
 }
 
 async function summarizeGoalUndo(
@@ -512,17 +540,56 @@ async function executeAiToolCallInner(
           }
         }
 
+        // The executor's completeTask is a *toggle* for completion-type
+        // tasks (a UI tap on a done task un-checks it) — fine for a
+        // deliberate tap, a trap for chat: a user re-reporting a task
+        // they've already done ("I did my $60 save" said twice, or said
+        // once after tapping done in the app) must not silently reverse
+        // their progress and its auto-logged goal entry (observed live
+        // doing exactly that and then narrating a fabricated total).
+        // Un-marking is opt-in via the explicit `reopen` flag instead.
+        const priorTask = await getTask(userId, target.taskId);
+        if (!priorTask) {
+          return { ok: false, error: "that task ref doesn't match any current task — check the task list." };
+        }
+
+        if (validated.data.reopen) {
+          if (priorTask.status !== 'done') {
+            return {
+              ok: false,
+              error: `"${priorTask.title}" isn't marked done, so there's nothing to un-mark.`,
+            };
+          }
+          const { task } = await progressTask(userId, target.taskId, { kind: 'reopen' }, source);
+          const impact = await goalImpactSuffix(userId, timezone, priorTask.status, task);
+          return {
+            ok: true,
+            toolName,
+            task,
+            summary: `Un-marked "${task.title}" — it's open again.${impact}`,
+            recordKind: 'task_progress',
+          };
+        }
+
+        if (priorTask.status === 'done' && priorTask.type === 'completion') {
+          return {
+            ok: false,
+            error: `"${priorTask.title}" is already marked done — completing it again would just repeat what's recorded, so nothing was changed. If the user is un-doing it ("actually I didn't do it"), call complete_task again with reopen: true.`,
+          };
+        }
+
         const { task } = await completeTask(
           userId,
           target.taskId,
           { value: validated.data.value, itemIds },
           source,
         );
+        const impact = await goalImpactSuffix(userId, timezone, priorTask.status, task);
         return {
           ok: true,
           toolName,
           task,
-          summary: summarizeComplete(task),
+          summary: `${summarizeComplete(task)}${impact}`,
           recordKind: 'task_completion',
         };
       }
@@ -542,14 +609,20 @@ async function executeAiToolCallInner(
             : action === 'stop_timer'
               ? { kind: 'duration_stop' }
               : { kind: 'counter_increment', amount: validated.data.amount };
+        const priorTask = await getTask(userId, target.taskId);
         const { task } = await progressTask(userId, target.taskId, input, source);
+        // Incremental progress can cross the done boundary either way (a
+        // counter reaching its target auto-completes; a negative increment
+        // can reopen) — the goal side effect gets stated as a fact here the
+        // same way complete_task's does.
+        const impact = await goalImpactSuffix(userId, timezone, priorTask?.status, task);
         const summary =
           action === 'start_timer'
             ? `Started the timer for "${task.title}".`
             : action === 'stop_timer'
               ? `Paused "${task.title}".`
               : `Updated "${task.title}".`;
-        return { ok: true, toolName, task, summary, recordKind: 'task_progress' };
+        return { ok: true, toolName, task, summary: `${summary}${impact}`, recordKind: 'task_progress' };
       }
       case 'postpone_task': {
         const validated = validateToolInput('postpone_task', rawInput);
@@ -721,6 +794,33 @@ async function executeAiToolCallInner(
           goal,
           summary: `${describeGoalEdit(before, goal, validated.data)}${paceSuffix ? ` Now: ${paceSuffix}.` : ''}`,
           recordKind: 'goal_edited',
+        };
+      }
+      case 'remove_goal': {
+        const validated = validateToolInput('remove_goal', rawInput);
+        if (!validated.ok) return { ok: false, error: validated.error };
+        const resolved = resolveGoalRef(refs, validated.data.goalRef);
+        if (!resolved.ok) return { ok: false, error: resolved.error };
+        const goalId = resolved.ref.goalId;
+        const hintCheck = await verifyNameHint(userId, goalId, validated.data.nameHint);
+        if (hintCheck) return { ok: false, error: hintCheck.error };
+
+        // Unlike remove_task there's no tap-to-confirm card for goals —
+        // removal applies immediately, but it's archival (fully restored by
+        // undo_last_action, linked tasks included), and the tool description
+        // requires clear user intent first. Linked tasks cascade away with
+        // it (archiveGoal), so no orphaned "Save $5" keeps nagging for a
+        // goal that no longer exists.
+        const { goal, cascadedTaskTitles } = await archiveGoal(userId, goalId, source);
+        const taskNote = cascadedTaskTitles.length
+          ? ` along with ${cascadedTaskTitles.map((t) => `"${t}"`).join(', ')}`
+          : '';
+        return {
+          ok: true,
+          toolName,
+          goal,
+          summary: `Removed the "${goal.name}" goal${taskNote}. "Undo" brings it all back.`,
+          recordKind: 'goal_archived',
         };
       }
       case 'log_goal_entry': {

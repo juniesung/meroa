@@ -244,6 +244,7 @@ function describeStarterTaskRecurrence(recurrence: StarterTask['recurrence']): s
 
 function GoalPreviewCard({ message }: { message: ChatMessage }) {
   const createGoalFromPreview = useCreateGoalFromPreview();
+  const { data: liveGoals } = useGoals();
   const [dismissed, setDismissed] = useState(false);
 
   const preview = message.meta.preview as GoalPreview | undefined;
@@ -253,12 +254,24 @@ function GoalPreviewCard({ message }: { message: ChatMessage }) {
   const createdGoalId =
     createGoalFromPreview.data?.goal.id ?? (message.meta.createdGoalId as string | undefined);
   const created = !!createdGoalId;
+  // A goal created from this card can have been removed/undone since — the
+  // card shouldn't keep saying "Created ✓" about a goal that no longer
+  // exists. Only downgraded once the live list has actually loaded and the
+  // id is genuinely absent (POST /goals stays strictly idempotent
+  // server-side either way — one preview never creates twice).
+  const createdButRemoved = created && !!liveGoals && !liveGoals.some((g) => g.id === createdGoalId);
 
   const targetLine = `Target: ${definition.currency}${definition.targetValue}`;
   const deadlineLine = definition.deadline ? `By ${definition.deadline}` : null;
   const starterTasks = preview.starterTasks ?? [];
 
-  const statusText = created ? 'Created ✓' : dismissed ? 'Not saved' : 'Create this goal?';
+  const statusText = created
+    ? createdButRemoved
+      ? 'Created — since removed'
+      : 'Created ✓'
+    : dismissed
+      ? 'Not saved'
+      : 'Create this goal?';
 
   return (
     <View style={styles.actionCard}>

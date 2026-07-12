@@ -338,6 +338,54 @@ today" for a done task) contradicting clear context; one max-tokens empty reply
 and goes overdue tomorrow — that's the deferred goal type 3 (quantified, indirect)
 use case, pre-existing Phase 3 behavior, not addressed here.
 
+## Second as-a-user pass (2026-07-12, catch-only, then a fix round on user approval)
+
+A pure user-simulation session (~30 live turns, no code changed during it) cataloged
+1 severe + 5 moderate code findings plus a model-quality cluster; on approval all six
+were fixed and each re-verified live through chat AND the REST entry points:
+
+1. **[severe] Re-reporting a done task silently reversed it and the model lied about
+   the total.** completeTask is a toggle (right for a UI tap); via chat, "I did my $60
+   save" said twice reopened the task, deleted the $60 auto-entry, showed "Logged
+   progress", and the model announced $220.50 while the DB said $100.50. Fix: the AI
+   complete_task path rejects re-completing an already-done completion task ("already
+   marked done — nothing changed"); un-marking is opt-in via a new `reopen: true`
+   param routed through the generic reopen transition. Verified: re-report is a safe
+   no-op; "unmark it" reopens and removes the auto-entry.
+2. **Goal removal orphaned its linked tasks** — the daily "Save $X" kept nagging
+   forever, logging nothing, dragging every day's consistency verdict to "missed".
+   Fix: archiveGoal cascades linked tasks (templates always; instances/standalones
+   while open — done rows stay as history), records cascadedTaskIds on the
+   goal_archived record, and undoing the removal restores exactly that set. Verified
+   through chat, the app's DELETE route, and both undo entry points.
+3. **A stale preview card could create a duplicate goal** (re-tap after the created
+   goal was undone: createdGoalId lookup filtered archived, and the reverted
+   goal_created record dodged the executor's idempotency too). Fix: the Create-tap
+   idempotency lookup includes archived rows — one preview creates at most one goal,
+   ever. Client: "Created ✓" downgrades to "Created — since removed" when the goal no
+   longer exists in the live list.
+4. **Zero-streak turns had no streak line at all in the tail**, so "do I have a
+   streak?" got an invented answer ("none of your tasks are set up for it"). Fix: the
+   line is always present, including a "starts automatically the first day every due
+   task gets done" zero-state. Verified grounded live.
+5. **complete/progress results said nothing about the goal side effect**, so the
+   model did its own money math (twice wrong live). Fix: completion/reopen/progress
+   summaries state the auto-log/removal fact with the recomputed server headline +
+   pace. Verified the model quoting them verbatim.
+6. **No chat path to remove a goal.** New `remove_goal` AI tool: immediate (no
+   confirm card exists for goals) but description-gated on clear user intent, fully
+   reversible incl. cascaded tasks; system-prompt rule added. Verified end to end
+   with undo.
+
+Still open from that session, deliberately untouched (minor/model-quality): "$0.5"
+money formatting (no trailing cents digit); no validation that starter-task pace can
+actually reach the target; flash's high zero-call claim rate (6 corrections in ~29
+turns — strongest signal yet for the deferred act/narrate split); one *missed* catch
+("undo again" → zero calls, claimed "Back to 12/40" — short state-claims pass the
+recap-tolerant classifier); history-over-context narration in long sessions (stale
+totals, a never-created goal recalled as existing); currency contamination across
+goals in one conversation (€ leaked from an Oktoberfest goal onto a parking ticket).
+
 ## §4 results (2026-07-12, deepseek-v4-flash, isolated dev-token account +15555559911)
 
 Ran end-to-end against the live server (not a simulation) — real chat turns through the

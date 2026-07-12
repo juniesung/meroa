@@ -777,6 +777,7 @@ async function undoGoalRecord(
     prior?: { name: string; icon: string | null; definition: unknown; version: number };
     data?: Record<string, unknown>;
     starterTaskIds?: string[];
+    cascadedTaskIds?: string[];
   };
   const goalId = payload.goalId;
   if (!goalId) throw new TaskActionError('not_found', 'the goal for that action no longer exists');
@@ -837,6 +838,14 @@ async function undoGoalRecord(
       const [g] = await tx.update(goals).set({ archivedAt: null }).where(eq(goals.id, goal.id)).returning();
       if (!g) throw new Error('goal_update_failed');
       updated = g;
+      // Removing the goal cascaded its linked tasks away (archiveGoal) —
+      // bringing the goal back brings exactly that set back with it.
+      if (payload.cascadedTaskIds?.length) {
+        await tx
+          .update(tasks)
+          .set({ deletedAt: null })
+          .where(inArray(tasks.id, payload.cascadedTaskIds));
+      }
       break;
     }
     case 'goal_entry': {
