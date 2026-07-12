@@ -59,6 +59,10 @@ export type TailBlockInput = {
   taskListText: string;
   goalListText: string;
   recentChangesText: string;
+  // "4-day perfect streak" / "no streak right now (longest: 6)" — precomputed
+  // by lib/goals/consistency.ts, never derived here (docs/goals-redesign-
+  // plan.md §2.4).
+  streakText: string;
 };
 
 /**
@@ -86,7 +90,7 @@ export function buildTailBlock(input: TailBlockInput): string {
     '# Right now',
     `${nowLabel} (${tz})`,
     '',
-    `Right now: ${input.counts.open} open, ${input.counts.doneToday} done today.`,
+    `Right now: ${input.counts.open} open, ${input.counts.doneToday} done today. ${input.streakText}`,
     '',
     '# Their tasks (open, recently done, and repeating)',
     input.taskListText,

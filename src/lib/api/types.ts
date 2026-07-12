@@ -207,6 +207,24 @@ export type ApiGoalDetail = {
   lastEntryAt: string | null;
 };
 
+// Mirrors server/src/lib/goals/consistency.ts — client renders, never
+// re-buckets (docs/goals-redesign-plan.md §2.4, lesson 12).
+export type DayVerdict = 'perfect' | 'missed' | 'neutral';
+
+export type DayBucket = {
+  ymd: string;
+  dueCount: number;
+  doneCount: number;
+  verdict: DayVerdict;
+  level: 0 | 1 | 2 | 3;
+};
+
+export type ApiGoalConsistency = {
+  current: number;
+  longest: number;
+  calendar: DayBucket[];
+};
+
 export type CreateGoalParams = {
   name: string;
   icon?: string;

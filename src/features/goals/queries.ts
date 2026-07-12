@@ -7,12 +7,20 @@ import type { ApiGoal, EditGoalPatch, LogGoalEntryPatch } from '@/lib/api/types'
 export const goalsQueryKey = ['goals'] as const;
 export const goalDetailQueryKey = (id: string) => ['goals', id] as const;
 export const goalEntriesQueryKey = (id: string) => ['goals', id, 'entries'] as const;
+export const goalConsistencyQueryKey = ['goals', 'consistency'] as const;
 
 export function useGoals() {
   return useQuery({
     queryKey: goalsQueryKey,
     queryFn: () => api.getGoals(),
     select: (data) => data.goals,
+  });
+}
+
+export function useGoalConsistency() {
+  return useQuery({
+    queryKey: goalConsistencyQueryKey,
+    queryFn: () => api.getGoalConsistency(),
   });
 }
 

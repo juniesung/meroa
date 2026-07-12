@@ -23,6 +23,7 @@ import {
   type GoalTemplateKey,
 } from '../lib/goals/schema.ts';
 import { buildGoalCardSummaries, buildGoalDetail } from '../lib/goals/summary.ts';
+import { buildGoalConsistency } from '../lib/goals/consistency.ts';
 import { localDatetimeToUtcIso } from '../lib/tasks/recurrence.ts';
 import { requireAuth, type AuthVariables } from '../middleware/auth.ts';
 
@@ -61,6 +62,14 @@ goalRoutes.get('/', async (c) => {
   const summaries = await buildGoalCardSummaries(rows, timezone);
   const withSummary = rows.map((goal) => ({ ...goal, ...summaries.get(goal.id)! }));
   return c.json({ goals: withSummary });
+});
+
+// Registered before /:id so "consistency" is never captured as a goal id.
+goalRoutes.get('/consistency', async (c) => {
+  const userId = c.get('userId');
+  const timezone = await getUserTimezone(userId);
+  const consistency = await buildGoalConsistency(userId, timezone);
+  return c.json(consistency);
 });
 
 goalRoutes.get('/:id', async (c) => {

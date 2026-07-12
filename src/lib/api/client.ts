@@ -10,6 +10,7 @@ import type {
   ApiEntitlement,
   ApiTask,
   ApiGoal,
+  ApiGoalConsistency,
   ApiGoalDetail,
   ApiGoalEntry,
   ApiUser,
@@ -213,6 +214,8 @@ export const api = {
     request<{ task: ApiTask; action: string }>('/tasks/undo', { method: 'POST' }),
 
   getGoals: () => request<{ goals: ApiGoal[] }>('/goals'),
+
+  getGoalConsistency: () => request<ApiGoalConsistency>('/goals/consistency'),
 
   getGoal: (id: string) =>
     request<{ goal: ApiGoal; detail: ApiGoalDetail; entries: ApiGoalEntry[] }>(`/goals/${id}`),

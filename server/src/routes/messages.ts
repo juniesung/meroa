@@ -11,6 +11,7 @@ import { buildRecentChangesFeed } from '../lib/ai/recent-changes.ts';
 import { buildTailBlock } from '../lib/ai/system-prompt.ts';
 import { buildTaskContext } from '../lib/ai/task-context.ts';
 import { buildGoalContext } from '../lib/ai/goal-context.ts';
+import { buildGoalConsistency } from '../lib/goals/consistency.ts';
 import { getOrCreateAppConversation, getRecentMessages } from '../lib/conversations.ts';
 import { materializeRecurringInstances } from '../lib/tasks/recurrence.ts';
 import { computeAllowance, withUserChatLock } from '../lib/usage.ts';
@@ -132,6 +133,13 @@ messageRoutes.post('/', zValidator('json', sendSchema), async (c) => {
   // Appends into the same TurnRefs map task context just built — one ref
   // namespace ("T*"/"G*") covers both tasks and goals for the turn.
   const goalContext = await buildGoalContext(userId, userContext.timezone, taskContext.refs);
+  const consistency = await buildGoalConsistency(userId, userContext.timezone);
+  const streakText =
+    consistency.current > 0
+      ? `${consistency.current}-day perfect streak (longest: ${consistency.longest}).`
+      : consistency.longest > 0
+        ? `No streak right now (longest: ${consistency.longest}).`
+        : '';
 
   // Out-of-band mutations (a Tasks-tab tap, a removal-card confirm) since
   // the user's *previous* message are otherwise invisible to the model —
@@ -152,6 +160,7 @@ messageRoutes.post('/', zValidator('json', sendSchema), async (c) => {
     taskListText: taskContext.text,
     goalListText: goalContext.text,
     recentChangesText,
+    streakText,
   });
 
   return streamSSE(c, async (stream) => {

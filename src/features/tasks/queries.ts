@@ -31,6 +31,12 @@ function upsertTask(tasks: ApiTask[], task: ApiTask): ApiTask[] {
 // of the six-type progress rules) — `onSettled` still invalidates so a
 // recurring create's freshly-materialized siblings and anything else the
 // response didn't carry stay in sync.
+//
+// Also invalidates the goals-consistency key by its literal value (not
+// imported from features/goals/queries.ts, which itself imports
+// tasksQueryKey from here — importing the other direction too would make
+// the two modules circular) — completing/postponing/editing a task can
+// change a day's verdict, so the streak/heatmap need a fresh fetch too.
 function useTaskMutation<TVars>(mutationFn: (vars: TVars) => Promise<{ task: ApiTask }>) {
   const queryClient = useQueryClient();
   return useMutation({
@@ -42,6 +48,7 @@ function useTaskMutation<TVars>(mutationFn: (vars: TVars) => Promise<{ task: Api
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: tasksQueryKey });
+      queryClient.invalidateQueries({ queryKey: ['goals', 'consistency'] });
     },
   });
 }
