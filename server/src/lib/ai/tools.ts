@@ -527,7 +527,13 @@ const logGoalEntryToolSchema = goalRefSchema.extend({
 });
 
 export const AI_TOOL_SCHEMAS = {
-  create_task: createTaskInputSchema.and(z.object({ goalLink: goalLinkToolSchema.optional() }).strict()),
+  // NOT .strict() on the intersected object — z.intersection validates the
+  // raw input against both operands independently, so a strict() second
+  // operand would reject every key it doesn't itself declare (title, type,
+  // icon, ...) even though createTaskInputSchema already accepts them.
+  // Caught live: create_task failed 100% of the time with "Unrecognized
+  // key(s): 'title', 'type', 'icon'" until this was fixed.
+  create_task: createTaskInputSchema.and(z.object({ goalLink: goalLinkToolSchema.optional() })),
   edit_task: taskRefSchema
     .merge(editTaskPatchSchema)
     .extend({ goalLink: goalLinkToolSchema.optional(), unlinkGoal: z.boolean().optional() }),
