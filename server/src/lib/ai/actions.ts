@@ -95,11 +95,18 @@ export type TaskActionResult =
   | { ok: true; toolName: AiToolName; preview: GoalPreview; summary: string; recordKind: string }
   | { ok: false; error: string };
 
-// "$150" or "$150 (birthday money)" — used both to confirm what
-// log_goal_entry actually recorded and to narrate what an undone entry
-// removed.
-function describeEntryData(currency: string, data: GoalEntryData): string {
-  return data.note ? `${currency}${data.amount} (${data.note})` : `${currency}${data.amount}`;
+// "$150" (savings), "175lb" (indirect — the unit trails, never a currency
+// prefix), or "$150 (birthday money)" with a note — used both to confirm
+// what log_goal_entry actually recorded and to narrate what an undone entry
+// removed. Habit goals never reach here (they have no entries).
+function describeEntryData(definition: GoalDefinition, data: GoalEntryData): string {
+  const value =
+    definition.type === 'savings'
+      ? `${definition.currency}${data.amount}`
+      : definition.type === 'indirect'
+        ? `${data.amount}${definition.unit}`
+        : `${data.amount}`;
+  return data.note ? `${value} (${data.note})` : value;
 }
 
 // The goal's concrete, recomputed post-action fact (never leaves the model
@@ -109,6 +116,21 @@ function describeEntryData(currency: string, data: GoalEntryData): string {
 async function goalHeadline(goal: GoalRow, timezone: string | null): Promise<string> {
   const summaries = await buildGoalCardSummaries([goal], timezone);
   return summaries.get(goal.id)?.headline ?? '';
+}
+
+// Indirect-only: headline plus the delta-vs-previous-entry fact
+// (computeIndirectCardSummary's `sub`) and the pace line when a target
+// exists — a down payment on Phase 5's history-aware replies ("that's 0.6
+// down from your last log"), server-computed so the model quotes it rather
+// than comparing entries itself.
+async function goalHeadlineWithDelta(goal: GoalRow, timezone: string | null): Promise<string> {
+  const summaries = await buildGoalCardSummaries([goal], timezone);
+  const summary = summaries.get(goal.id);
+  if (!summary) return '';
+  const parts = [summary.headline];
+  if (summary.sub && summary.sub !== 'First log') parts.push(summary.sub);
+  if (summary.paceLine) parts.push(summary.paceLine);
+  return parts.join(' — ');
 }
 
 // Headline plus the recomputed pace ("$14 / $120 — needs $2.41/day to hit
@@ -152,6 +174,15 @@ async function goalImpactSuffix(
       : ` Check-in removed for habit "${goal.name}" — streak is now ${streak.current} (longest: ${streak.longest}).`;
   }
 
+  if (definition.type === 'indirect') {
+    // Never a source of the number itself (locked decision: "no progress
+    // bar derived from tasks, ever") — a linked task is supporting activity
+    // only, so its completion states that plainly and nothing numeric.
+    return becameDone
+      ? ` That's supporting activity for "${goal.name}" — log a real measurement there when you have one.`
+      : '';
+  }
+
   const contribution = (after.config as { goalContribution?: unknown }).goalContribution;
   if (typeof contribution !== 'number') return '';
   const currency = definition.currency;
@@ -176,11 +207,8 @@ async function summarizeGoalUndo(
     case 'goal_edited':
       return `Undid the last edit to "${goal.name}"${headline ? ` — ${headline}` : ''}.`;
     case 'goal_entry': {
-      // Entries exist only on savings goals, so the currency is always
-      // present on this branch's definition.
       const definition = goal.definition as GoalDefinition;
-      const currency = definition.type === 'savings' ? definition.currency : '';
-      const logged = entryData ? describeEntryData(currency, entryData) : '';
+      const logged = entryData ? describeEntryData(definition, entryData as GoalEntryData) : '';
       return `Removed that${logged ? ` ${logged}` : ''} entry from "${goal.name}"${headline ? ` — ${headline} now` : ''}.`;
     }
     default:
@@ -195,15 +223,16 @@ async function summarizeGoalUndo(
 function describeGoalEdit(
   before: GoalRow,
   after: GoalRow,
-  input: { name?: string; targetValue?: number; deadline?: string },
+  input: { name?: string; targetValue?: number; deadline?: string; unit?: string },
 ): string {
   const parts: string[] = [];
   if (input.name !== undefined) parts.push(`renamed to "${after.name}"`);
 
   const beforeDef = before.definition as GoalDefinition;
   const afterDef = after.definition as GoalDefinition;
-  // target/deadline only exist on savings; the executor already rejected
-  // those patch fields for a habit, so this narrowing never drops real info.
+  // target/deadline exist on savings and indirect; unit only on indirect —
+  // the executor already rejected those patch fields for a habit, so this
+  // narrowing never drops real info.
   if (beforeDef.type === 'savings' && afterDef.type === 'savings') {
     if (input.targetValue !== undefined) {
       parts.push(`target is now ${afterDef.currency}${afterDef.targetValue} (was ${beforeDef.currency}${beforeDef.targetValue})`);
@@ -214,6 +243,24 @@ function describeGoalEdit(
           ? `deadline is now ${afterDef.deadline} (was ${beforeDef.deadline})`
           : `deadline is now ${afterDef.deadline}`,
       );
+    }
+  } else if (beforeDef.type === 'indirect' && afterDef.type === 'indirect') {
+    if (input.targetValue !== undefined) {
+      parts.push(
+        beforeDef.targetValue !== undefined
+          ? `target is now ${afterDef.targetValue}${afterDef.unit} (was ${beforeDef.targetValue}${beforeDef.unit})`
+          : `target is now ${afterDef.targetValue}${afterDef.unit}`,
+      );
+    }
+    if (input.deadline !== undefined) {
+      parts.push(
+        beforeDef.deadline
+          ? `deadline is now ${afterDef.deadline} (was ${beforeDef.deadline})`
+          : `deadline is now ${afterDef.deadline}`,
+      );
+    }
+    if (input.unit !== undefined) {
+      parts.push(`unit is now ${afterDef.unit} (was ${beforeDef.unit})`);
     }
   }
 
@@ -870,19 +917,26 @@ async function executeAiToolCallInner(
         // Never saves — this returns a preview only (docs/goals-redesign-
         // plan.md §2.1). POST /goals {previewMessageId} does the actual
         // create once the user taps. The cross-field rules (savings needs a
-        // target, habit needs its check-in task and no numbers) are already
-        // enforced by createGoalParamsSchema's superRefine in
-        // validateToolInput above — a violation came back as an error the
-        // model can act on, not a half-built preview.
+        // target, habit needs its check-in task and no numbers, indirect
+        // needs a unit) are already enforced by createGoalParamsSchema's
+        // superRefine in validateToolInput above — a violation came back as
+        // an error the model can act on, not a half-built preview.
         const definition = goalDefinitionSchema.parse(
           validated.data.type === 'habit'
             ? { type: 'habit' }
-            : {
-                type: 'savings',
-                currency: validated.data.currency ?? '$',
-                targetValue: validated.data.targetValue,
-                deadline: validated.data.deadline,
-              },
+            : validated.data.type === 'indirect'
+              ? {
+                  type: 'indirect',
+                  unit: validated.data.unit,
+                  targetValue: validated.data.targetValue,
+                  deadline: validated.data.deadline,
+                }
+              : {
+                  type: 'savings',
+                  currency: validated.data.currency ?? '$',
+                  targetValue: validated.data.targetValue,
+                  deadline: validated.data.deadline,
+                },
         );
         const preview: GoalPreview = {
           template: validated.data.type,
@@ -919,6 +973,7 @@ async function executeAiToolCallInner(
           icon: validated.data.icon,
           targetValue: validated.data.targetValue,
           deadline: validated.data.deadline,
+          unit: validated.data.unit,
         };
         const { goal } = await editGoal(userId, goalId, patch, source);
 
@@ -982,12 +1037,16 @@ async function executeAiToolCallInner(
         };
         const { goal } = await logGoalEntry(userId, goalId, patch, source);
 
-        const headline = await goalHeadline(goal, timezone);
         // logGoalEntry rejects habit goals, so a success here is always
-        // savings — the currency exists.
+        // savings or indirect. Indirect gets the delta-vs-previous fact too
+        // (goalHeadlineWithDelta) so the model can narrate history, not just
+        // the raw new value.
         const definition = goal.definition as GoalDefinition;
-        const currency = definition.type === 'savings' ? definition.currency : '';
-        const logged = describeEntryData(currency, { amount: validated.data.amount, note: validated.data.note });
+        const headline =
+          definition.type === 'indirect'
+            ? await goalHeadlineWithDelta(goal, timezone)
+            : await goalHeadline(goal, timezone);
+        const logged = describeEntryData(definition, { amount: validated.data.amount, note: validated.data.note });
         return {
           ok: true,
           toolName,

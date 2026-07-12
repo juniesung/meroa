@@ -303,15 +303,15 @@ export const AI_TOOLS: Anthropic.Tool[] = [
   {
     name: 'create_goal',
     description:
-      'Show the user a preview of a new goal before saving it — this does NOT save anything by itself. Two types: "savings" (a target amount to save toward, e.g. "$200 for a trip" — needs targetValue) and "habit" (a repeating practice with a streak, e.g. "meditate daily" — NO target amount, NO deadline; instead it REQUIRES its recurring check-in task in starterTasks, because completing that task is the check-in and the streak counts it). Call it as soon as you have enough; don\'t ask "should I set this up?" in chat text first — the Create button on the preview card is the only confirmation. Only ask a real question when something required is genuinely missing (a savings amount). Never invent a number the user did not say. If the user asks for a change before tapping Create, call this again with the revision for a fresh preview.',
+      'Show the user a preview of a new goal before saving it — this does NOT save anything by itself. Three types: "savings" (a target amount to save toward, e.g. "$200 for a trip" — needs targetValue), "habit" (a repeating practice with a streak, e.g. "meditate daily" — NO target amount, NO deadline; instead it REQUIRES its recurring check-in task in starterTasks, because completing that task is the check-in and the streak counts it), and "indirect" (a real measurement tracked over time, e.g. "track my weight" or "get my bench to 225" — needs unit; targetValue is OPTIONAL, someone can just track a number with no goal). Call it as soon as you have enough; don\'t ask "should I set this up?" in chat text first — the Create button on the preview card is the only confirmation. Only ask a real question when something required is genuinely missing (a savings amount, an indirect unit). Never invent a number the user did not say. If the user asks for a change before tapping Create, call this again with the revision for a fresh preview.',
     input_schema: {
       type: 'object',
       properties: {
         type: {
           type: 'string',
-          enum: ['savings', 'habit'],
+          enum: ['savings', 'habit', 'indirect'],
           description:
-            'savings: a money target ("save $500"). habit: a repeating practice tracked by streak ("meditate every day", "no-sugar habit") — anything the user wants to do consistently rather than accumulate.',
+            'savings: a money target ("save $500"). habit: a repeating practice tracked by streak ("meditate every day", "no-sugar habit") — anything the user wants to do consistently rather than accumulate. indirect: a real measurement logged over time ("track my weight", "get my bench to 225 lb") — the number always comes from an explicit log, never from a task.',
         },
         name: { type: 'string', description: 'Short name for the goal, e.g. "Rave savings" or "Daily meditation".' },
         icon: { type: 'string', enum: ICON_ENUM, description: 'Pick whichever best matches what this is for.' },
@@ -319,14 +319,18 @@ export const AI_TOOLS: Anthropic.Tool[] = [
           type: 'string',
           description: 'savings only. Currency symbol, e.g. "$" — only if the user actually said one; defaults to "$".',
         },
+        unit: {
+          type: 'string',
+          description: 'indirect only, required there: the measurement unit, e.g. "lb", "kg", "pages". Ask if genuinely unclear rather than guessing.',
+        },
         targetValue: {
           type: 'number',
-          description: 'savings only, required there: the target amount, e.g. "$200" -> 200. NEVER set for a habit.',
+          description: 'savings: required — the target amount, e.g. "$200" -> 200. indirect: optional — only if the user stated a target (e.g. "get to 165 lb"); "just track my weight" with no target is a complete, valid goal — omit it. NEVER set for a habit.',
         },
         deadline: {
           type: 'string',
           description:
-            'savings only. A concrete ISO date (YYYY-MM-DD) the user wants to hit the target by — only if they gave a timeframe (e.g. "in 30 days", "by December"). Convert relative language to an absolute date using today\'s date from context; never invent a deadline the user didn\'t imply. Omit entirely if no timeframe was mentioned.',
+            'savings and indirect only, and only alongside a targetValue. A concrete ISO date (YYYY-MM-DD) the user wants to hit the target by — only if they gave a timeframe (e.g. "in 30 days", "by December"). Convert relative language to an absolute date using today\'s date from context; never invent a deadline the user didn\'t imply. Omit entirely if no timeframe was mentioned.',
         },
         starterTasks: {
           type: 'array',
@@ -351,13 +355,13 @@ export const AI_TOOLS: Anthropic.Tool[] = [
               contribution: {
                 type: 'number',
                 description:
-                  'savings goals only: the amount completing this task once logs to the goal, e.g. 5 for "save $5 daily". OMIT for a habit — a habit check-in has no amount; completing the task is the check-in itself.',
+                  'savings goals only: the amount completing this task once logs to the goal, e.g. 5 for "save $5 daily". OMIT for a habit or indirect goal — a habit check-in has no amount (completing the task is the check-in itself), and an indirect goal never logs a number from a task.',
               },
             },
             required: ['title'],
           },
           description:
-            'Proposed starter tasks (up to 5). For a savings goal: optional, e.g. a daily "Save $5" — only when a natural next action is obvious from what the user said; each completion auto-logs its contribution, never a separate log_goal_entry for the same amount. For a HABIT goal: required, exactly the recurring check-in task ("Meditate 10 min", daily) — the streak counts that task and completing it IS the check-in. Never invent a schedule, amount, or time the user didn\'t give (a plain "daily" gets no time field).',
+            'Proposed starter tasks (up to 5). For a savings goal: optional, e.g. a daily "Save $5" — only when a natural next action is obvious from what the user said; each completion auto-logs its contribution, never a separate log_goal_entry for the same amount. For a HABIT goal: required, exactly the recurring check-in task ("Meditate 10 min", daily) — the streak counts that task and completing it IS the check-in. For an INDIRECT goal: optional, supporting activity only ("go for a run") — never carries a contribution, and completing it never logs a measurement (only log_goal_entry does that). Never invent a schedule, amount, or time the user didn\'t give (a plain "daily" gets no time field).',
         },
       },
       required: ['type', 'name'],
@@ -366,7 +370,7 @@ export const AI_TOOLS: Anthropic.Tool[] = [
   {
     name: 'edit_goal',
     description:
-      "Edit an existing goal's name or icon (any type), or a savings goal's target amount or deadline — use the goal's ref from the goals list in context, never guess one. A habit goal has no target or deadline to edit. Only include what the user actually asked to change; never resend the whole thing. Applies immediately (it's undoable, unlike create_goal's preview) — state the concrete before/after value when you confirm it.",
+      "Edit an existing goal's name or icon (any type), a savings or indirect goal's target amount or deadline, or an indirect goal's unit — use the goal's ref from the goals list in context, never guess one. A habit goal has no target, deadline, or unit to edit. Only include what the user actually asked to change; never resend the whole thing. Applies immediately (it's undoable, unlike create_goal's preview) — state the concrete before/after value when you confirm it.",
     input_schema: {
       type: 'object',
       properties: {
@@ -374,11 +378,12 @@ export const AI_TOOLS: Anthropic.Tool[] = [
         nameHint: GOAL_NAME_HINT_PROPERTY,
         name: { type: 'string' },
         icon: { type: 'string', enum: ICON_ENUM },
-        targetValue: { type: 'number', description: 'New target amount.' },
+        targetValue: { type: 'number', description: 'New target amount — savings and indirect only.' },
         deadline: {
           type: 'string',
-          description: 'New concrete ISO date (YYYY-MM-DD) — convert relative language to an absolute date.',
+          description: 'New concrete ISO date (YYYY-MM-DD) — savings and indirect only, and only alongside a target value. Convert relative language to an absolute date.',
         },
+        unit: { type: 'string', description: 'New measurement unit — indirect only.' },
       },
       required: ['goalRef', 'nameHint'],
     },
@@ -386,14 +391,17 @@ export const AI_TOOLS: Anthropic.Tool[] = [
   {
     name: 'log_goal_entry',
     description:
-      'SAVINGS goals only: log an explicit amount the user just told you about — e.g. "log $150 to savings", "put in $40 birthday money". Never for a habit goal (its check-ins happen by completing its task — use complete_task). Only for a value the user actually stated; never invent an amount — ask instead. Use the goal\'s ref exactly as shown in the goals list in context.',
+      'SAVINGS and INDIRECT goals only: log an explicit value the user just told you about — for savings, an amount ("log $150 to savings", "put in $40 birthday money"); for indirect, the current measurement ("175 this morning", "hit 185 on bench"). Never for a habit goal (its check-ins happen by completing its task — use complete_task). Only for a value the user actually stated; never invent one — ask instead. Use the goal\'s ref exactly as shown in the goals list in context.',
     input_schema: {
       type: 'object',
       properties: {
         goalRef: GOAL_REF_PROPERTY,
         nameHint: GOAL_NAME_HINT_PROPERTY,
-        amount: { type: 'number', description: 'The amount the user actually stated — required.' },
-        note: { type: 'string', description: 'Optional short note, only if the user gave one (e.g. "birthday money").' },
+        amount: {
+          type: 'number',
+          description: 'The value the user actually stated — required. For indirect goals this is the measurement itself (e.g. current weight), not a delta.',
+        },
+        note: { type: 'string', description: 'Optional short note, only if the user gave one (e.g. "birthday money", "morning weigh-in").' },
         entryAt: {
           type: 'string',
           description:
@@ -509,6 +517,7 @@ const editGoalToolSchema = goalRefSchema.extend({
   icon: z.string().trim().max(40).optional(),
   targetValue: z.number().min(0.01).optional(),
   deadline: z.string().regex(ISO_DATE_REGEX, 'deadline must be an ISO date (YYYY-MM-DD)').optional(),
+  unit: z.string().trim().min(1).max(20).optional(),
 });
 
 const logGoalEntryToolSchema = goalRefSchema.extend({

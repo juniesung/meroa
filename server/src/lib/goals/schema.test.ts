@@ -71,3 +71,63 @@ describe('createGoalParamsSchema — habit', () => {
     expect(result.success).toBe(false);
   });
 });
+
+describe('createGoalParamsSchema — indirect', () => {
+  it('accepts a unit-only indirect goal (no target) — "just track it" is complete', () => {
+    const result = createGoalParamsSchema.safeParse({ type: 'indirect', name: 'Weight', unit: 'lb' });
+    expect(result.success).toBe(true);
+  });
+
+  it('accepts an indirect goal with a target and deadline', () => {
+    const result = createGoalParamsSchema.safeParse({
+      type: 'indirect',
+      name: 'Bench PR',
+      unit: 'lb',
+      targetValue: 225,
+      deadline: '2026-12-25',
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects indirect without a unit', () => {
+    const result = createGoalParamsSchema.safeParse({ type: 'indirect', name: 'Weight' });
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.error.issues[0]?.path).toEqual(['unit']);
+  });
+
+  it('rejects indirect with a currency', () => {
+    const result = createGoalParamsSchema.safeParse({ type: 'indirect', name: 'Weight', unit: 'lb', currency: '$' });
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects a deadline with no target value', () => {
+    const result = createGoalParamsSchema.safeParse({
+      type: 'indirect',
+      name: 'Weight',
+      unit: 'lb',
+      deadline: '2026-12-25',
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.error.issues[0]?.path).toEqual(['deadline']);
+  });
+
+  it('rejects a starter task carrying a contribution — a linked task never logs a number', () => {
+    const result = createGoalParamsSchema.safeParse({
+      type: 'indirect',
+      name: 'Weight',
+      unit: 'lb',
+      starterTasks: [{ title: 'Gym session', contribution: 5 }],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('accepts a supporting starter task with no contribution', () => {
+    const result = createGoalParamsSchema.safeParse({
+      type: 'indirect',
+      name: 'Weight',
+      unit: 'lb',
+      starterTasks: [{ title: 'Gym session' }],
+    });
+    expect(result.success).toBe(true);
+  });
+});

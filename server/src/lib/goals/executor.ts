@@ -6,10 +6,12 @@ import { archiveGoalCascadeInTx, createTaskInTx, type ActionSource, type TaskRow
 import {
   goalDefinitionSchema,
   type EditGoalPatch,
+  type IndirectGoalDefinition,
   type LogGoalEntryPatch,
   type GoalDefinition,
   type GoalEntryData,
   type GoalTemplateKey,
+  type SavingsGoalDefinition,
   type StarterTask,
 } from './schema.ts';
 
@@ -249,30 +251,45 @@ export async function createGoal(
 
 /**
  * Applies a constrained edit patch to a goal's current definition —
- * targetValue and deadline exist only on savings; a habit goal's definition
- * has nothing numeric to edit (name/icon live on the row, not in here).
- * Returns an error string instead of throwing so the executor can wrap it
- * consistently as an invalid_input.
+ * targetValue and deadline exist on savings and indirect; unit exists only
+ * on indirect; a habit goal's definition has nothing numeric to edit
+ * (name/icon live on the row, not in here). Returns an error string instead
+ * of throwing so the executor can wrap it consistently as an invalid_input.
  */
 function applyEditOps(
   definition: GoalDefinition,
   patch: EditGoalPatch,
 ): { definition: GoalDefinition } | { error: string } {
   if (definition.type === 'habit') {
-    if (patch.targetValue !== undefined || patch.deadline !== undefined) {
-      return { error: 'a habit goal has no target amount or deadline to change — only its name or icon can be edited' };
+    if (patch.targetValue !== undefined || patch.deadline !== undefined || patch.unit !== undefined) {
+      return { error: 'a habit goal has no target amount, deadline, or unit to change — only its name or icon can be edited' };
     }
     return { definition };
   }
 
-  let next = definition;
-
-  if (patch.targetValue !== undefined) {
-    next = { ...next, targetValue: patch.targetValue };
+  if (definition.type === 'savings') {
+    if (patch.unit !== undefined) {
+      return { error: 'a savings goal has no unit field — it always uses currency' };
+    }
+    let next: SavingsGoalDefinition = definition;
+    if (patch.targetValue !== undefined) next = { ...next, targetValue: patch.targetValue };
+    if (patch.deadline !== undefined) next = { ...next, deadline: patch.deadline };
+    const parsed = goalDefinitionSchema.safeParse(next);
+    if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? 'invalid goal definition' };
+    return { definition: parsed.data };
   }
 
-  if (patch.deadline !== undefined) {
-    next = { ...next, deadline: patch.deadline };
+  // indirect
+  let next: IndirectGoalDefinition = definition;
+  if (patch.targetValue !== undefined) next = { ...next, targetValue: patch.targetValue };
+  if (patch.deadline !== undefined) next = { ...next, deadline: patch.deadline };
+  if (patch.unit !== undefined) next = { ...next, unit: patch.unit };
+
+  // indirectGoalDefinitionSchema can't enforce this itself (see its comment
+  // — a discriminated union member can't carry a superRefine) — checked here
+  // instead, same rule as create's.
+  if (next.deadline !== undefined && next.targetValue === undefined) {
+    return { error: 'a deadline only makes sense with a target value — include one or drop the deadline' };
   }
 
   const parsed = goalDefinitionSchema.safeParse(next);

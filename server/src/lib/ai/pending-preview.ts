@@ -61,7 +61,9 @@ export function renderPendingPreview(preview: GoalPreview | null): string {
   const facts =
     d.type === 'savings'
       ? ` · ${d.currency}${d.targetValue}${d.deadline ? ` · by ${d.deadline}` : ''}`
-      : ' · habit (daily check-in streak, no target amount)';
+      : d.type === 'indirect'
+        ? ` · indirect (${d.unit}${d.targetValue !== undefined ? `, target ${d.targetValue}${d.unit}` : ', no target'}${d.deadline ? ` · by ${d.deadline}` : ''})`
+        : ' · habit (daily check-in streak, no target amount)';
   const starters = preview.starterTasks?.length
     ? ` · starter tasks: ${preview.starterTasks.map((s) => describeStarter(s, currency)).join('; ')}`
     : '';

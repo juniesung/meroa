@@ -81,13 +81,22 @@ export async function buildGoalContext(
     const definition = goal.definition as GoalDefinition;
 
     // Habit line leads with the streak (its whole mechanic) and the
-    // check-in task; savings with the money facts. Both precomputed —
-    // the model quotes, never derives (lesson 6).
+    // check-in task; indirect states it never derives from a task; savings
+    // with the money facts. All precomputed — the model quotes, never
+    // derives (lesson 6).
     let line: string;
     if (definition.type === 'habit') {
       const contribution = contributions.get(goal.id);
       const viaLabel = contribution ? ` · check-in via "${contribution.title}" (complete_task IS the check-in)` : '';
       line = `[${alias}] "${goal.name}" · habit · ${summary.headline} (${summary.sub})${viaLabel}`;
+    } else if (definition.type === 'indirect') {
+      const deadlineLabel = definition.deadline ? `, due ${formatYmdShort(definition.deadline)}` : '';
+      const lastLabel = summary.lastEntryAt ? `, last ${formatYmdShort(ymdInTz(summary.lastEntryAt, tz))}` : '';
+      const contribution = contributions.get(goal.id);
+      const supportingLabel = contribution
+        ? ` · supporting task "${contribution.title}" (never auto-logs a number)`
+        : '';
+      line = `[${alias}] "${goal.name}" · indirect · ${summary.headline} (${summary.sub})${summary.paceLine ? ` · ${summary.paceLine}` : ''}${deadlineLabel}${supportingLabel} · ${summary.entryCount} ${summary.entryCount === 1 ? 'entry' : 'entries'}${lastLabel}`;
     } else {
       const deadlineLabel = definition.deadline ? `, due ${formatYmdShort(definition.deadline)}` : '';
       const lastLabel = summary.lastEntryAt ? `, last ${formatYmdShort(ymdInTz(summary.lastEntryAt, tz))}` : '';
