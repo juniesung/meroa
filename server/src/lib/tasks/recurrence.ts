@@ -176,12 +176,20 @@ function resetConfigForNewInstance(
   // reminders on would only ever notify for the template row itself, which
   // never has a concrete same-day dueAt and is never shown as a due task.
   const reminder = !!templateConfig.reminder;
+  // Same reasoning for a goal-linked starter task's per-completion
+  // contribution amount — every instance needs to carry it forward so
+  // completing *any* day's occurrence auto-logs to the goal, not just the
+  // template row (which is never itself shown as a due task) — see the
+  // connected loop in lib/tasks/executor.ts's applyProgress
+  // (docs/goals-redesign-plan.md §2.3).
+  const goalContribution = templateConfig.goalContribution as number | undefined;
+  const contributionExtra = goalContribution !== undefined ? { goalContribution } : {};
   switch (type) {
     case 'completion':
-      return { dueTimeExplicit, reminder };
+      return { dueTimeExplicit, reminder, ...contributionExtra };
     case 'checklist': {
       const items = (templateConfig.items as ChecklistItem[] | undefined) ?? [];
-      return { items: items.map((i) => ({ ...i, done: false })), dueTimeExplicit, reminder };
+      return { items: items.map((i) => ({ ...i, done: false })), dueTimeExplicit, reminder, ...contributionExtra };
     }
     case 'counter':
       return {
@@ -190,6 +198,7 @@ function resetConfigForNewInstance(
         unit: templateConfig.unit,
         dueTimeExplicit,
         reminder,
+        ...contributionExtra,
       };
     case 'duration':
       return {
@@ -198,6 +207,7 @@ function resetConfigForNewInstance(
         runningSince: null,
         dueTimeExplicit,
         reminder,
+        ...contributionExtra,
       };
   }
 }

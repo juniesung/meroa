@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { recurrenceSchema } from '../tasks/schema.ts';
+
 // v1 ships exactly one goal type — savings (docs/goals-redesign-plan.md §1,
 // §2.2). Habit/indirect/milestone join this list one at a time in later
 // passes; goals.template (the DB column) stays the discriminator tag,
@@ -39,15 +41,30 @@ export type SavingsGoalDefinition = z.infer<typeof savingsGoalDefinitionSchema>;
 export const goalDefinitionSchema = savingsGoalDefinitionSchema;
 export type GoalDefinition = SavingsGoalDefinition;
 
+// A starter task proposed alongside the goal — typically recurring (e.g.
+// "save $5 daily"). `contribution` is the amount completing it auto-logs to
+// the goal (docs/goals-redesign-plan.md §2.3) — the connected loop's core:
+// completing the task IS logging the entry, one record, two views.
+export const starterTaskSchema = z
+  .object({
+    title: z.string().trim().min(1).max(80),
+    recurrence: recurrenceSchema.optional(),
+    contribution: z.number().min(0.01),
+  })
+  .strict();
+export type StarterTask = z.infer<typeof starterTaskSchema>;
+
 // What create_goal returns to the model and stores on the preview message's
 // meta — never a saved goals row (docs/goals-redesign-plan.md §2.1).
 // routes/goals.ts's POST / (the Create-tap confirm) re-validates and saves
-// exactly this shape.
+// exactly this shape, creating the goal and every starter task in one
+// transaction.
 export type GoalPreview = {
   template: GoalTemplateKey;
   name: string;
   icon: string | null;
   definition: GoalDefinition;
+  starterTasks?: StarterTask[];
 };
 
 // --- create ----------------------------------------------------------
@@ -60,6 +77,7 @@ export const createGoalParamsSchema = z
     currency: z.string().trim().min(1).max(6).optional(),
     targetValue: z.number().min(0.01),
     deadline: z.string().regex(ISO_DATE, 'deadline must be an ISO date (YYYY-MM-DD)').optional(),
+    starterTasks: z.array(starterTaskSchema).max(5).optional(),
   })
   .strict();
 export type CreateGoalParams = z.infer<typeof createGoalParamsSchema>;

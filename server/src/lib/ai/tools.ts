@@ -290,6 +290,32 @@ export const AI_TOOLS: Anthropic.Tool[] = [
           description:
             'A concrete ISO date (YYYY-MM-DD) the user wants to hit the target by — only if they gave a timeframe (e.g. "in 30 days", "by December"). Convert relative language to an absolute date using today\'s date from context; never invent a deadline the user didn\'t imply. Omit entirely if no timeframe was mentioned.',
         },
+        starterTasks: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              title: { type: 'string', description: 'e.g. "Save $5".' },
+              recurrence: {
+                type: 'object',
+                description: 'Same shape as create_task\'s recurrence — only if this should repeat on a schedule.',
+                properties: {
+                  freq: { type: 'string', enum: ['daily', 'weekly', 'every_n_days'] },
+                  byWeekday: { type: 'array', items: { type: 'string', enum: ['mo', 'tu', 'we', 'th', 'fr', 'sa', 'su'] } },
+                  n: { type: 'number' },
+                  time: { type: 'string' },
+                },
+              },
+              contribution: {
+                type: 'number',
+                description: 'The amount completing this task once logs to the goal, e.g. 5 for "save $5 daily".',
+              },
+            },
+            required: ['title', 'contribution'],
+          },
+          description:
+            'Up to 5 proposed starter tasks that work toward this goal, e.g. a daily "Save $5" task for a savings goal — only propose these when a natural next action is obvious from what the user said (a deadline or a stated pace implies one); skip this entirely rather than inventing a schedule or amount they never mentioned. Each task\'s completion automatically logs its contribution to the goal — never a separate log_goal_entry call for the same amount.',
+        },
       },
       required: ['name', 'targetValue'],
     },

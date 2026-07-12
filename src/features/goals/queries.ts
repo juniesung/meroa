@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { api } from '@/lib/api/client';
+import { tasksQueryKey } from '@/features/tasks/queries';
 import type { ApiGoal, EditGoalPatch, LogGoalEntryPatch } from '@/lib/api/types';
 
 export const goalsQueryKey = ['goals'] as const;
@@ -54,6 +55,10 @@ export function useCreateGoalFromPreview() {
     onSettled: (data) => {
       queryClient.invalidateQueries({ queryKey: goalsQueryKey });
       if (data) queryClient.invalidateQueries({ queryKey: goalDetailQueryKey(data.goal.id) });
+      // Starter tasks are created alongside the goal in the same transaction
+      // (docs/goals-redesign-plan.md §2.3) — the Tasks tab needs to reflect
+      // them the instant Create is tapped, same as any other task action.
+      if (data?.tasks.length) queryClient.invalidateQueries({ queryKey: tasksQueryKey });
     },
   });
 }

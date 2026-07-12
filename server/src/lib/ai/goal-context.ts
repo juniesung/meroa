@@ -1,7 +1,7 @@
-import { and, desc, eq, isNull } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull } from 'drizzle-orm';
 
 import { db } from '../../db/client.ts';
-import { goals } from '../../db/schema.ts';
+import { goals, tasks } from '../../db/schema.ts';
 import { formatYmdShort, ymdInTz } from '../tasks/recurrence.ts';
 import type { GoalDefinition } from '../goals/schema.ts';
 import { buildGoalCardSummaries } from '../goals/summary.ts';
@@ -9,6 +9,28 @@ import type { TurnRefs } from './task-context.ts';
 
 const MAX_ROWS = 10;
 const MAX_CHARS = 1500;
+
+// The first linked task carrying a contribution, so the goal line can state
+// "$5/day via 'Save $5'" (docs/goals-redesign-plan.md §2.3) — the model
+// already sees the task itself (with its own ref) in the task list, so this
+// names it by title rather than duplicating a ref cross-reference.
+async function fetchPrimaryContribution(
+  goalIds: string[],
+): Promise<Map<string, { title: string; contribution: number }>> {
+  const byGoal = new Map<string, { title: string; contribution: number }>();
+  if (goalIds.length === 0) return byGoal;
+  const rows = await db
+    .select({ goalId: tasks.goalId, title: tasks.title, config: tasks.config, createdAt: tasks.createdAt })
+    .from(tasks)
+    .where(and(inArray(tasks.goalId, goalIds), isNull(tasks.deletedAt)))
+    .orderBy(tasks.createdAt);
+  for (const row of rows) {
+    if (!row.goalId || byGoal.has(row.goalId)) continue;
+    const contribution = (row.config as Record<string, unknown>).goalContribution;
+    if (typeof contribution === 'number') byGoal.set(row.goalId, { title: row.title, contribution });
+  }
+  return byGoal;
+}
 
 /**
  * Compact goal-list summary injected into the AI's context, mirroring
@@ -35,6 +57,7 @@ export async function buildGoalContext(
   if (rows.length === 0) return { text: 'They have no goals yet.' };
 
   const summaries = await buildGoalCardSummaries(rows, timezone);
+  const contributions = await fetchPrimaryContribution(rows.map((g) => g.id));
 
   const lines: string[] = [];
   let charCount = 0;
@@ -53,8 +76,12 @@ export async function buildGoalContext(
     const definition = goal.definition as GoalDefinition;
     const deadlineLabel = definition.deadline ? `, due ${formatYmdShort(definition.deadline)}` : '';
     const lastLabel = summary.lastEntryAt ? `, last ${formatYmdShort(ymdInTz(summary.lastEntryAt, tz))}` : '';
+    const contribution = contributions.get(goal.id);
+    const contributionLabel = contribution
+      ? ` · ${definition.currency}${contribution.contribution}/completion via "${contribution.title}"`
+      : '';
 
-    const line = `[${alias}] "${goal.name}" · ${summary.headline}${summary.paceLine ? ` · ${summary.paceLine}` : ''}${deadlineLabel} · ${summary.entryCount} entries${lastLabel}`;
+    const line = `[${alias}] "${goal.name}" · ${summary.headline}${contributionLabel}${summary.paceLine ? ` · ${summary.paceLine}` : ''}${deadlineLabel} · ${summary.entryCount} entries${lastLabel}`;
 
     if (charCount + line.length > MAX_CHARS) {
       truncated = true;

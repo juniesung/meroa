@@ -1,7 +1,7 @@
 import { and, asc, eq, gt, inArray, or } from 'drizzle-orm';
 
 import { db } from '../../db/client.ts';
-import { records, tasks } from '../../db/schema.ts';
+import { goals, records, tasks } from '../../db/schema.ts';
 
 const MAX_FEED_ENTRIES = 5;
 
@@ -124,6 +124,40 @@ export async function buildRecentChangesFeed(userId: string, since: Date | null)
     for (const t of found) titleById.set(t.id, t.title);
   }
 
+  // Connected loop: a task_completion/task_progress record whose task is
+  // goal-linked auto-logged a contribution (lib/tasks/executor.ts's
+  // applyProgress) — otherwise-invisible to the model the same way every
+  // other out-of-band mutation here is, so it gets the same treatment
+  // (docs/goals-redesign-plan.md §2.3). Only tasks currently `done` count —
+  // a task reopened since (status back to 'open') no longer has a live
+  // entry, so no contribution actually landed.
+  const completionTaskIds = [
+    ...new Set(
+      parsed
+        .filter((r) => (r.kind === 'task_completion' || r.kind === 'task_progress') && r.payload.taskId)
+        .map((r) => r.payload.taskId!),
+    ),
+  ];
+  const contributionByTaskId = new Map<string, { goalName: string; amount: number }>();
+  if (completionTaskIds.length > 0) {
+    const linked = await db
+      .select({ id: tasks.id, goalId: tasks.goalId, config: tasks.config, status: tasks.status })
+      .from(tasks)
+      .where(inArray(tasks.id, completionTaskIds));
+    const goalIds = [...new Set(linked.map((t) => t.goalId).filter((g): g is string => !!g))];
+    const goalNameById = new Map<string, string>();
+    if (goalIds.length > 0) {
+      const goalRows = await db.select({ id: goals.id, name: goals.name }).from(goals).where(inArray(goals.id, goalIds));
+      for (const g of goalRows) goalNameById.set(g.id, g.name);
+    }
+    for (const t of linked) {
+      if (!t.goalId || t.status !== 'done') continue;
+      const amount = (t.config as Record<string, unknown>).goalContribution;
+      const goalName = goalNameById.get(t.goalId);
+      if (typeof amount === 'number' && goalName) contributionByTaskId.set(t.id, { goalName, amount });
+    }
+  }
+
   const sentences: string[] = [];
   for (const { kind, payload } of parsed) {
     if (kind === 'task_undo' || kind === 'goal_undo') {
@@ -141,7 +175,9 @@ export async function buildRecentChangesFeed(userId: string, since: Date | null)
       continue;
     }
     const title = payload.title ?? payload.name ?? (payload.taskId && titleById.get(payload.taskId));
-    sentences.push(describeChange(kind, title || 'a task'));
+    const contribution = payload.taskId && contributionByTaskId.get(payload.taskId);
+    const base = describeChange(kind, title || 'a task');
+    sentences.push(contribution ? `${base}, adding ${contribution.amount} to "${contribution.goalName}"` : base);
   }
 
   return `Since your last message, in the app: ${sentences.join('; ')}.`;

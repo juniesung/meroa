@@ -36,7 +36,7 @@ import {
 } from '@/features/tasks/queries';
 import { useCreateGoalFromPreview, useGoals } from '@/features/goals/queries';
 import { useTabBarHeight } from '@/hooks/use-tab-bar-inset';
-import type { ApiTask, GoalPreview } from '@/lib/api/types';
+import type { ApiTask, GoalPreview, StarterTask } from '@/lib/api/types';
 import { toIconName } from '@/lib/icon';
 import { requestNotificationPermission } from '@/lib/notifications';
 
@@ -235,6 +235,13 @@ function TaskBulkRemovalConfirmCard({ message }: { message: ChatMessage }) {
 // create_goal never saves anything by itself — this card's Create tap is
 // the only confirmation (docs/goals-redesign-plan.md §2.1). "Not now" is
 // client-local only, matching TaskRemovalConfirmCard's "Keep it".
+function describeStarterTaskRecurrence(recurrence: StarterTask['recurrence']): string {
+  if (!recurrence) return '';
+  if (recurrence.freq === 'daily') return ' · daily';
+  if (recurrence.freq === 'weekly') return ` · weekly on ${recurrence.byWeekday.join(',')}`;
+  return ` · every ${recurrence.n} days`;
+}
+
 function GoalPreviewCard({ message }: { message: ChatMessage }) {
   const createGoalFromPreview = useCreateGoalFromPreview();
   const [dismissed, setDismissed] = useState(false);
@@ -249,6 +256,7 @@ function GoalPreviewCard({ message }: { message: ChatMessage }) {
 
   const targetLine = `Target: ${definition.currency}${definition.targetValue}`;
   const deadlineLine = definition.deadline ? `By ${definition.deadline}` : null;
+  const starterTasks = preview.starterTasks ?? [];
 
   const statusText = created ? 'Created ✓' : dismissed ? 'Not saved' : 'Create this goal?';
 
@@ -268,6 +276,13 @@ function GoalPreviewCard({ message }: { message: ChatMessage }) {
       <View style={styles.previewBody}>
         <Text style={styles.previewFields}>{targetLine}</Text>
         {deadlineLine ? <Text style={styles.previewFields}>{deadlineLine}</Text> : null}
+        {starterTasks.map((task, idx) => (
+          <Text key={idx} style={styles.previewFields}>
+            ✓ {task.title} — {definition.currency}
+            {task.contribution}
+            {describeStarterTaskRecurrence(task.recurrence)}
+          </Text>
+        ))}
       </View>
       {!created && !dismissed && (
         <View style={styles.removalButtons}>

@@ -226,7 +226,7 @@ export const api = {
   // never saves anything (docs/goals-redesign-plan.md §2.1); this is the
   // actual save, using the exact definition the card showed.
   createGoalFromPreview: (previewMessageId: string) =>
-    request<{ goal: ApiGoal }>('/goals', {
+    request<{ goal: ApiGoal; tasks: ApiTask[] }>('/goals', {
       method: 'POST',
       body: JSON.stringify({ previewMessageId }),
     }),

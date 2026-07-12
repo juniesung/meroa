@@ -1,9 +1,10 @@
 import { and, desc, eq, inArray, isNull, like, or } from 'drizzle-orm';
 
 import { db } from '../../db/client.ts';
-import { records, tasks, goals } from '../../db/schema.ts';
+import { records, tasks, goals, goalEntries } from '../../db/schema.ts';
 import type { GoalRow } from '../goals/executor.ts';
 import { materializeRecurringInstances, rollPastToNextDay, ymdInTz, type Tx } from './recurrence.ts';
+import { decideGoalEntryAction } from './goal-entry-decision.ts';
 import {
   reduceTaskProgress,
   resolveCompleteInput,
@@ -148,69 +149,81 @@ export async function getTask(userId: string, taskId: string): Promise<TaskRow |
 
 // --- create ----------------------------------------------------------
 
+// Transaction-parameterized core, so a caller that needs to create a task
+// alongside something else in the same transaction (goals/executor.ts's
+// starter-task creation — docs/goals-redesign-plan.md §2.3) can share it
+// instead of nesting a second top-level transaction.
+export async function createTaskInTx(
+  tx: Tx,
+  userId: string,
+  input: CreateTaskInput,
+  timezone: string | null,
+  opts: ActionSource,
+): Promise<{ task: TaskRow }> {
+  const idempotent = await findIdempotentRecord(tx, userId, opts, 'task_created');
+  if (idempotent) {
+    const payload = idempotent.payload as { taskId: string };
+    const [existingTask] = await tx
+      .select()
+      .from(tasks)
+      .where(eq(tasks.id, payload.taskId))
+      .limit(1);
+    if (existingTask) return { task: existingTask };
+  }
+
+  const config = {
+    ...buildInitialConfig(input),
+    reminder: input.reminder ?? false,
+    dueTimeExplicit: input.dueTimeExplicit ?? true,
+  };
+  const dueAt = input.dueAt ? rollPastToNextDay(new Date(input.dueAt), timezone ?? 'UTC') : null;
+
+  const [task] = await tx
+    .insert(tasks)
+    .values({
+      userId,
+      type: input.type,
+      title: input.title,
+      icon: input.icon ?? null,
+      config,
+      recurrence: input.recurrence ?? null,
+      dueAt,
+      createdFromMessageId: opts.source === 'chat' ? (opts.sourceMessageId ?? null) : null,
+    })
+    .returning();
+  if (!task) throw new Error('task_insert_failed');
+
+  await tx.insert(records).values({
+    userId,
+    kind: 'task_created',
+    payload: { taskId: task.id, title: task.title },
+    source: opts.source,
+    sourceMessageId: opts.sourceMessageId ?? null,
+    toolCallId: opts.toolCallId ?? null,
+  });
+
+  let responseTask = task;
+  if (input.recurrence) {
+    await materializeRecurringInstances(userId, timezone, tx);
+    const todayYmd = ymdInTz(new Date(), timezone ?? 'UTC');
+    const [todayInstance] = await tx
+      .select()
+      .from(tasks)
+      .where(and(eq(tasks.templateId, task.id), eq(tasks.occurrenceDate, todayYmd)))
+      .limit(1);
+    if (todayInstance) responseTask = todayInstance;
+  }
+
+  return { task: responseTask };
+}
+
 export async function createTask(
   userId: string,
   input: CreateTaskInput,
   timezone: string | null,
   opts: ActionSource,
 ): Promise<{ task: TaskRow }> {
-  return db.transaction(async (tx) => {
-    const idempotent = await findIdempotentRecord(tx, userId, opts, 'task_created');
-    if (idempotent) {
-      const payload = idempotent.payload as { taskId: string };
-      const [existingTask] = await tx
-        .select()
-        .from(tasks)
-        .where(eq(tasks.id, payload.taskId))
-        .limit(1);
-      if (existingTask) return { task: existingTask };
-    }
-
-    const config = {
-      ...buildInitialConfig(input),
-      reminder: input.reminder ?? false,
-      dueTimeExplicit: input.dueTimeExplicit ?? true,
-    };
-    const dueAt = input.dueAt ? rollPastToNextDay(new Date(input.dueAt), timezone ?? 'UTC') : null;
-
-    const [task] = await tx
-      .insert(tasks)
-      .values({
-        userId,
-        type: input.type,
-        title: input.title,
-        icon: input.icon ?? null,
-        config,
-        recurrence: input.recurrence ?? null,
-        dueAt,
-        createdFromMessageId: opts.source === 'chat' ? (opts.sourceMessageId ?? null) : null,
-      })
-      .returning();
-    if (!task) throw new Error('task_insert_failed');
-
-    await tx.insert(records).values({
-      userId,
-      kind: 'task_created',
-      payload: { taskId: task.id, title: task.title },
-      source: opts.source,
-      sourceMessageId: opts.sourceMessageId ?? null,
-      toolCallId: opts.toolCallId ?? null,
-    });
-
-    let responseTask = task;
-    if (input.recurrence) {
-      await materializeRecurringInstances(userId, timezone, tx);
-      const todayYmd = ymdInTz(new Date(), timezone ?? 'UTC');
-      const [todayInstance] = await tx
-        .select()
-        .from(tasks)
-        .where(and(eq(tasks.templateId, task.id), eq(tasks.occurrenceDate, todayYmd)))
-        .limit(1);
-      if (todayInstance) responseTask = todayInstance;
-    }
-
-    return { task: responseTask };
-  });
+  return db.transaction((tx) => createTaskInTx(tx, userId, input, timezone, opts));
 }
 
 // --- edit --------------------------------------------------------------
@@ -419,6 +432,39 @@ async function applyProgress(
     .where(eq(tasks.id, task.id))
     .returning();
   if (!updated) throw new Error('task_update_failed');
+
+  // Connected loop: a goal-linked task's completion auto-logs its
+  // contribution as a goal entry, store-once — the entry's recordId IS this
+  // same task_completion/task_progress record, not a duplicate row
+  // (CLAUDE.md §2). becameDone can fire under either recordKind (a counter
+  // task_progress reaching its target counts too), so this hooks the status
+  // transition itself rather than a specific AI tool name. The un-complete
+  // trap (docs/goals-redesign-plan.md §2.3 — re-completing after an
+  // un-complete must never double-log) is decided by the pure
+  // decideGoalEntryAction (unit-tested in goal-entry-decision.test.ts), not
+  // inline here — `task.completedRecordId` is the *prior* value since
+  // `task` was loaded before this update. undo_last_action needs no
+  // equivalent cleanup: reverting the record sets its own revertedAt, which
+  // already hides the entry via the live-entries join (lib/goals/summary.ts).
+  const goalEntryAction = decideGoalEntryAction({
+    goalId: task.goalId,
+    goalContribution: (task.config as Record<string, unknown>).goalContribution,
+    becameDone,
+    becameOpen,
+    newRecordId: record.id,
+    priorCompletedRecordId: task.completedRecordId,
+    entryAt: record.occurredAt,
+  });
+  if (goalEntryAction.action === 'insert') {
+    await tx.insert(goalEntries).values({
+      goalId: goalEntryAction.goalId,
+      recordId: goalEntryAction.recordId,
+      data: { amount: goalEntryAction.amount },
+      entryAt: goalEntryAction.entryAt,
+    });
+  } else if (goalEntryAction.action === 'delete') {
+    await tx.delete(goalEntries).where(eq(goalEntries.recordId, goalEntryAction.recordId));
+  }
 
   return { task: updated };
 }

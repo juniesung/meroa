@@ -1,8 +1,8 @@
 import { and, desc, eq, isNull, lt } from 'drizzle-orm';
 
 import { db } from '../../db/client.ts';
-import { records, goalEntries, goals } from '../../db/schema.ts';
-import type { ActionSource } from '../tasks/executor.ts';
+import { records, goalEntries, goals, tasks } from '../../db/schema.ts';
+import { createTaskInTx, type ActionSource, type TaskRow } from '../tasks/executor.ts';
 import {
   goalDefinitionSchema,
   type EditGoalPatch,
@@ -10,6 +10,7 @@ import {
   type GoalDefinition,
   type GoalEntryData,
   type GoalTemplateKey,
+  type StarterTask,
 } from './schema.ts';
 
 export type GoalRow = typeof goals.$inferSelect;
@@ -109,18 +110,32 @@ export async function getGoal(userId: string, goalId: string): Promise<GoalRow |
 // builds and returns a preview definition. This is the actual save, called
 // by POST /goals once the user taps Create on the preview card, with the
 // exact definition that was shown (re-validated here, not rebuilt from
-// params) so what gets saved always matches what was previewed.
+// params) so what gets saved always matches what was previewed. Every
+// starter task is created in the same transaction, linked via `goalId` with
+// `config.goalContribution` — the connected loop's setup half
+// (docs/goals-redesign-plan.md §2.3); the other half lives in
+// lib/tasks/executor.ts's applyProgress.
 export async function createGoal(
   userId: string,
-  input: { template: GoalTemplateKey; name: string; icon?: string | null; definition: GoalDefinition },
+  input: {
+    template: GoalTemplateKey;
+    name: string;
+    icon?: string | null;
+    definition: GoalDefinition;
+    starterTasks?: StarterTask[];
+  },
+  timezone: string | null,
   opts: ActionSource,
-): Promise<{ goal: GoalRow }> {
+): Promise<{ goal: GoalRow; tasks: TaskRow[] }> {
   return db.transaction(async (tx) => {
     const idempotent = await findIdempotentGoalRecord(tx, userId, opts, 'goal_created');
     if (idempotent) {
       const payload = idempotent.payload as { goalId: string };
       const [existingGoal] = await tx.select().from(goals).where(eq(goals.id, payload.goalId)).limit(1);
-      if (existingGoal) return { goal: existingGoal };
+      if (existingGoal) {
+        const linkedTasks = await tx.select().from(tasks).where(eq(tasks.goalId, existingGoal.id));
+        return { goal: existingGoal, tasks: linkedTasks };
+      }
     }
 
     const definition = goalDefinitionSchema.parse(input.definition);
@@ -147,7 +162,51 @@ export async function createGoal(
       toolCallId: opts.toolCallId ?? null,
     });
 
-    return { goal };
+    const createdTasks: TaskRow[] = [];
+    for (const starter of input.starterTasks ?? []) {
+      const { task: created } = await createTaskInTx(
+        tx,
+        userId,
+        { type: 'completion', title: starter.title, recurrence: starter.recurrence, reminder: false },
+        timezone,
+        opts,
+      );
+      // Recurring: createTaskInTx already materialized and returned *today's*
+      // instance, not the template — the template needs the stamp too (every
+      // future instance reads goalContribution off the template's config at
+      // materialization time — recurrence.ts's resetConfigForNewInstance),
+      // and if today's instance already exists it needs its own copy right
+      // now rather than waiting for tomorrow's materialization.
+      const templateId = created.templateId ?? created.id;
+      const [templateRow] = await tx.select().from(tasks).where(eq(tasks.id, templateId)).limit(1);
+      if (!templateRow) throw new Error('task_insert_failed');
+      const [updatedTemplate] = await tx
+        .update(tasks)
+        .set({
+          goalId: goal.id,
+          config: { ...(templateRow.config as Record<string, unknown>), goalContribution: starter.contribution },
+        })
+        .where(eq(tasks.id, templateId))
+        .returning();
+      if (!updatedTemplate) throw new Error('task_update_failed');
+
+      if (created.id === templateId) {
+        createdTasks.push(updatedTemplate);
+      } else {
+        const [updatedInstance] = await tx
+          .update(tasks)
+          .set({
+            goalId: goal.id,
+            config: { ...(created.config as Record<string, unknown>), goalContribution: starter.contribution },
+          })
+          .where(eq(tasks.id, created.id))
+          .returning();
+        if (!updatedInstance) throw new Error('task_update_failed');
+        createdTasks.push(updatedInstance);
+      }
+    }
+
+    return { goal, tasks: createdTasks };
   });
 }
 

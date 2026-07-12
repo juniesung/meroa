@@ -18,6 +18,7 @@ import {
   editGoalPatchSchema,
   logGoalEntryPatchSchema,
   goalDefinitionSchema,
+  starterTaskSchema,
   GOAL_TEMPLATES,
   type GoalTemplateKey,
 } from '../lib/goals/schema.ts';
@@ -108,6 +109,7 @@ const createFromPreviewSchema = z.object({ previewMessageId: z.string().uuid() }
 goalRoutes.post('/', zValidator('json', createFromPreviewSchema), async (c) => {
   const userId = c.get('userId');
   const { previewMessageId } = c.req.valid('json');
+  const timezone = await getUserTimezone(userId);
 
   const [row] = await db
     .select({ message: messages, conversationUserId: conversations.userId })
@@ -121,17 +123,17 @@ goalRoutes.post('/', zValidator('json', createFromPreviewSchema), async (c) => {
 
   const meta = row.message.meta as {
     kind?: string;
-    preview?: { template?: string; name?: string; icon?: string | null; definition?: unknown };
+    preview?: { template?: string; name?: string; icon?: string | null; definition?: unknown; starterTasks?: unknown };
     createdGoalId?: string;
   };
   if (meta.createdGoalId) {
     const existing = await getGoal(userId, meta.createdGoalId);
-    if (existing) return c.json({ goal: existing }, 200);
+    if (existing) return c.json({ goal: existing, tasks: [] }, 200);
   }
   if (meta.kind !== 'goal_preview' || !meta.preview) {
     return c.json({ error: 'invalid_input', message: 'that message is not a goal preview' }, 400);
   }
-  const { template, name, icon, definition } = meta.preview;
+  const { template, name, icon, definition, starterTasks } = meta.preview;
   if (!template || !GOAL_TEMPLATES.includes(template as GoalTemplateKey) || !name) {
     return c.json({ error: 'invalid_input', message: 'stored preview is malformed' }, 400);
   }
@@ -139,18 +141,29 @@ goalRoutes.post('/', zValidator('json', createFromPreviewSchema), async (c) => {
   if (!parsedDefinition.success) {
     return c.json({ error: 'invalid_input', message: 'stored preview definition is invalid' }, 400);
   }
+  const parsedStarterTasks = starterTasks ? starterTaskSchema.array().safeParse(starterTasks) : null;
+  if (starterTasks && !parsedStarterTasks?.success) {
+    return c.json({ error: 'invalid_input', message: 'stored preview starter tasks are invalid' }, 400);
+  }
 
   try {
-    const { goal } = await createGoal(
+    const { goal, tasks } = await createGoal(
       userId,
-      { template: template as GoalTemplateKey, name, icon: icon ?? null, definition: parsedDefinition.data },
+      {
+        template: template as GoalTemplateKey,
+        name,
+        icon: icon ?? null,
+        definition: parsedDefinition.data,
+        starterTasks: parsedStarterTasks?.data,
+      },
+      timezone,
       { source: 'goal_ui', sourceMessageId: previewMessageId },
     );
     await db
       .update(messages)
       .set({ meta: { ...meta, createdGoalId: goal.id } })
       .where(eq(messages.id, previewMessageId));
-    return c.json({ goal }, 201);
+    return c.json({ goal, tasks }, 201);
   } catch (err) {
     const { status, body } = actionErrorResponse(err);
     return c.json(body, status);

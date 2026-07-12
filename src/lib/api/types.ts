@@ -150,6 +150,12 @@ export type GoalDefinition = {
   checkInCadence?: 'weekly' | 'off';
 };
 
+export type StarterTask = {
+  title: string;
+  recurrence?: Recurrence;
+  contribution: number;
+};
+
 // What create_goal returns for display before anything is saved — stored on
 // a goal_preview message's meta.preview, and what POST /goals sends back.
 export type GoalPreview = {
@@ -157,6 +163,7 @@ export type GoalPreview = {
   name: string;
   icon: string | null;
   definition: GoalDefinition;
+  starterTasks?: StarterTask[];
 };
 
 export type ApiGoal = {

@@ -611,6 +611,7 @@ async function executeAiToolCallInner(
           name: validated.data.name,
           icon: validated.data.icon ?? null,
           definition,
+          starterTasks: validated.data.starterTasks,
         };
         return {
           ok: true,
