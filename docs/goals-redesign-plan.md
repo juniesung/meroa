@@ -427,6 +427,16 @@ occasional imprecise *prose* around correct actions ("then I'll set up the weekl
 task" for a starter already in the preview) — factual drift in narration with the
 facts also on screen, never a false success claim. Cost: two model calls per turn.
 
+**Heatmap revision (user-requested, 2026-07-12):** §2.5's GitHub-style 15-week strip
+replaced with a month-paged calendar — one month at a time (chevrons page back
+through the served history, currently 2 months + current), reading left→right /
+top→down with the 1st at top-left, cell intensity = that day's completion ratio
+(full accent exactly when everything due was done), future days as outlined
+placeholders, tap-a-day summary kept. Server side: buildCalendar now serves whole
+months (1st of monthsBack ago → today) instead of a fixed 105-day strip; day-verdict
+and streak math untouched. Stat tiles deliberately left as-is (rolling 7-day "done
+this week", calendar-month "perfect days") per the user's call.
+
 ## §4 results (2026-07-12, deepseek-v4-flash, isolated dev-token account +15555559911)
 
 Ran end-to-end against the live server (not a simulation) — real chat turns through the

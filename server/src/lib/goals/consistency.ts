@@ -114,13 +114,27 @@ export function computeLongestStreak(buckets: Map<string, DayBucket>): number {
   return longest;
 }
 
-/** Last `weeks` weeks (default 15, ~105 days) ending today, oldest first — client renders, never re-buckets. */
-export function buildCalendar(buckets: Map<string, DayBucket>, todayYmd: string, weeks = 15): DayBucket[] {
-  const days = weeks * 7;
+/**
+ * From the 1st of the month `monthsBack` months before today's month,
+ * through today, oldest first — whole months so the client's month-paged
+ * calendar view (components/Heatmap.tsx) always has complete months to
+ * page through; the current month simply ends at today (future days are
+ * client-side placeholders, no data to bucket). Client renders, never
+ * re-buckets.
+ */
+export function buildCalendar(buckets: Map<string, DayBucket>, todayYmd: string, monthsBack = 2): DayBucket[] {
+  const [year, month] = todayYmd.split('-').map(Number) as [number, number];
+  let startYear = year;
+  let startMonth = month - monthsBack;
+  while (startMonth < 1) {
+    startMonth += 12;
+    startYear -= 1;
+  }
   const calendar: DayBucket[] = [];
-  for (let i = days - 1; i >= 0; i--) {
-    const ymd = addDaysToYmd(todayYmd, -i);
-    calendar.push(bucketOrNeutral(buckets, ymd));
+  let cursor = `${startYear}-${String(startMonth).padStart(2, '0')}-01`;
+  while (cursor <= todayYmd) {
+    calendar.push(bucketOrNeutral(buckets, cursor));
+    cursor = addDaysToYmd(cursor, 1);
   }
   return calendar;
 }

@@ -107,18 +107,26 @@ describe('computeLongestStreak', () => {
 });
 
 describe('buildCalendar', () => {
-  it('returns exactly weeks*7 days, oldest first, ending today', () => {
+  it('spans from the 1st of the month monthsBack months ago through today, oldest first', () => {
     const buckets = bucketTasksByDay([row('2026-07-10', 'done')]);
     const calendar = buildCalendar(buckets, '2026-07-10', 2);
-    expect(calendar).toHaveLength(14);
-    expect(calendar[0]!.ymd).toBe('2026-06-27');
+    // May 1 .. Jul 10 = 31 + 30 + 10
+    expect(calendar).toHaveLength(71);
+    expect(calendar[0]!.ymd).toBe('2026-05-01');
     expect(calendar[calendar.length - 1]!.ymd).toBe('2026-07-10');
     expect(calendar[calendar.length - 1]!.verdict).toBe('perfect');
   });
 
+  it('wraps the year boundary when monthsBack crosses January', () => {
+    const calendar = buildCalendar(new Map(), '2026-01-15', 2);
+    expect(calendar[0]!.ymd).toBe('2025-11-01');
+    expect(calendar[calendar.length - 1]!.ymd).toBe('2026-01-15');
+  });
+
   it('fills days with no data as neutral (level 0) rather than omitting them', () => {
-    const calendar = buildCalendar(new Map(), '2026-07-10', 1);
-    expect(calendar).toHaveLength(7);
+    const calendar = buildCalendar(new Map(), '2026-07-10', 0);
+    // Jul 1 .. Jul 10
+    expect(calendar).toHaveLength(10);
     expect(calendar.every((d) => d.verdict === 'neutral' && d.level === 0)).toBe(true);
   });
 });
