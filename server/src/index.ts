@@ -9,7 +9,7 @@ import { bootstrapRoutes } from './routes/bootstrap.ts';
 import { meRoutes } from './routes/me.ts';
 import { messageRoutes } from './routes/messages.ts';
 import { taskRoutes } from './routes/tasks.ts';
-import { toolRoutes } from './routes/tools.ts';
+import { goalRoutes } from './routes/goals.ts';
 
 const app = new Hono();
 
@@ -24,7 +24,7 @@ app.route('/me', meRoutes);
 app.route('/bootstrap', bootstrapRoutes);
 app.route('/conversations/current/messages', messageRoutes);
 app.route('/tasks', taskRoutes);
-app.route('/tools', toolRoutes);
+app.route('/goals', goalRoutes);
 
 serve({ fetch: app.fetch, port: env.PORT }, (info) => {
   logger.info(`meroa-server listening on http://localhost:${info.port}`);

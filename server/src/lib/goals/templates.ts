@@ -1,6 +1,6 @@
-import type { CreateToolParams, ToolDefinition, ToolField, ToolFieldInput } from './schema.ts';
+import type { CreateGoalParams, GoalDefinition, GoalField, GoalFieldInput } from './schema.ts';
 
-function field(input: ToolFieldInput): ToolField {
+function field(input: GoalFieldInput): GoalField {
   return { id: crypto.randomUUID(), ...input };
 }
 
@@ -8,14 +8,14 @@ function field(input: ToolFieldInput): ToolField {
 // applied uniformly across every template — a create-time model call gets
 // small, validated deviation from the default shape, never a raw field
 // array (phase-4-implementation-plan.md §1.2).
-function applyCustomization(defaultFields: ToolField[], params: CreateToolParams): ToolField[] {
+function applyCustomization(defaultFields: GoalField[], params: CreateGoalParams): GoalField[] {
   const omit = new Set((params.omitFields ?? []).map((l) => l.toLowerCase().trim()));
   const kept = defaultFields.filter((f) => !omit.has(f.label.toLowerCase().trim()));
   const extra = (params.extraFields ?? []).map(field);
   return [...kept, ...extra];
 }
 
-function workoutDefinition(params: CreateToolParams): ToolDefinition {
+function workoutDefinition(params: CreateGoalParams): GoalDefinition {
   const weightUnit = params.unit ?? 'lb';
   const fields = applyCustomization(
     [
@@ -40,7 +40,7 @@ function workoutDefinition(params: CreateToolParams): ToolDefinition {
   };
 }
 
-function habitDefinition(params: CreateToolParams): ToolDefinition {
+function habitDefinition(params: CreateGoalParams): GoalDefinition {
   const fields = applyCustomization([field({ label: 'Notes', type: 'text' })], params);
   return {
     fields,
@@ -52,10 +52,10 @@ function habitDefinition(params: CreateToolParams): ToolDefinition {
   };
 }
 
-function numericDefinition(params: CreateToolParams): ToolDefinition {
+function numericDefinition(params: CreateGoalParams): GoalDefinition {
   const valueField = field({ label: 'Value', type: 'number', unit: params.unit });
   const fields = applyCustomization([valueField], params);
-  const views: ToolDefinition['views'] = params.targetValue
+  const views: GoalDefinition['views'] = params.targetValue
     ? [{ kind: 'progress_total' }, { kind: 'recent_list' }]
     : [
         { kind: 'bars', bucket: 'week', measure: 'sum', fieldId: valueField.id },
@@ -70,7 +70,7 @@ function numericDefinition(params: CreateToolParams): ToolDefinition {
   };
 }
 
-function moneyDefinition(params: CreateToolParams): ToolDefinition {
+function moneyDefinition(params: CreateGoalParams): GoalDefinition {
   const currency = params.currency ?? '$';
   const amountField = field({ label: 'Amount', type: 'number', unit: currency });
   const fields = applyCustomization([amountField, field({ label: 'Note', type: 'text' })], params);
@@ -83,7 +83,7 @@ function moneyDefinition(params: CreateToolParams): ToolDefinition {
   };
 }
 
-function journalDefinition(params: CreateToolParams): ToolDefinition {
+function journalDefinition(params: CreateGoalParams): GoalDefinition {
   const fields = applyCustomization(
     [
       field({ label: 'Entry', type: 'text', required: true }),
@@ -95,14 +95,14 @@ function journalDefinition(params: CreateToolParams): ToolDefinition {
 }
 
 /**
- * Assembles a full ToolDefinition from a template key + small, validated
+ * Assembles a full GoalDefinition from a template key + small, validated
  * params — the server owns the default field shapes; the model only ever
  * supplies bounded customization (unit/currency/target/extraFields/
  * omitFields), never a raw field array (phase-4-implementation-plan.md §1.2,
  * docs/ai-reliability-hardening.md lesson 2's "no storage shape" applied to
  * tool creation rather than task template/instance rows).
  */
-export function buildTemplateDefinition(params: CreateToolParams): ToolDefinition {
+export function buildTemplateDefinition(params: CreateGoalParams): GoalDefinition {
   switch (params.template) {
     case 'workout':
       return workoutDefinition(params);

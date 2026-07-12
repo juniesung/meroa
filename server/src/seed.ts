@@ -8,13 +8,13 @@ import {
   messages,
   records,
   tasks,
-  toolEntries,
-  tools,
+  goalEntries,
+  goals,
   users,
 } from './db/schema.ts';
 import { logger } from './logger.ts';
-import { buildTemplateDefinition } from './lib/tools/templates.ts';
-import type { ToolField } from './lib/tools/schema.ts';
+import { buildTemplateDefinition } from './lib/goals/templates.ts';
+import type { GoalField } from './lib/goals/schema.ts';
 
 // Same demo number as DEMO_PHONE_E164 in lib/constants.ts — kept as a literal
 // here so the seed script has no dependency on the OTP flow's internals.
@@ -165,21 +165,22 @@ async function main() {
     },
   ]);
 
-  // --- a workout tool with history, so Tools isn't empty on first open ---
-  // Uses the same template builder create_tool does (lib/tools/templates.ts)
-  // so this stays schema-valid as ToolDefinition evolves, instead of an
-  // ad-hoc shape drifting out of sync with it (a stale ad-hoc { unit,
-  // exercises } shape here once crashed every chat turn's tool-context
-  // build, since computeCardSummary assumes definition.fields exists).
+  // --- a workout goal with history, so Goals isn't empty on first open ---
+  // Uses the same template builder create_goal did pre-simplification
+  // (lib/goals/templates.ts) so this stays schema-valid as GoalDefinition
+  // evolves, instead of an ad-hoc shape drifting out of sync with it (a
+  // stale ad-hoc { unit, exercises } shape here once crashed every chat
+  // turn's goal-context build, since computeCardSummary assumes
+  // definition.fields exists).
   const workoutDefinition = buildTemplateDefinition({
     template: 'workout',
     name: 'Strength tracker',
     unit: 'lb',
   });
-  const fieldByLabel = new Map<string, ToolField>(workoutDefinition.fields.map((f) => [f.label, f]));
+  const fieldByLabel = new Map<string, GoalField>(workoutDefinition.fields.map((f) => [f.label, f]));
 
-  const [workoutTool] = await db
-    .insert(tools)
+  const [workoutGoal] = await db
+    .insert(goals)
     .values({
       userId: user.id,
       template: 'workout',
@@ -188,7 +189,7 @@ async function main() {
       definition: workoutDefinition,
     })
     .returning();
-  if (!workoutTool) throw new Error('seed_tool_insert_failed');
+  if (!workoutGoal) throw new Error('seed_goal_insert_failed');
 
   const entries = [
     { daysAgo: 5, exercise: 'Bench Press', weight: 155, reps: 8 },
@@ -207,16 +208,16 @@ async function main() {
       .insert(records)
       .values({
         userId: user.id,
-        kind: 'tool_entry',
-        payload: { toolId: workoutTool.id, name: workoutTool.name, data, entryAt: occurredAt.toISOString() },
-        source: 'tool_ui',
+        kind: 'goal_entry',
+        payload: { goalId: workoutGoal.id, name: workoutGoal.name, data, entryAt: occurredAt.toISOString() },
+        source: 'goal_ui',
         occurredAt,
       })
       .returning();
     if (!record) throw new Error('seed_record_insert_failed');
 
-    await db.insert(toolEntries).values({
-      toolId: workoutTool.id,
+    await db.insert(goalEntries).values({
+      goalId: workoutGoal.id,
       recordId: record.id,
       data,
       entryAt: occurredAt,

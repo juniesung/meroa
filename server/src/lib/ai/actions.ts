@@ -19,24 +19,24 @@ import {
   type TaskRow,
 } from '../tasks/executor.ts';
 import {
-  createTool,
-  editTool,
-  getTool as getToolRow,
-  logToolEntry,
-  ToolActionError,
-  type ToolRow,
-} from '../tools/executor.ts';
-import { buildTemplateDefinition } from '../tools/templates.ts';
+  createGoal,
+  editGoal,
+  getGoal as getGoalRow,
+  logGoalEntry,
+  GoalActionError,
+  type GoalRow,
+} from '../goals/executor.ts';
+import { buildTemplateDefinition } from '../goals/templates.ts';
 import {
-  toolDefinitionSchema,
+  goalDefinitionSchema,
   validateEntryValues,
-  type EditToolPatch,
-  type LogToolEntryPatch,
-  type ToolDefinition,
-  type ToolEntryValue,
-  type ToolPreview,
-} from '../tools/schema.ts';
-import { buildToolCardSummaries } from '../tools/summary.ts';
+  type EditGoalPatch,
+  type LogGoalEntryPatch,
+  type GoalDefinition,
+  type GoalEntryValue,
+  type GoalPreview,
+} from '../goals/schema.ts';
+import { buildGoalCardSummaries } from '../goals/summary.ts';
 import type { TurnRef, TurnRefs } from './task-context.ts';
 import { isAiToolName, validateToolInput, type AiToolName } from './tools.ts';
 
@@ -83,18 +83,18 @@ async function verifyTitleHint(
 export type TaskActionResult =
   | { ok: true; toolName: AiToolName; task: TaskRow; summary: string; recordKind: string }
   | { ok: true; toolName: AiToolName; tasks: TaskRow[]; summary: string; recordKind: string }
-  // A tool (tracker) action that actually mutated a saved row — edit_tool,
-  // log_tool_entry, or an undo_last_action that reverted a tool_% record.
-  | { ok: true; toolName: AiToolName; tool: ToolRow; summary: string; recordKind: string }
-  // create_tool — a preview only, nothing saved yet
-  // (docs/phase-4-implementation-plan.md §1.3).
-  | { ok: true; toolName: AiToolName; preview: ToolPreview; summary: string; recordKind: string }
+  // A goal action that actually mutated a saved row — edit_goal,
+  // log_goal_entry, or an undo_last_action that reverted a goal_% record.
+  | { ok: true; toolName: AiToolName; goal: GoalRow; summary: string; recordKind: string }
+  // create_goal — a preview only, nothing saved yet
+  // (docs/goals-redesign-plan.md §2.1/§2.2).
+  | { ok: true; toolName: AiToolName; preview: GoalPreview; summary: string; recordKind: string }
   | { ok: false; error: string };
 
 // "$150" for the primary field, "Note: groceries" for anything else — used
-// both to confirm what log_tool_entry actually recorded and to narrate what
+// both to confirm what log_goal_entry actually recorded and to narrate what
 // an undone entry removed.
-function describeEntryValues(definition: ToolDefinition, data: Record<string, unknown>): string {
+function describeEntryValues(definition: GoalDefinition, data: Record<string, unknown>): string {
   const fieldsById = new Map(definition.fields.map((f) => [f.id, f]));
   const parts: string[] = [];
   for (const [fieldId, value] of Object.entries(data)) {
@@ -106,45 +106,45 @@ function describeEntryValues(definition: ToolDefinition, data: Record<string, un
   return parts.join(', ');
 }
 
-// The tool's concrete, recomputed post-action fact (never leaves the model
+// The goal's concrete, recomputed post-action fact (never leaves the model
 // to narrate from memory — docs/ai-reliability-hardening.md lesson 16).
 // Reuses the batched summaries helper with a single-element array; the cost
-// is the same as a dedicated single-tool query would be.
-async function toolHeadline(tool: ToolRow, timezone: string | null): Promise<string> {
-  const summaries = await buildToolCardSummaries([tool], timezone);
-  return summaries.get(tool.id)?.headline ?? '';
+// is the same as a dedicated single-goal query would be.
+async function goalHeadline(goal: GoalRow, timezone: string | null): Promise<string> {
+  const summaries = await buildGoalCardSummaries([goal], timezone);
+  return summaries.get(goal.id)?.headline ?? '';
 }
 
-async function summarizeToolUndo(
-  tool: ToolRow,
+async function summarizeGoalUndo(
+  goal: GoalRow,
   undidKind: string,
   timezone: string | null,
   entryData?: Record<string, unknown>,
 ): Promise<string> {
-  const headline = await toolHeadline(tool, timezone);
+  const headline = await goalHeadline(goal, timezone);
   switch (undidKind) {
-    case 'tool_created':
-      return `Removed the "${tool.name}" tracker.`;
-    case 'tool_archived':
-      return `Brought back "${tool.name}"${headline ? ` — ${headline}` : ''}.`;
-    case 'tool_edited':
-      return `Undid the last edit to "${tool.name}"${headline ? ` — ${headline}` : ''}.`;
-    case 'tool_entry': {
-      const logged = entryData ? describeEntryValues(tool.definition as ToolDefinition, entryData) : '';
-      return `Removed that${logged ? ` ${logged}` : ''} entry from "${tool.name}"${headline ? ` — ${headline} now` : ''}.`;
+    case 'goal_created':
+      return `Removed the "${goal.name}" goal.`;
+    case 'goal_archived':
+      return `Brought back "${goal.name}"${headline ? ` — ${headline}` : ''}.`;
+    case 'goal_edited':
+      return `Undid the last edit to "${goal.name}"${headline ? ` — ${headline}` : ''}.`;
+    case 'goal_entry': {
+      const logged = entryData ? describeEntryValues(goal.definition as GoalDefinition, entryData) : '';
+      return `Removed that${logged ? ` ${logged}` : ''} entry from "${goal.name}"${headline ? ` — ${headline} now` : ''}.`;
     }
     default:
-      return `Undid the last change to "${tool.name}"${headline ? ` — ${headline}` : ''}.`;
+      return `Undid the last change to "${goal.name}"${headline ? ` — ${headline}` : ''}.`;
   }
 }
 
-// Confirms a constrained edit_tool op with the concrete before/after value,
+// Confirms a constrained edit_goal op with the concrete before/after value,
 // not just "updated" (docs/ai-reliability-hardening.md lesson 13's edit
 // surface applies just as much to what the model says about an edit as to
 // what a form silently resaves).
-function describeToolEdit(
-  before: ToolRow,
-  after: ToolRow,
+function describeGoalEdit(
+  before: GoalRow,
+  after: GoalRow,
   input: {
     name?: string;
     targetValue?: number;
@@ -157,8 +157,8 @@ function describeToolEdit(
   const parts: string[] = [];
   if (input.name !== undefined) parts.push(`renamed to "${after.name}"`);
 
-  const beforeTarget = (before.definition as ToolDefinition).target;
-  const afterTarget = (after.definition as ToolDefinition).target;
+  const beforeTarget = (before.definition as GoalDefinition).target;
+  const afterTarget = (after.definition as GoalDefinition).target;
   if (input.targetValue !== undefined && afterTarget && beforeTarget) {
     const afterUnit = 'unit' in afterTarget && afterTarget.unit ? ` ${afterTarget.unit}` : '';
     const beforeUnit = 'unit' in beforeTarget && beforeTarget.unit ? ` ${beforeTarget.unit}` : '';
@@ -300,49 +300,49 @@ function removeTarget(
   return { ok: true, taskId: ref.instanceId };
 }
 
-type ResolvedToolRef = Extract<TurnRef, { kind: 'tool' }>;
+type ResolvedGoalRef = Extract<TurnRef, { kind: 'goal' }>;
 
-// Same resolve-then-verify pattern as resolveTaskRef, for tools.
-function resolveToolRef(
+// Same resolve-then-verify pattern as resolveTaskRef, for goals.
+function resolveGoalRef(
   refs: TurnRefs,
-  toolRef: string,
-): { ok: true; ref: ResolvedToolRef } | { ok: false; error: string } {
-  const entry = refs.get(toolRef);
-  if (!entry || entry.kind !== 'tool') {
+  goalRef: string,
+): { ok: true; ref: ResolvedGoalRef } | { ok: false; error: string } {
+  const entry = refs.get(goalRef);
+  if (!entry || entry.kind !== 'goal') {
     return {
       ok: false,
-      error: `${toolRef} isn't in the current tools list — re-check the tools list in context for the right ref.`,
+      error: `${goalRef} isn't in the current goals list — re-check the goals list in context for the right ref.`,
     };
   }
   return { ok: true, ref: entry };
 }
 
-function resolveToolFieldRef(
+function resolveGoalFieldRef(
   refs: TurnRefs,
-  toolId: string,
+  goalId: string,
   fieldRef: string,
 ): { ok: true; fieldId: string } | { ok: false; error: string } {
   const entry = refs.get(fieldRef);
-  if (!entry || entry.kind !== 'tool_field' || entry.toolId !== toolId) {
+  if (!entry || entry.kind !== 'goal_field' || entry.goalId !== goalId) {
     return {
       ok: false,
-      error: `${fieldRef} isn't a valid field ref for that tool — re-check the [fields: ...] list in context.`,
+      error: `${fieldRef} isn't a valid field ref for that goal — re-check the [fields: ...] list in context.`,
     };
   }
   return { ok: true, fieldId: entry.fieldId };
 }
 
-// Same pattern as verifyTitleHint, for tools.
+// Same pattern as verifyTitleHint, for goals.
 async function verifyNameHint(
   userId: string,
-  toolId: string,
+  goalId: string,
   nameHint: string,
 ): Promise<{ error: string } | null> {
-  const tool = await getToolRow(userId, toolId);
-  if (!tool) return null;
-  if (titleMatches(nameHint, tool.name)) return null;
+  const goal = await getGoalRow(userId, goalId);
+  if (!goal) return null;
+  if (titleMatches(nameHint, goal.name)) return null;
   return {
-    error: `nameHint doesn't match that ref — the tool there is actually named "${tool.name}", not "${nameHint}". Re-check the tools list in context for the right ref, or ask the user to clarify which tool they mean.`,
+    error: `nameHint doesn't match that ref — the goal there is actually named "${goal.name}", not "${nameHint}". Re-check the goals list in context for the right ref, or ask the user to clarify which goal they mean.`,
   };
 }
 
@@ -631,15 +631,15 @@ async function executeAiToolCallInner(
           recordKind: 'task_bulk_removal_pending',
         };
       }
-      case 'create_tool': {
-        const validated = validateToolInput('create_tool', rawInput);
+      case 'create_goal': {
+        const validated = validateToolInput('create_goal', rawInput);
         if (!validated.ok) return { ok: false, error: validated.error };
 
-        // Never saves — this returns a preview only (§1.3 of
-        // docs/phase-4-implementation-plan.md). POST /tools
-        // {previewMessageId} does the actual create once the user taps.
-        const definition = toolDefinitionSchema.parse(buildTemplateDefinition(validated.data));
-        const preview: ToolPreview = {
+        // Never saves — this returns a preview only (docs/goals-redesign-
+        // plan.md §2.1). POST /goals {previewMessageId} does the actual
+        // create once the user taps.
+        const definition = goalDefinitionSchema.parse(buildTemplateDefinition(validated.data));
+        const preview: GoalPreview = {
           template: validated.data.template,
           name: validated.data.name,
           icon: validated.data.icon ?? null,
@@ -651,28 +651,28 @@ async function executeAiToolCallInner(
           preview,
           summary:
             'Preview card shown — nothing is saved yet; the user taps Create on the card to save it. Do not ask them to confirm in chat text.',
-          recordKind: 'tool_preview',
+          recordKind: 'goal_preview',
         };
       }
-      case 'edit_tool': {
-        const validated = validateToolInput('edit_tool', rawInput);
+      case 'edit_goal': {
+        const validated = validateToolInput('edit_goal', rawInput);
         if (!validated.ok) return { ok: false, error: validated.error };
-        const resolved = resolveToolRef(refs, validated.data.toolRef);
+        const resolved = resolveGoalRef(refs, validated.data.goalRef);
         if (!resolved.ok) return { ok: false, error: resolved.error };
-        const toolId = resolved.ref.toolId;
-        const hintCheck = await verifyNameHint(userId, toolId, validated.data.nameHint);
+        const goalId = resolved.ref.goalId;
+        const hintCheck = await verifyNameHint(userId, goalId, validated.data.nameHint);
         if (hintCheck) return { ok: false, error: hintCheck.error };
 
-        const before = await getToolRow(userId, toolId);
+        const before = await getGoalRow(userId, goalId);
         if (!before) {
-          return { ok: false, error: "that tool ref doesn't match any current tool — check the tools list." };
+          return { ok: false, error: "that goal ref doesn't match any current goal — check the goals list." };
         }
 
         let removeFieldIds: string[] | undefined;
         if (validated.data.removeFieldRefs?.length) {
           removeFieldIds = [];
           for (const fieldRef of validated.data.removeFieldRefs) {
-            const resolvedField = resolveToolFieldRef(refs, toolId, fieldRef);
+            const resolvedField = resolveGoalFieldRef(refs, goalId, fieldRef);
             if (!resolvedField.ok) return { ok: false, error: resolvedField.error };
             removeFieldIds.push(resolvedField.fieldId);
           }
@@ -682,13 +682,13 @@ async function executeAiToolCallInner(
         if (validated.data.renameFields?.length) {
           renameFields = [];
           for (const r of validated.data.renameFields) {
-            const resolvedField = resolveToolFieldRef(refs, toolId, r.fieldRef);
+            const resolvedField = resolveGoalFieldRef(refs, goalId, r.fieldRef);
             if (!resolvedField.ok) return { ok: false, error: resolvedField.error };
             renameFields.push({ fieldId: resolvedField.fieldId, label: r.label });
           }
         }
 
-        const patch: EditToolPatch = {
+        const patch: EditGoalPatch = {
           name: validated.data.name,
           icon: validated.data.icon,
           targetValue: validated.data.targetValue,
@@ -697,28 +697,28 @@ async function executeAiToolCallInner(
           removeFieldIds,
           renameFields,
         };
-        const { tool } = await editTool(userId, toolId, patch, source);
+        const { goal } = await editGoal(userId, goalId, patch, source);
 
         return {
           ok: true,
           toolName,
-          tool,
-          summary: describeToolEdit(before, tool, validated.data),
-          recordKind: 'tool_edited',
+          goal,
+          summary: describeGoalEdit(before, goal, validated.data),
+          recordKind: 'goal_edited',
         };
       }
-      case 'log_tool_entry': {
-        const validated = validateToolInput('log_tool_entry', rawInput);
+      case 'log_goal_entry': {
+        const validated = validateToolInput('log_goal_entry', rawInput);
         if (!validated.ok) return { ok: false, error: validated.error };
-        const resolved = resolveToolRef(refs, validated.data.toolRef);
+        const resolved = resolveGoalRef(refs, validated.data.goalRef);
         if (!resolved.ok) return { ok: false, error: resolved.error };
-        const toolId = resolved.ref.toolId;
-        const hintCheck = await verifyNameHint(userId, toolId, validated.data.nameHint);
+        const goalId = resolved.ref.goalId;
+        const hintCheck = await verifyNameHint(userId, goalId, validated.data.nameHint);
         if (hintCheck) return { ok: false, error: hintCheck.error };
 
-        const values: ToolEntryValue[] = [];
+        const values: GoalEntryValue[] = [];
         for (const v of validated.data.values) {
-          const resolvedField = resolveToolFieldRef(refs, toolId, v.fieldRef);
+          const resolvedField = resolveGoalFieldRef(refs, goalId, v.fieldRef);
           if (!resolvedField.ok) return { ok: false, error: resolvedField.error };
           values.push({ fieldId: resolvedField.fieldId, value: v.value });
         }
@@ -726,35 +726,35 @@ async function executeAiToolCallInner(
         const entryAt = normalizeDueAt(validated.data.entryAt, timezone);
         if ('error' in entryAt) return { ok: false, error: entryAt.error };
 
-        const patch: LogToolEntryPatch = { values, entryAt: entryAt.value ?? undefined };
-        const { tool } = await logToolEntry(userId, toolId, patch, source);
+        const patch: LogGoalEntryPatch = { values, entryAt: entryAt.value ?? undefined };
+        const { goal } = await logGoalEntry(userId, goalId, patch, source);
 
-        const headline = await toolHeadline(tool, timezone);
+        const headline = await goalHeadline(goal, timezone);
         const logged = describeEntryValues(
-          tool.definition as ToolDefinition,
+          goal.definition as GoalDefinition,
           Object.fromEntries(values.map((v) => [v.fieldId, v.value])),
         );
         return {
           ok: true,
           toolName,
-          tool,
-          summary: `Logged ${logged || 'that'} to "${tool.name}"${headline ? ` — ${headline} now` : ''}.`,
-          recordKind: 'tool_entry',
+          goal,
+          summary: `Logged ${logged || 'that'} to "${goal.name}"${headline ? ` — ${headline} now` : ''}.`,
+          recordKind: 'goal_entry',
         };
       }
       case 'undo_last_action': {
         const result = await undoLastAction(userId, source);
-        if (result.tool) {
+        if (result.goal) {
           return {
             ok: true,
             toolName,
-            tool: result.tool,
-            summary: await summarizeToolUndo(result.tool, result.action, timezone, result.toolEntryData),
+            goal: result.goal,
+            summary: await summarizeGoalUndo(result.goal, result.action, timezone, result.goalEntryData),
             recordKind: result.action,
           };
         }
         const { task, action, tasks } = result;
-        if (!task) throw new Error('undo_last_action returned neither a task nor a tool');
+        if (!task) throw new Error('undo_last_action returned neither a task nor a goal');
         // Without the concrete restored value here, the model has nothing
         // but its own (unreliable) memory of prior turns to describe what
         // changed — observed live producing a wrong due date two edits
@@ -778,7 +778,7 @@ async function executeAiToolCallInner(
       }
     }
   } catch (err) {
-    if (err instanceof TaskActionError || err instanceof ToolActionError) {
+    if (err instanceof TaskActionError || err instanceof GoalActionError) {
       return { ok: false, error: err.message };
     }
     throw err;

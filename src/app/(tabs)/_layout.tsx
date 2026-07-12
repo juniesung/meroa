@@ -52,7 +52,7 @@ export default function TabsLayout() {
     >
       <Tabs.Screen name="index" options={{ title: 'Chat', tabBarIcon: makeIcon('chat') }} />
       <Tabs.Screen name="tasks" options={{ title: 'Tasks', tabBarIcon: makeIcon('tasks') }} />
-      <Tabs.Screen name="tools" options={{ title: 'Tools', tabBarIcon: makeIcon('tools') }} />
+      <Tabs.Screen name="goals" options={{ title: 'Goals', tabBarIcon: makeIcon('goals') }} />
       <Tabs.Screen name="you" options={{ title: 'You', tabBarIcon: makeIcon('you') }} />
     </Tabs>
   );

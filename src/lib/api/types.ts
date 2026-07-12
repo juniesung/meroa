@@ -75,7 +75,7 @@ export type ApiTask = {
   icon: string | null;
   config: CompletionConfig | ChecklistConfig | CounterConfig | DurationConfig;
   recurrence: Recurrence | null;
-  toolId: string | null;
+  goalId: string | null;
   dueAt: string | null;
   status: TaskStatus;
   completedRecordId: string | null;
@@ -136,61 +136,61 @@ export type PostponeTaskInput = {
   reason?: 'bad_timing' | 'low_energy' | 'avoided' | null;
 };
 
-// --- tools (mirrors server/src/lib/tools/schema.ts) -----------------------
+// --- goals (mirrors server/src/lib/goals/schema.ts) ------------------------
 
-export type ToolFieldType = 'number' | 'text' | 'boolean' | 'rating' | 'choice';
+export type GoalFieldType = 'number' | 'text' | 'boolean' | 'rating' | 'choice';
 
-export type ToolField = {
+export type GoalField = {
   id: string;
   label: string;
-  type: ToolFieldType;
+  type: GoalFieldType;
   unit?: string;
   options?: string[];
   required?: boolean;
   archived?: boolean;
 };
 
-export type ToolTarget =
+export type GoalTarget =
   | { kind: 'total'; value: number; unit?: string }
   | { kind: 'count_per_period'; period: 'day' | 'week'; value: number };
 
-export type ToolView =
+export type GoalView =
   | { kind: 'progress_total' }
   | { kind: 'streak' }
   | { kind: 'bars'; bucket: 'day' | 'week'; measure: 'count' | 'sum'; fieldId?: string }
   | { kind: 'recent_list' };
 
-export type ToolDefinition = {
-  fields: ToolField[];
+export type GoalDefinition = {
+  fields: GoalField[];
   primaryFieldId?: string;
-  target?: ToolTarget;
-  views: ToolView[];
+  target?: GoalTarget;
+  views: GoalView[];
   entryNoun?: string;
 };
 
-export type ToolTemplateKey = 'workout' | 'habit' | 'numeric' | 'money' | 'journal';
+export type GoalTemplateKey = 'workout' | 'habit' | 'numeric' | 'money' | 'journal';
 
-// What create_tool returns for display before anything is saved — stored on
-// a tool_preview message's meta.preview, and what POST /tools sends back.
-export type ToolPreview = {
-  template: ToolTemplateKey;
+// What create_goal returns for display before anything is saved — stored on
+// a goal_preview message's meta.preview, and what POST /goals sends back.
+export type GoalPreview = {
+  template: GoalTemplateKey;
   name: string;
   icon: string | null;
-  definition: ToolDefinition;
+  definition: GoalDefinition;
 };
 
-export type ApiTool = {
+export type ApiGoal = {
   id: string;
   userId: string;
   template: string;
   name: string;
   icon: string | null;
   version: number;
-  definition: ToolDefinition;
+  definition: GoalDefinition;
   createdAt: string;
   archivedAt: string | null;
-  // Card summary fields, precomputed server-side (lib/tools/summary.ts) —
-  // present on the GET /tools list response.
+  // Card summary fields, precomputed server-side (lib/goals/summary.ts) —
+  // present on the GET /goals list response.
   entryCount: number;
   headline?: string;
   sub?: string;
@@ -198,51 +198,51 @@ export type ApiTool = {
   lastEntryAt?: string | null;
 };
 
-export type ApiToolEntry = {
+export type ApiGoalEntry = {
   id: string;
-  toolId: string;
+  goalId: string;
   recordId: string;
   data: Record<string, unknown>;
   entryAt: string;
   createdAt: string;
 };
 
-export type ApiToolViewData =
+export type ApiGoalViewData =
   | { kind: 'progress_total'; total: number | null; targetValue: number | null; unit: string | null; progress: number | null }
   | { kind: 'streak'; streak: number }
   | { kind: 'bars'; bucket: 'day' | 'week'; buckets: { label: string; ymd: string; value: number }[] }
   | { kind: 'recent_list' };
 
-export type ApiToolDetail = {
+export type ApiGoalDetail = {
   card: { headline: string; sub: string; progress: number | null };
-  views: ApiToolViewData[];
+  views: ApiGoalViewData[];
   entryCount: number;
   lastEntryAt: string | null;
 };
 
-export type CreateToolParams = {
-  template: ToolTemplateKey;
+export type CreateGoalParams = {
+  template: GoalTemplateKey;
   name: string;
   icon?: string;
   unit?: string;
   currency?: string;
   targetValue?: number;
   targetPeriod?: 'day' | 'week';
-  extraFields?: { label: string; type: ToolFieldType; unit?: string; options?: string[]; required?: boolean }[];
+  extraFields?: { label: string; type: GoalFieldType; unit?: string; options?: string[]; required?: boolean }[];
   omitFields?: string[];
 };
 
-export type EditToolPatch = {
+export type EditGoalPatch = {
   name?: string;
   icon?: string;
   targetValue?: number;
   unit?: string;
-  addFields?: { label: string; type: ToolFieldType; unit?: string; options?: string[]; required?: boolean }[];
+  addFields?: { label: string; type: GoalFieldType; unit?: string; options?: string[]; required?: boolean }[];
   removeFieldIds?: string[];
   renameFields?: { fieldId: string; label: string }[];
 };
 
-export type LogToolEntryPatch = {
+export type LogGoalEntryPatch = {
   values: { fieldId: string; value: number | string | boolean }[];
   entryAt?: string;
 };
@@ -254,7 +254,7 @@ export type BootstrapResponse = {
   messages: ApiMessage[];
   memories: ApiMemory[];
   tasks: ApiTask[];
-  tools: ApiTool[];
+  goals: ApiGoal[];
 };
 
 export type AuthTokens = {

@@ -1,11 +1,11 @@
 import { and, desc, eq, inArray, isNull } from 'drizzle-orm';
 
 import { db } from '../../db/client.ts';
-import { records, toolEntries } from '../../db/schema.ts';
+import { records, goalEntries } from '../../db/schema.ts';
 import { addDaysToYmd, formatYmdShort, ymdInTz, weekdayOfYmd } from '../tasks/recurrence.ts';
 import type { Weekday } from '../tasks/schema.ts';
-import type { ToolRow } from './executor.ts';
-import type { ToolDefinition, ToolView } from './schema.ts';
+import type { GoalRow } from './executor.ts';
+import type { GoalDefinition, GoalView } from './schema.ts';
 
 // All chart/streak/total math lives here, computed once server-side in the
 // account's own timezone — the model and the client both only ever render
@@ -42,37 +42,37 @@ function formatNumber(n: number): string {
   return Number.isInteger(n) ? n.toLocaleString() : n.toLocaleString(undefined, { maximumFractionDigits: 2 });
 }
 
-// --- fetch (live entries = tool_entries whose backing record was never
+// --- fetch (live entries = goal_entries whose backing record was never
 // undone; summary.ts is the only place that reads entries for display, so
 // this filter is the single source of truth for "still counts") ----------
 
-async function fetchLiveEntries(toolId: string): Promise<LiveEntry[]> {
+async function fetchLiveEntries(goalId: string): Promise<LiveEntry[]> {
   const rows = await db
-    .select({ entryAt: toolEntries.entryAt, data: toolEntries.data })
-    .from(toolEntries)
-    .innerJoin(records, eq(toolEntries.recordId, records.id))
-    .where(and(eq(toolEntries.toolId, toolId), isNull(records.revertedAt)))
-    .orderBy(desc(toolEntries.entryAt));
+    .select({ entryAt: goalEntries.entryAt, data: goalEntries.data })
+    .from(goalEntries)
+    .innerJoin(records, eq(goalEntries.recordId, records.id))
+    .where(and(eq(goalEntries.goalId, goalId), isNull(records.revertedAt)))
+    .orderBy(desc(goalEntries.entryAt));
   return rows.map((r) => ({ entryAt: r.entryAt, data: r.data as Record<string, unknown> }));
 }
 
-// Batched form for the tools list — one query for every tool's entries
+// Batched form for the goals list — one query for every tool's entries
 // instead of one query per tool (the N+1 the old GET /tools list had).
-async function fetchLiveEntriesForTools(toolIds: string[]): Promise<Map<string, LiveEntry[]>> {
-  const byTool = new Map<string, LiveEntry[]>();
-  if (toolIds.length === 0) return byTool;
+async function fetchLiveEntriesForGoals(goalIds: string[]): Promise<Map<string, LiveEntry[]>> {
+  const byGoal = new Map<string, LiveEntry[]>();
+  if (goalIds.length === 0) return byGoal;
   const rows = await db
-    .select({ toolId: toolEntries.toolId, entryAt: toolEntries.entryAt, data: toolEntries.data })
-    .from(toolEntries)
-    .innerJoin(records, eq(toolEntries.recordId, records.id))
-    .where(and(inArray(toolEntries.toolId, toolIds), isNull(records.revertedAt)))
-    .orderBy(desc(toolEntries.entryAt));
+    .select({ goalId: goalEntries.goalId, entryAt: goalEntries.entryAt, data: goalEntries.data })
+    .from(goalEntries)
+    .innerJoin(records, eq(goalEntries.recordId, records.id))
+    .where(and(inArray(goalEntries.goalId, goalIds), isNull(records.revertedAt)))
+    .orderBy(desc(goalEntries.entryAt));
   for (const r of rows) {
-    const list = byTool.get(r.toolId) ?? [];
+    const list = byGoal.get(r.goalId) ?? [];
     list.push({ entryAt: r.entryAt, data: r.data as Record<string, unknown> });
-    byTool.set(r.toolId, list);
+    byGoal.set(r.goalId, list);
   }
-  return byTool;
+  return byGoal;
 }
 
 // --- pure computation (no I/O — testable in isolation) ------------------
@@ -97,7 +97,7 @@ export function computeStreak(entries: LiveEntry[], tz: string, now: Date): numb
 }
 
 export function computeChartBuckets(
-  view: Extract<ToolView, { kind: 'bars' }>,
+  view: Extract<GoalView, { kind: 'bars' }>,
   entries: LiveEntry[],
   tz: string,
   now: Date,
@@ -130,14 +130,14 @@ export function computeChartBuckets(
   return buckets;
 }
 
-export type ToolCardSummary = {
+export type GoalCardSummary = {
   headline: string;
   sub: string;
   progress: number | null;
 };
 
 function computeProgress(
-  definition: ToolDefinition,
+  definition: GoalDefinition,
   total: number | null,
   entriesToday: number,
   entriesThisWeek: number,
@@ -161,11 +161,11 @@ function countLabel(count: number, noun: string): string {
 }
 
 export function computeCardSummary(
-  definition: ToolDefinition,
+  definition: GoalDefinition,
   entries: LiveEntry[],
   tz: string,
   now: Date,
-): ToolCardSummary {
+): GoalCardSummary {
   const noun = definition.entryNoun ?? 'entry';
   const entryCount = entries.length;
   const lastEntryAt = entries[0]?.entryAt ?? null;
@@ -218,20 +218,20 @@ export function computeCardSummary(
 
 // --- I/O-backed entry points ---------------------------------------------
 
-export type ToolViewData =
+export type GoalViewData =
   | { kind: 'progress_total'; total: number | null; targetValue: number | null; unit: string | null; progress: number | null }
   | { kind: 'streak'; streak: number }
   | { kind: 'bars'; bucket: 'day' | 'week'; buckets: { label: string; ymd: string; value: number }[] }
   | { kind: 'recent_list' };
 
-export type ToolDetail = {
-  card: ToolCardSummary;
-  views: ToolViewData[];
+export type GoalDetail = {
+  card: GoalCardSummary;
+  views: GoalViewData[];
   entryCount: number;
   lastEntryAt: string | null;
 };
 
-function buildViews(definition: ToolDefinition, entries: LiveEntry[], tz: string, now: Date): ToolViewData[] {
+function buildViews(definition: GoalDefinition, entries: LiveEntry[], tz: string, now: Date): GoalViewData[] {
   const primaryField = definition.fields.find((f) => f.id === definition.primaryFieldId);
   const total = primaryField ? sumField(entries, primaryField.id) : null;
   const todayYmd = ymdInTz(now, tz);
@@ -243,7 +243,7 @@ function buildViews(definition: ToolDefinition, entries: LiveEntry[], tz: string
   }).length;
   const progress = computeProgress(definition, total, entriesToday, entriesThisWeek);
 
-  return definition.views.map((view): ToolViewData => {
+  return definition.views.map((view): GoalViewData => {
     switch (view.kind) {
       case 'progress_total': {
         const target = definition.target?.kind === 'total' ? definition.target : null;
@@ -265,11 +265,11 @@ function buildViews(definition: ToolDefinition, entries: LiveEntry[], tz: string
   });
 }
 
-export async function buildToolDetail(tool: ToolRow, timezone: string | null): Promise<ToolDetail> {
+export async function buildGoalDetail(goal: GoalRow, timezone: string | null): Promise<GoalDetail> {
   const tz = timezone ?? 'UTC';
   const now = new Date();
-  const definition = tool.definition as ToolDefinition;
-  const entries = await fetchLiveEntries(tool.id);
+  const definition = goal.definition as GoalDefinition;
+  const entries = await fetchLiveEntries(goal.id);
 
   return {
     card: computeCardSummary(definition, entries, tz, now),
@@ -279,19 +279,19 @@ export async function buildToolDetail(tool: ToolRow, timezone: string | null): P
   };
 }
 
-/** Batched card summaries for the tools list — one query total, not one per tool. */
-export async function buildToolCardSummaries(
-  tools: ToolRow[],
+/** Batched card summaries for the goals list — one query total, not one per goal. */
+export async function buildGoalCardSummaries(
+  goalRows: GoalRow[],
   timezone: string | null,
-): Promise<Map<string, ToolCardSummary & { entryCount: number; lastEntryAt: Date | null }>> {
+): Promise<Map<string, GoalCardSummary & { entryCount: number; lastEntryAt: Date | null }>> {
   const tz = timezone ?? 'UTC';
   const now = new Date();
-  const entriesByTool = await fetchLiveEntriesForTools(tools.map((t) => t.id));
-  const result = new Map<string, ToolCardSummary & { entryCount: number; lastEntryAt: Date | null }>();
-  for (const tool of tools) {
-    const entries = entriesByTool.get(tool.id) ?? [];
-    const card = computeCardSummary(tool.definition as ToolDefinition, entries, tz, now);
-    result.set(tool.id, { ...card, entryCount: entries.length, lastEntryAt: entries[0]?.entryAt ?? null });
+  const entriesByGoal = await fetchLiveEntriesForGoals(goalRows.map((g) => g.id));
+  const result = new Map<string, GoalCardSummary & { entryCount: number; lastEntryAt: Date | null }>();
+  for (const goal of goalRows) {
+    const entries = entriesByGoal.get(goal.id) ?? [];
+    const card = computeCardSummary(goal.definition as GoalDefinition, entries, tz, now);
+    result.set(goal.id, { ...card, entryCount: entries.length, lastEntryAt: entries[0]?.entryAt ?? null });
   }
   return result;
 }

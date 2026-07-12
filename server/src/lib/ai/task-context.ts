@@ -26,11 +26,11 @@ const RECENT_DONE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 export type TurnRef =
   | { kind: 'task'; taskId: string; isRecurringSeries: boolean; instanceId?: string; templateId?: string }
   | { kind: 'checklist_item'; taskId: string; itemId: string }
-  // Tool (tracker) refs — assigned by lib/ai/tool-context.ts into this same
-  // map, aliased "L1"/"L1.1" (mnemonic: tooL) rather than "T*" so a regex
-  // can't confuse the two ref families.
-  | { kind: 'tool'; toolId: string }
-  | { kind: 'tool_field'; toolId: string; fieldId: string };
+  // Goal refs — assigned by lib/ai/goal-context.ts into this same map,
+  // aliased "G1"/"G1.1" rather than "T*" so a regex can't confuse the two
+  // ref families.
+  | { kind: 'goal'; goalId: string }
+  | { kind: 'goal_field'; goalId: string; fieldId: string };
 export type TurnRefs = Map<string, TurnRef>;
 
 export type TaskContextResult = {

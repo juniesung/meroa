@@ -19,14 +19,14 @@ function describeChange(kind: string, title: string): string {
       return `"${title}" was postponed`;
     case 'task_removed':
       return `"${title}" was removed (you confirmed it)`;
-    case 'tool_created':
-      return `the "${title}" tool was created (you tapped Create)`;
-    case 'tool_edited':
-      return `the "${title}" tool was edited`;
-    case 'tool_entry':
+    case 'goal_created':
+      return `the "${title}" goal was created (you tapped Create)`;
+    case 'goal_edited':
+      return `the "${title}" goal was edited`;
+    case 'goal_entry':
       return `an entry was logged to "${title}"`;
-    case 'tool_archived':
-      return `the "${title}" tool was removed`;
+    case 'goal_archived':
+      return `the "${title}" goal was removed`;
     default:
       return `"${title}" changed`;
   }
@@ -49,13 +49,13 @@ function describeUndo(undidKind: string, title: string): string {
       return `"${title}" was reverted to its previous version (you undid the edit)`;
     case 'task_postponed':
       return `"${title}" was reverted to its previous due date (you undid the postpone)`;
-    case 'tool_created':
-      return `the "${title}" tool was removed (you undid creating it)`;
-    case 'tool_archived':
-      return `the "${title}" tool was brought back (you undid removing it)`;
-    case 'tool_edited':
-      return `the "${title}" tool was reverted to its previous version (you undid the edit)`;
-    case 'tool_entry':
+    case 'goal_created':
+      return `the "${title}" goal was removed (you undid creating it)`;
+    case 'goal_archived':
+      return `the "${title}" goal was brought back (you undid removing it)`;
+    case 'goal_edited':
+      return `the "${title}" goal was reverted to its previous version (you undid the edit)`;
+    case 'goal_entry':
       return `that entry on "${title}" was removed (you undid logging it)`;
     default:
       return `"${title}" was reverted (you undid the last change)`;
@@ -63,11 +63,11 @@ function describeUndo(undidKind: string, title: string): string {
 }
 
 /**
- * Out-of-band task/tool mutations — a Tasks-tab tap, a tool preview
+ * Out-of-band task/goal mutations — a Tasks-tab tap, a goal preview
  * Create-tap, a quick-entry log — are otherwise invisible to the model: its
  * own history only ever shows the "pending confirmation" side of the story,
  * never how it resolved. This surfaces everything recorded with source
- * 'tasks_ui' or 'tool_ui' since the previous user message as short prose, so
+ * 'tasks_ui' or 'goal_ui' since the previous user message as short prose, so
  * the model's next reply can reflect what actually happened instead of
  * completing an unresolved narrative wrongly (docs/ai-reliability-
  * hardening.md item 4, class 7). Returns '' when there's nothing to report
@@ -82,7 +82,7 @@ export async function buildRecentChangesFeed(userId: string, since: Date | null)
     .where(
       and(
         eq(records.userId, userId),
-        or(eq(records.source, 'tasks_ui'), eq(records.source, 'tool_ui')),
+        or(eq(records.source, 'tasks_ui'), eq(records.source, 'goal_ui')),
         gt(records.occurredAt, since),
       ),
     )
@@ -96,8 +96,8 @@ export async function buildRecentChangesFeed(userId: string, since: Date | null)
     payload: row.payload as {
       taskId?: string;
       title?: string;
-      // Tool payloads always carry `name` (the executor always has the
-      // tool row in hand) — unlike task_edited's `title`, no batched lookup
+      // Goal payloads always carry `name` (the executor always has the
+      // goal row in hand) — unlike task_edited's `title`, no batched lookup
       // is ever needed for these.
       name?: string;
       tasks?: { taskId: string; title: string }[];
@@ -126,7 +126,7 @@ export async function buildRecentChangesFeed(userId: string, since: Date | null)
 
   const sentences: string[] = [];
   for (const { kind, payload } of parsed) {
-    if (kind === 'task_undo' || kind === 'tool_undo') {
+    if (kind === 'task_undo' || kind === 'goal_undo') {
       const undidKind = payload.undidKind ?? 'unknown';
       if (payload.tasks?.length) {
         for (const t of payload.tasks) sentences.push(describeUndo(undidKind, t.title));

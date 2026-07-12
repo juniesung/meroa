@@ -128,14 +128,14 @@ export const records = pgTable(
   },
   (t) => [
     index('records_user_idx').on(t.userId),
-    check('records_source_check', sql`${t.source} in ('chat','tasks_ui','tool_ui','system')`),
+    check('records_source_check', sql`${t.source} in ('chat','tasks_ui','goal_ui','system')`),
   ],
 );
 
-// --- tools -----------------------------------------------------------------
+// --- goals -----------------------------------------------------------------
 // Layout edits bump `version`; historical entries are never rewritten.
-export const tools = pgTable(
-  'tools',
+export const goals = pgTable(
+  'goals',
   {
     id: uuid('id').primaryKey().defaultRandom(),
     userId: uuid('user_id')
@@ -149,13 +149,12 @@ export const tools = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     archivedAt: timestamp('archived_at', { withTimezone: true }),
   },
-  (t) => [index('tools_user_idx').on(t.userId)],
+  (t) => [index('goals_user_idx').on(t.userId)],
 );
 
 // --- tasks -------------------------------------------------------------
 // `type` covers all six Phase-3 task types up front so the column never
-// needs to change shape later. `toolId` is the Phase-5 task<->tool link,
-// nullable now because linking doesn't exist yet.
+// needs to change shape later. `goalId` is the task<->goal link.
 //
 // A recurring task is a *template* row (`recurrence` non-null, `type` is
 // still the per-instance base type — a daily counter is still a counter
@@ -175,7 +174,7 @@ export const tasks = pgTable(
     icon: text('icon'),
     config: jsonb('config').notNull().default({}),
     recurrence: jsonb('recurrence'),
-    toolId: uuid('tool_id').references(() => tools.id, { onDelete: 'set null' }),
+    goalId: uuid('goal_id').references(() => goals.id, { onDelete: 'set null' }),
     dueAt: timestamp('due_at', { withTimezone: true }),
     status: text('status').notNull().default('open'),
     completedRecordId: uuid('completed_record_id').references(() => records.id, {
@@ -205,15 +204,15 @@ export const tasks = pgTable(
   ],
 );
 
-// --- tool_entries ------------------------------------------------------
+// --- goal_entries ------------------------------------------------------
 // An entry is a view of a record — never a second copy of the same action.
-export const toolEntries = pgTable(
-  'tool_entries',
+export const goalEntries = pgTable(
+  'goal_entries',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    toolId: uuid('tool_id')
+    goalId: uuid('goal_id')
       .notNull()
-      .references(() => tools.id, { onDelete: 'cascade' }),
+      .references(() => goals.id, { onDelete: 'cascade' }),
     recordId: uuid('record_id')
       .notNull()
       .references(() => records.id, { onDelete: 'cascade' }),
@@ -221,7 +220,7 @@ export const toolEntries = pgTable(
     entryAt: timestamp('entry_at', { withTimezone: true }).notNull().defaultNow(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index('tool_entries_tool_idx').on(t.toolId, t.entryAt)],
+  (t) => [index('goal_entries_goal_idx').on(t.goalId, t.entryAt)],
 );
 
 // --- memories ------------------------------------------------------------
@@ -270,7 +269,7 @@ export const usersRelations = relations(users, ({ many, one }) => ({
   conversations: many(conversations),
   records: many(records),
   tasks: many(tasks),
-  tools: many(tools),
+  goals: many(goals),
   memories: many(memories),
   entitlement: one(entitlements, {
     fields: [users.id],
@@ -296,26 +295,26 @@ export const recordsRelations = relations(records, ({ one, many }) => ({
     fields: [records.sourceMessageId],
     references: [messages.id],
   }),
-  toolEntries: many(toolEntries),
+  goalEntries: many(goalEntries),
 }));
 
 export const tasksRelations = relations(tasks, ({ one }) => ({
   user: one(users, { fields: [tasks.userId], references: [users.id] }),
-  tool: one(tools, { fields: [tasks.toolId], references: [tools.id] }),
+  goal: one(goals, { fields: [tasks.goalId], references: [goals.id] }),
   completedRecord: one(records, {
     fields: [tasks.completedRecordId],
     references: [records.id],
   }),
 }));
 
-export const toolsRelations = relations(tools, ({ one, many }) => ({
-  user: one(users, { fields: [tools.userId], references: [users.id] }),
-  entries: many(toolEntries),
+export const goalsRelations = relations(goals, ({ one, many }) => ({
+  user: one(users, { fields: [goals.userId], references: [users.id] }),
+  entries: many(goalEntries),
 }));
 
-export const toolEntriesRelations = relations(toolEntries, ({ one }) => ({
-  tool: one(tools, { fields: [toolEntries.toolId], references: [tools.id] }),
-  record: one(records, { fields: [toolEntries.recordId], references: [records.id] }),
+export const goalEntriesRelations = relations(goalEntries, ({ one }) => ({
+  goal: one(goals, { fields: [goalEntries.goalId], references: [goals.id] }),
+  record: one(records, { fields: [goalEntries.recordId], references: [records.id] }),
 }));
 
 export const memoriesRelations = relations(memories, ({ one }) => ({

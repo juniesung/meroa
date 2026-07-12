@@ -8,7 +8,7 @@ import {
 } from '@/lib/api/client';
 import { getCachedAccessToken, loadTokens } from '@/lib/auth/tokenStore';
 
-import type { ApiMessage, ApiTask, ApiTool, ToolPreview } from './types';
+import type { ApiMessage, ApiTask, ApiGoal, GoalPreview } from './types';
 
 const BASE_URL = process.env.EXPO_PUBLIC_API_URL;
 if (!BASE_URL) {
@@ -21,10 +21,10 @@ export type ChatStreamEvent =
   | { type: 'segment'; message: ApiMessage }
   // remove_tasks (a single confirm for several at once) sends `tasks`
   // instead of `task` on the same SSE event name — the client only ever
-  // reads `message` off this event, so both share one type here too. A tool
-  // (tracker) action sends `tool`; create_tool's preview sends `preview`
-  // (nothing saved yet).
-  | { type: 'action'; message: ApiMessage; task?: ApiTask; tasks?: ApiTask[]; tool?: ApiTool; preview?: ToolPreview }
+  // reads `message` off this event, so both share one type here too. A goal
+  // action sends `goal`; create_goal's preview sends `preview` (nothing
+  // saved yet).
+  | { type: 'action'; message: ApiMessage; task?: ApiTask; tasks?: ApiTask[]; goal?: ApiGoal; preview?: GoalPreview }
   | { type: 'stream_end' }
   | { type: 'error'; retryable: boolean; message: string }
   | { type: 'limit_reached'; plan: 'free' | 'plus'; limit: number };
@@ -116,7 +116,7 @@ export async function* streamMessage(
           message: parsed.message,
           task: parsed.task,
           tasks: parsed.tasks,
-          tool: parsed.tool,
+          goal: parsed.goal,
           preview: parsed.preview,
         };
         break;

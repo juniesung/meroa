@@ -34,9 +34,9 @@ import {
   useProgressTask,
   useTasks,
 } from '@/features/tasks/queries';
-import { useCreateToolFromPreview, useTools } from '@/features/tools/queries';
+import { useCreateGoalFromPreview, useGoals } from '@/features/goals/queries';
 import { useTabBarHeight } from '@/hooks/use-tab-bar-inset';
-import type { ApiTask, ToolPreview } from '@/lib/api/types';
+import type { ApiTask, GoalPreview } from '@/lib/api/types';
 import { toIconName } from '@/lib/icon';
 import { requestNotificationPermission } from '@/lib/notifications';
 
@@ -232,31 +232,31 @@ function TaskBulkRemovalConfirmCard({ message }: { message: ChatMessage }) {
   );
 }
 
-// create_tool never saves anything by itself — this card's Create tap is
-// the only confirmation (docs/phase-4-implementation-plan.md §1.3). "Not
-// now" is client-local only, matching TaskRemovalConfirmCard's "Keep it".
-function ToolPreviewCard({ message }: { message: ChatMessage }) {
-  const createToolFromPreview = useCreateToolFromPreview();
+// create_goal never saves anything by itself — this card's Create tap is
+// the only confirmation (docs/goals-redesign-plan.md §2.1). "Not now" is
+// client-local only, matching TaskRemovalConfirmCard's "Keep it".
+function GoalPreviewCard({ message }: { message: ChatMessage }) {
+  const createGoalFromPreview = useCreateGoalFromPreview();
   const [dismissed, setDismissed] = useState(false);
 
-  const preview = message.meta.preview as ToolPreview | undefined;
+  const preview = message.meta.preview as GoalPreview | undefined;
   if (!preview) return null;
 
   const definition = preview.definition;
-  const createdToolId =
-    createToolFromPreview.data?.tool.id ?? (message.meta.createdToolId as string | undefined);
-  const created = !!createdToolId;
+  const createdGoalId =
+    createGoalFromPreview.data?.goal.id ?? (message.meta.createdGoalId as string | undefined);
+  const created = !!createdGoalId;
 
   const activeFields = definition.fields.filter((f) => !f.archived);
   const fieldsLine = activeFields.map((f) => (f.unit ? `${f.label} (${f.unit})` : f.label)).join(' · ');
   const targetLine =
     definition.target?.kind === 'total'
-      ? `Goal: ${definition.target.value}${definition.target.unit ? ` ${definition.target.unit}` : ''}`
+      ? `Target: ${definition.target.value}${definition.target.unit ? ` ${definition.target.unit}` : ''}`
       : definition.target?.kind === 'count_per_period'
-        ? `Goal: ${definition.target.value}x per ${definition.target.period}`
+        ? `Target: ${definition.target.value}x per ${definition.target.period}`
         : null;
 
-  const statusText = created ? 'Created ✓' : dismissed ? 'Not saved' : 'Create this tracker?';
+  const statusText = created ? 'Created ✓' : dismissed ? 'Not saved' : 'Create this goal?';
 
   return (
     <View style={styles.actionCard}>
@@ -283,7 +283,7 @@ function ToolPreviewCard({ message }: { message: ChatMessage }) {
           <Pressable
             onPress={() => {
               Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-              createToolFromPreview.mutate(message.id);
+              createGoalFromPreview.mutate(message.id);
             }}
             style={styles.previewConfirmButton}
             hitSlop={4}
@@ -297,26 +297,26 @@ function ToolPreviewCard({ message }: { message: ChatMessage }) {
   );
 }
 
-// Resolves the live tool by id (falls back to the meta snapshot, same
+// Resolves the live goal by id (falls back to the meta snapshot, same
 // live-view-of-the-record pattern as TaskActionCard) — the summary sentence
 // itself already states the concrete post-action fact (docs/ai-reliability-
 // hardening.md lesson 16), so it's shown directly rather than re-derived.
-function ToolActionCard({ message }: { message: ChatMessage }) {
-  const { data: tools } = useTools();
-  const toolId = message.meta.toolId as string | undefined;
-  const snapshot = message.meta.tool as { name: string; icon: string | null } | undefined;
-  const tool = tools?.find((t) => t.id === toolId) ?? snapshot;
-  if (!tool) return null;
+function GoalActionCard({ message }: { message: ChatMessage }) {
+  const { data: goals } = useGoals();
+  const goalId = message.meta.goalId as string | undefined;
+  const snapshot = message.meta.goal as { name: string; icon: string | null } | undefined;
+  const goal = goals?.find((g) => g.id === goalId) ?? snapshot;
+  if (!goal) return null;
 
   return (
     <View style={styles.actionCard}>
       <View style={styles.removalRow}>
         <View style={styles.removalIconChip}>
-          <Icon name={toIconName(tool.icon)} size={18} color={theme.blue} stroke={1.9} />
+          <Icon name={toIconName(goal.icon)} size={18} color={theme.blue} stroke={1.9} />
         </View>
         <View style={{ flex: 1 }}>
           <Text style={styles.removalTitle} numberOfLines={1}>
-            {tool.name}
+            {goal.name}
           </Text>
           <Text style={styles.removalStatus} numberOfLines={2}>
             {message.content}
@@ -347,11 +347,11 @@ function MessageRow({
   if (message.role === 'assistant' && message.meta?.kind === 'task_bulk_removal_pending') {
     return <TaskBulkRemovalConfirmCard message={message} />;
   }
-  if (message.role === 'assistant' && message.meta?.kind === 'tool_preview') {
-    return <ToolPreviewCard message={message} />;
+  if (message.role === 'assistant' && message.meta?.kind === 'goal_preview') {
+    return <GoalPreviewCard message={message} />;
   }
-  if (message.role === 'assistant' && message.meta?.kind === 'tool_action') {
-    return <ToolActionCard message={message} />;
+  if (message.role === 'assistant' && message.meta?.kind === 'goal_action') {
+    return <GoalActionCard message={message} />;
   }
 
   return (

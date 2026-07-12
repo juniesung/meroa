@@ -3,7 +3,7 @@ import Svg, { Path } from 'react-native-svg';
 export const iconPaths = {
   chat: 'M4 6.5A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5v8A2.5 2.5 0 0 1 17.5 17H12l-4 3v-3H6.5A2.5 2.5 0 0 1 4 14.5v-8Z',
   tasks: 'M4 6h4M4 12h4M4 18h4M11 5l2 2 5-5M11 11l2 2 5-5M11 17l2 2 5-5',
-  tools: 'M6 4h4v4H6zM14 4h4v4h-4zM6 12h4v4H6zM14 12h4v4h-4zM6 20h4M14 20h4',
+  goals: 'M6 4h4v4H6zM14 4h4v4h-4zM6 12h4v4H6zM14 12h4v4h-4zM6 20h4M14 20h4',
   you: 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM4 21a8 8 0 0 1 16 0',
   plus: 'M12 5v14M5 12h14',
   send: 'M4 12l16-8-6 18-2-8-8-2Z',

@@ -2,20 +2,20 @@ import { router } from 'expo-router';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { ToolCard } from '@/components/ToolCard';
+import { GoalCard } from '@/components/GoalCard';
 import { theme } from '@/constants/theme';
-import { useTools } from '@/features/tools/queries';
+import { useGoals } from '@/features/goals/queries';
 import { useTabBarHeight } from '@/hooks/use-tab-bar-inset';
 import { toIconName } from '@/lib/icon';
 
-export default function ToolsScreen() {
-  const { data: tools = [], isLoading } = useTools();
+export default function GoalsScreen() {
+  const { data: goals = [], isLoading } = useGoals();
   const tabBarHeight = useTabBarHeight();
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 20, paddingBottom: tabBarHeight + 40 }}>
-        <Text style={styles.eyebrow}>PERSONALIZED TOOLS</Text>
+        <Text style={styles.eyebrow}>YOUR GOALS</Text>
         <Text style={styles.h1}>Your progress</Text>
         <Text style={styles.p}>Meroa builds these from your conversations. They grow as you do.</Text>
 
@@ -23,21 +23,21 @@ export default function ToolsScreen() {
           <View style={styles.loading}>
             <ActivityIndicator color={theme.dim} />
           </View>
-        ) : tools.length === 0 ? (
+        ) : goals.length === 0 ? (
           <View style={styles.empty}>
             <Text style={styles.emptyText}>
-              {"No tools yet — describe a goal to Meroa and it'll build one with you."}
+              {"No goals yet — describe a goal to Meroa and it'll build one with you."}
             </Text>
           </View>
         ) : (
           <View style={{ gap: 12, marginTop: 20 }}>
-            {tools.map((tool) => (
-              <Pressable key={tool.id} onPress={() => router.push({ pathname: '/tool/[id]', params: { id: tool.id } })}>
-                <ToolCard
-                  icon={toIconName(tool.icon)}
-                  title={tool.name}
-                  subtitle={tool.sub ?? `${tool.entryCount} ${tool.entryCount === 1 ? 'entry' : 'entries'} logged`}
-                  progress={Math.round((tool.progress ?? 0) * 100)}
+            {goals.map((goal) => (
+              <Pressable key={goal.id} onPress={() => router.push({ pathname: '/goal/[id]', params: { id: goal.id } })}>
+                <GoalCard
+                  icon={toIconName(goal.icon)}
+                  title={goal.name}
+                  subtitle={goal.sub ?? `${goal.entryCount} ${goal.entryCount === 1 ? 'entry' : 'entries'} logged`}
+                  progress={Math.round((goal.progress ?? 0) * 100)}
                 />
               </Pressable>
             ))}

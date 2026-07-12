@@ -2,7 +2,7 @@ import { and, desc, eq, isNull } from 'drizzle-orm';
 import { Hono } from 'hono';
 
 import { db } from '../db/client.ts';
-import { entitlements, memories, tasks, tools, users } from '../db/schema.ts';
+import { entitlements, memories, tasks, goals, users } from '../db/schema.ts';
 import { getOrCreateAppConversation, getRecentMessages } from '../lib/conversations.ts';
 import { taskStatusOrder } from '../lib/task-order.ts';
 import { materializeRecurringInstances } from '../lib/tasks/recurrence.ts';
@@ -45,11 +45,11 @@ bootstrapRoutes.get('/', async (c) => {
     .where(and(eq(tasks.userId, userId), isNull(tasks.deletedAt)))
     .orderBy(taskStatusOrder, desc(tasks.createdAt));
 
-  const toolRows = await db
+  const goalRows = await db
     .select()
-    .from(tools)
-    .where(and(eq(tools.userId, userId), isNull(tools.archivedAt)))
-    .orderBy(desc(tools.createdAt));
+    .from(goals)
+    .where(and(eq(goals.userId, userId), isNull(goals.archivedAt)))
+    .orderBy(desc(goals.createdAt));
 
   return c.json({
     user: {
@@ -66,6 +66,6 @@ bootstrapRoutes.get('/', async (c) => {
     messages: recentMessages,
     memories: memoryRows,
     tasks: taskRows,
-    tools: toolRows,
+    goals: goalRows,
   });
 });

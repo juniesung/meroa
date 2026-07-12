@@ -4,29 +4,29 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 
 import { db } from '../db/client.ts';
-import { conversations, messages, tools, users } from '../db/schema.ts';
+import { conversations, messages, goals, users } from '../db/schema.ts';
 import {
-  archiveTool,
-  createTool,
-  editTool,
-  getTool,
-  listToolEntries,
-  logToolEntry,
-  ToolActionError,
-} from '../lib/tools/executor.ts';
+  archiveGoal,
+  createGoal,
+  editGoal,
+  getGoal,
+  listGoalEntries,
+  logGoalEntry,
+  GoalActionError,
+} from '../lib/goals/executor.ts';
 import {
-  editToolPatchSchema,
-  logToolEntryPatchSchema,
-  toolDefinitionSchema,
-  TOOL_TEMPLATES,
-  type ToolTemplateKey,
-} from '../lib/tools/schema.ts';
-import { buildToolCardSummaries, buildToolDetail } from '../lib/tools/summary.ts';
+  editGoalPatchSchema,
+  logGoalEntryPatchSchema,
+  goalDefinitionSchema,
+  GOAL_TEMPLATES,
+  type GoalTemplateKey,
+} from '../lib/goals/schema.ts';
+import { buildGoalCardSummaries, buildGoalDetail } from '../lib/goals/summary.ts';
 import { localDatetimeToUtcIso } from '../lib/tasks/recurrence.ts';
 import { requireAuth, type AuthVariables } from '../middleware/auth.ts';
 
-export const toolRoutes = new Hono<{ Variables: AuthVariables }>();
-toolRoutes.use('*', requireAuth);
+export const goalRoutes = new Hono<{ Variables: AuthVariables }>();
+goalRoutes.use('*', requireAuth);
 
 async function getUserTimezone(userId: string): Promise<string | null> {
   const [user] = await db
@@ -41,40 +41,40 @@ function actionErrorResponse(err: unknown): {
   status: 400 | 404;
   body: { error: string; message: string };
 } {
-  if (err instanceof ToolActionError) {
+  if (err instanceof GoalActionError) {
     const status = err.code === 'invalid_input' ? 400 : 404;
     return { status, body: { error: err.code, message: err.message } };
   }
   throw err;
 }
 
-toolRoutes.get('/', async (c) => {
+goalRoutes.get('/', async (c) => {
   const userId = c.get('userId');
   const timezone = await getUserTimezone(userId);
   const rows = await db
     .select()
-    .from(tools)
-    .where(and(eq(tools.userId, userId), isNull(tools.archivedAt)))
-    .orderBy(desc(tools.createdAt));
+    .from(goals)
+    .where(and(eq(goals.userId, userId), isNull(goals.archivedAt)))
+    .orderBy(desc(goals.createdAt));
 
-  const summaries = await buildToolCardSummaries(rows, timezone);
-  const withSummary = rows.map((tool) => ({ ...tool, ...summaries.get(tool.id)! }));
-  return c.json({ tools: withSummary });
+  const summaries = await buildGoalCardSummaries(rows, timezone);
+  const withSummary = rows.map((goal) => ({ ...goal, ...summaries.get(goal.id)! }));
+  return c.json({ goals: withSummary });
 });
 
-toolRoutes.get('/:id', async (c) => {
+goalRoutes.get('/:id', async (c) => {
   const userId = c.get('userId');
   const id = c.req.param('id');
   const timezone = await getUserTimezone(userId);
 
-  const tool = await getTool(userId, id);
-  if (!tool) return c.json({ error: 'not_found', message: 'tool not found' }, 404);
+  const goal = await getGoal(userId, id);
+  if (!goal) return c.json({ error: 'not_found', message: 'goal not found' }, 404);
 
   const [detail, entries] = await Promise.all([
-    buildToolDetail(tool, timezone),
-    listToolEntries(id, { limit: 20 }),
+    buildGoalDetail(goal, timezone),
+    listGoalEntries(id, { limit: 20 }),
   ]);
-  return c.json({ tool, detail, entries });
+  return c.json({ goal, detail, entries });
 });
 
 const entriesQuerySchema = z.object({
@@ -82,15 +82,15 @@ const entriesQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).optional(),
 });
 
-toolRoutes.get('/:id/entries', zValidator('query', entriesQuerySchema), async (c) => {
+goalRoutes.get('/:id/entries', zValidator('query', entriesQuerySchema), async (c) => {
   const userId = c.get('userId');
   const id = c.req.param('id');
   const { cursor, limit } = c.req.valid('query');
 
-  const tool = await getTool(userId, id);
-  if (!tool) return c.json({ error: 'not_found', message: 'tool not found' }, 404);
+  const goal = await getGoal(userId, id);
+  if (!goal) return c.json({ error: 'not_found', message: 'goal not found' }, 404);
 
-  const entries = await listToolEntries(id, {
+  const entries = await listGoalEntries(id, {
     limit: limit ?? 30,
     before: cursor ? new Date(cursor) : undefined,
   });
@@ -99,13 +99,13 @@ toolRoutes.get('/:id/entries', zValidator('query', entriesQuerySchema), async (c
 
 const createFromPreviewSchema = z.object({ previewMessageId: z.string().uuid() });
 
-// Confirm-tap target for the AI's create_tool preview card — create_tool
-// itself never writes a tools row (docs/phase-4-implementation-plan.md
-// §1.3); this is the actual save, using the exact definition that was shown
-// on the card. Idempotent two ways: the stamped meta.createdToolId (checked
-// here) and the executor's own (sourceMessageId, kind) idempotency check, so
-// a retried or double tap never creates a second tool.
-toolRoutes.post('/', zValidator('json', createFromPreviewSchema), async (c) => {
+// Confirm-tap target for the AI's create_goal preview card — create_goal
+// itself never writes a goals row (docs/goals-redesign-plan.md §2.1); this
+// is the actual save, using the exact definition that was shown on the
+// card. Idempotent two ways: the stamped meta.createdGoalId (checked here)
+// and the executor's own (sourceMessageId, kind) idempotency check, so a
+// retried or double tap never creates a second goal.
+goalRoutes.post('/', zValidator('json', createFromPreviewSchema), async (c) => {
   const userId = c.get('userId');
   const { previewMessageId } = c.req.valid('json');
 
@@ -122,48 +122,48 @@ toolRoutes.post('/', zValidator('json', createFromPreviewSchema), async (c) => {
   const meta = row.message.meta as {
     kind?: string;
     preview?: { template?: string; name?: string; icon?: string | null; definition?: unknown };
-    createdToolId?: string;
+    createdGoalId?: string;
   };
-  if (meta.createdToolId) {
-    const existing = await getTool(userId, meta.createdToolId);
-    if (existing) return c.json({ tool: existing }, 200);
+  if (meta.createdGoalId) {
+    const existing = await getGoal(userId, meta.createdGoalId);
+    if (existing) return c.json({ goal: existing }, 200);
   }
-  if (meta.kind !== 'tool_preview' || !meta.preview) {
-    return c.json({ error: 'invalid_input', message: 'that message is not a tool preview' }, 400);
+  if (meta.kind !== 'goal_preview' || !meta.preview) {
+    return c.json({ error: 'invalid_input', message: 'that message is not a goal preview' }, 400);
   }
   const { template, name, icon, definition } = meta.preview;
-  if (!template || !TOOL_TEMPLATES.includes(template as ToolTemplateKey) || !name) {
+  if (!template || !GOAL_TEMPLATES.includes(template as GoalTemplateKey) || !name) {
     return c.json({ error: 'invalid_input', message: 'stored preview is malformed' }, 400);
   }
-  const parsedDefinition = toolDefinitionSchema.safeParse(definition);
+  const parsedDefinition = goalDefinitionSchema.safeParse(definition);
   if (!parsedDefinition.success) {
     return c.json({ error: 'invalid_input', message: 'stored preview definition is invalid' }, 400);
   }
 
   try {
-    const { tool } = await createTool(
+    const { goal } = await createGoal(
       userId,
-      { template: template as ToolTemplateKey, name, icon: icon ?? null, definition: parsedDefinition.data },
-      { source: 'tool_ui', sourceMessageId: previewMessageId },
+      { template: template as GoalTemplateKey, name, icon: icon ?? null, definition: parsedDefinition.data },
+      { source: 'goal_ui', sourceMessageId: previewMessageId },
     );
     await db
       .update(messages)
-      .set({ meta: { ...meta, createdToolId: tool.id } })
+      .set({ meta: { ...meta, createdGoalId: goal.id } })
       .where(eq(messages.id, previewMessageId));
-    return c.json({ tool }, 201);
+    return c.json({ goal }, 201);
   } catch (err) {
     const { status, body } = actionErrorResponse(err);
     return c.json(body, status);
   }
 });
 
-toolRoutes.patch('/:id', zValidator('json', editToolPatchSchema), async (c) => {
+goalRoutes.patch('/:id', zValidator('json', editGoalPatchSchema), async (c) => {
   const userId = c.get('userId');
   const id = c.req.param('id');
   const patch = c.req.valid('json');
   try {
-    const { tool } = await editTool(userId, id, patch, { source: 'tool_ui' });
-    return c.json({ tool });
+    const { goal } = await editGoal(userId, id, patch, { source: 'goal_ui' });
+    return c.json({ goal });
   } catch (err) {
     const { status, body } = actionErrorResponse(err);
     return c.json(body, status);
@@ -173,7 +173,7 @@ toolRoutes.patch('/:id', zValidator('json', editToolPatchSchema), async (c) => {
 // Quick-entry bottom sheet target — only ever sends fields the user actually
 // filled in (docs/ai-reliability-hardening.md lesson 13); untouched optional
 // fields are simply omitted, never defaulted.
-toolRoutes.post('/:id/entries', zValidator('json', logToolEntryPatchSchema), async (c) => {
+goalRoutes.post('/:id/entries', zValidator('json', logGoalEntryPatchSchema), async (c) => {
   const userId = c.get('userId');
   const id = c.req.param('id');
   const timezone = await getUserTimezone(userId);
@@ -187,20 +187,20 @@ toolRoutes.post('/:id/entries', zValidator('json', logToolEntryPatchSchema), asy
   }
 
   try {
-    const { tool, entry } = await logToolEntry(userId, id, { ...patch, entryAt }, { source: 'tool_ui' });
-    return c.json({ tool, entry }, 201);
+    const { goal, entry } = await logGoalEntry(userId, id, { ...patch, entryAt }, { source: 'goal_ui' });
+    return c.json({ goal, entry }, 201);
   } catch (err) {
     const { status, body } = actionErrorResponse(err);
     return c.json(body, status);
   }
 });
 
-toolRoutes.delete('/:id', async (c) => {
+goalRoutes.delete('/:id', async (c) => {
   const userId = c.get('userId');
   const id = c.req.param('id');
   try {
-    const { tool } = await archiveTool(userId, id, { source: 'tool_ui' });
-    return c.json({ tool });
+    const { goal } = await archiveGoal(userId, id, { source: 'goal_ui' });
+    return c.json({ goal });
   } catch (err) {
     const { status, body } = actionErrorResponse(err);
     return c.json(body, status);

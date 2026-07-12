@@ -5,7 +5,7 @@ import { Icon, type IconName } from './Icon';
 import { Progress } from './Progress';
 import { Ring } from './Ring';
 
-export function ToolCard({
+export function GoalCard({
   icon,
   title,
   subtitle,

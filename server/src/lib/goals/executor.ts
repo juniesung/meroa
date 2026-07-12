@@ -1,26 +1,26 @@
 import { and, desc, eq, isNull, lt } from 'drizzle-orm';
 
 import { db } from '../../db/client.ts';
-import { records, toolEntries, tools } from '../../db/schema.ts';
+import { records, goalEntries, goals } from '../../db/schema.ts';
 import type { ActionSource } from '../tasks/executor.ts';
 import {
-  toolDefinitionSchema,
+  goalDefinitionSchema,
   validateEntryValues,
-  type EditToolPatch,
-  type LogToolEntryPatch,
-  type ToolDefinition,
-  type ToolField,
-  type ToolFieldInput,
-  type ToolTemplateKey,
+  type EditGoalPatch,
+  type LogGoalEntryPatch,
+  type GoalDefinition,
+  type GoalField,
+  type GoalFieldInput,
+  type GoalTemplateKey,
 } from './schema.ts';
 
-export type ToolRow = typeof tools.$inferSelect;
-export type ToolEntryRow = typeof toolEntries.$inferSelect;
+export type GoalRow = typeof goals.$inferSelect;
+export type GoalEntryRow = typeof goalEntries.$inferSelect;
 type Tx = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
 
-export class ToolActionError extends Error {
+export class GoalActionError extends Error {
   code: 'not_found' | 'invalid_input';
-  constructor(code: ToolActionError['code'], message: string) {
+  constructor(code: GoalActionError['code'], message: string) {
     super(message);
     this.code = code;
   }
@@ -29,12 +29,12 @@ export class ToolActionError extends Error {
 // Same chat-retry idempotency pattern as lib/tasks/executor.ts's
 // findIdempotentRecord — a retried turn re-issuing the same tool call
 // returns the original outcome instead of double-writing.
-async function findIdempotentToolRecord(
+async function findIdempotentGoalRecord(
   tx: Tx,
   userId: string,
   opts: ActionSource,
   kind: string,
-  toolId?: string,
+  goalId?: string,
 ) {
   if (!opts.sourceMessageId) return null;
   if (opts.toolCallId) {
@@ -67,68 +67,68 @@ async function findIdempotentToolRecord(
     .orderBy(desc(records.createdAt))
     .limit(1);
   if (!existing) return null;
-  const payload = existing.payload as { toolId?: string };
-  if (toolId && payload.toolId !== toolId) return null;
+  const payload = existing.payload as { goalId?: string };
+  if (goalId && payload.goalId !== goalId) return null;
   return existing;
 }
 
-async function loadTool(tx: Tx, userId: string, toolId: string): Promise<ToolRow> {
-  const [tool] = await tx
+async function loadGoal(tx: Tx, userId: string, goalId: string): Promise<GoalRow> {
+  const [goal] = await tx
     .select()
-    .from(tools)
-    .where(and(eq(tools.id, toolId), eq(tools.userId, userId), isNull(tools.archivedAt)))
+    .from(goals)
+    .where(and(eq(goals.id, goalId), eq(goals.userId, userId), isNull(goals.archivedAt)))
     .limit(1);
-  if (!tool) throw new ToolActionError('not_found', 'tool not found');
-  return tool;
+  if (!goal) throw new GoalActionError('not_found', 'goal not found');
+  return goal;
 }
 
-async function loadToolForUpdate(tx: Tx, userId: string, toolId: string): Promise<ToolRow> {
-  const [tool] = await tx
+async function loadGoalForUpdate(tx: Tx, userId: string, goalId: string): Promise<GoalRow> {
+  const [goal] = await tx
     .select()
-    .from(tools)
-    .where(and(eq(tools.id, toolId), eq(tools.userId, userId), isNull(tools.archivedAt)))
+    .from(goals)
+    .where(and(eq(goals.id, goalId), eq(goals.userId, userId), isNull(goals.archivedAt)))
     .for('update')
     .limit(1);
-  if (!tool) throw new ToolActionError('not_found', 'tool not found');
-  return tool;
+  if (!goal) throw new GoalActionError('not_found', 'goal not found');
+  return goal;
 }
 
 // Read-only, non-throwing lookup — the AI action layer's nameHint
 // verification and the create-from-preview flow both use this instead of
 // the mutation-oriented functions below (mirrors lib/tasks/executor.ts's
 // getTask).
-export async function getTool(userId: string, toolId: string): Promise<ToolRow | null> {
-  const [tool] = await db
+export async function getGoal(userId: string, goalId: string): Promise<GoalRow | null> {
+  const [goal] = await db
     .select()
-    .from(tools)
-    .where(and(eq(tools.id, toolId), eq(tools.userId, userId), isNull(tools.archivedAt)))
+    .from(goals)
+    .where(and(eq(goals.id, goalId), eq(goals.userId, userId), isNull(goals.archivedAt)))
     .limit(1);
-  return tool ?? null;
+  return goal ?? null;
 }
 
 // --- create ----------------------------------------------------------
-// `create_tool` (the AI tool, lib/ai/actions.ts) never calls this — it only
+// `create_goal` (the AI tool, lib/ai/actions.ts) never calls this — it only
 // builds and returns a preview definition. This is the actual save, called
-// by POST /tools once the user taps Create on the preview card, with the
+// by POST /goals once the user taps Create on the preview card, with the
 // exact definition that was shown (re-validated here, not rebuilt from
 // params) so what gets saved always matches what was previewed.
-export async function createTool(
+export async function createGoal(
   userId: string,
-  input: { template: ToolTemplateKey; name: string; icon?: string | null; definition: ToolDefinition },
+  input: { template: GoalTemplateKey; name: string; icon?: string | null; definition: GoalDefinition },
   opts: ActionSource,
-): Promise<{ tool: ToolRow }> {
+): Promise<{ goal: GoalRow }> {
   return db.transaction(async (tx) => {
-    const idempotent = await findIdempotentToolRecord(tx, userId, opts, 'tool_created');
+    const idempotent = await findIdempotentGoalRecord(tx, userId, opts, 'goal_created');
     if (idempotent) {
-      const payload = idempotent.payload as { toolId: string };
-      const [existingTool] = await tx.select().from(tools).where(eq(tools.id, payload.toolId)).limit(1);
-      if (existingTool) return { tool: existingTool };
+      const payload = idempotent.payload as { goalId: string };
+      const [existingGoal] = await tx.select().from(goals).where(eq(goals.id, payload.goalId)).limit(1);
+      if (existingGoal) return { goal: existingGoal };
     }
 
-    const definition = toolDefinitionSchema.parse(input.definition);
+    const definition = goalDefinitionSchema.parse(input.definition);
 
-    const [tool] = await tx
-      .insert(tools)
+    const [goal] = await tx
+      .insert(goals)
       .values({
         userId,
         template: input.template,
@@ -138,29 +138,29 @@ export async function createTool(
         definition,
       })
       .returning();
-    if (!tool) throw new Error('tool_insert_failed');
+    if (!goal) throw new Error('goal_insert_failed');
 
     await tx.insert(records).values({
       userId,
-      kind: 'tool_created',
-      payload: { toolId: tool.id, name: tool.name },
+      kind: 'goal_created',
+      payload: { goalId: goal.id, name: goal.name },
       source: opts.source,
       sourceMessageId: opts.sourceMessageId ?? null,
       toolCallId: opts.toolCallId ?? null,
     });
 
-    return { tool };
+    return { goal };
   });
 }
 
 // --- edit (constrained ops) ---------------------------------------------
 
-function addField(fields: ToolField[], input: ToolFieldInput): ToolField[] {
+function addField(fields: GoalField[], input: GoalFieldInput): GoalField[] {
   return [...fields, { id: crypto.randomUUID(), ...input }];
 }
 
 /**
- * Applies a constrained edit patch to a tool's current definition. Never
+ * Applies a constrained edit patch to a goal's current definition. Never
  * resends or reconstructs the whole definition from scratch — only the
  * fields the caller actually touched change (docs/ai-reliability-hardening.md
  * lesson 13: an edit surface that can't faithfully represent a value must
@@ -168,21 +168,21 @@ function addField(fields: ToolField[], input: ToolFieldInput): ToolField[] {
  * so the executor can wrap it consistently as an invalid_input.
  */
 function applyEditOps(
-  definition: ToolDefinition,
-  patch: EditToolPatch,
-): { definition: ToolDefinition } | { error: string } {
+  definition: GoalDefinition,
+  patch: EditGoalPatch,
+): { definition: GoalDefinition } | { error: string } {
   let next = definition;
 
   if (patch.targetValue !== undefined) {
     if (!next.target) {
-      return { error: 'this tool has no target to change — ask the user if they want to add one' };
+      return { error: 'this goal has no target to change — ask the user if they want to add one' };
     }
     next = { ...next, target: { ...next.target, value: patch.targetValue } };
   }
 
   if (patch.unit !== undefined) {
     if (!next.primaryFieldId) {
-      return { error: 'this tool has no primary numeric field to set a unit on' };
+      return { error: 'this goal has no primary numeric field to set a unit on' };
     }
     const primaryId = next.primaryFieldId;
     next = {
@@ -208,11 +208,11 @@ function applyEditOps(
     // silently breaking the definition; the model can ask the user which to
     // drop first (the target/view, or pick a different field).
     if (next.primaryFieldId && removeSet.has(next.primaryFieldId)) {
-      return { error: 'that field backs this tool\'s total — remove the target first, or choose a different field' };
+      return { error: 'that field backs this goal\'s total — remove the target first, or choose a different field' };
     }
     const usedByBars = next.views.some((v) => v.kind === 'bars' && v.fieldId && removeSet.has(v.fieldId));
     if (usedByBars) {
-      return { error: 'that field backs one of this tool\'s charts — ask the user which to drop first' };
+      return { error: 'that field backs one of this goal\'s charts — ask the user which to drop first' };
     }
     next = { ...next, fields: next.fields.map((f) => (removeSet.has(f.id) ? { ...f, archived: true } : f)) };
   }
@@ -224,77 +224,77 @@ function applyEditOps(
     next = { ...next, fields: next.fields.map((f) => (labelById.has(f.id) ? { ...f, label: labelById.get(f.id)! } : f)) };
   }
 
-  const parsed = toolDefinitionSchema.safeParse(next);
-  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? 'invalid tool definition' };
+  const parsed = goalDefinitionSchema.safeParse(next);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? 'invalid goal definition' };
   return { definition: parsed.data };
 }
 
-export async function editTool(
+export async function editGoal(
   userId: string,
-  toolId: string,
-  patch: EditToolPatch,
+  goalId: string,
+  patch: EditGoalPatch,
   opts: ActionSource,
-): Promise<{ tool: ToolRow }> {
+): Promise<{ goal: GoalRow }> {
   return db.transaction(async (tx) => {
-    const idempotent = await findIdempotentToolRecord(tx, userId, opts, 'tool_edited', toolId);
-    if (idempotent) return { tool: await loadTool(tx, userId, toolId) };
+    const idempotent = await findIdempotentGoalRecord(tx, userId, opts, 'goal_edited', goalId);
+    if (idempotent) return { goal: await loadGoal(tx, userId, goalId) };
 
-    const tool = await loadToolForUpdate(tx, userId, toolId);
-    const currentDefinition = tool.definition as ToolDefinition;
+    const goal = await loadGoalForUpdate(tx, userId, goalId);
+    const currentDefinition = goal.definition as GoalDefinition;
 
-    const prior = { name: tool.name, icon: tool.icon, definition: tool.definition, version: tool.version };
+    const prior = { name: goal.name, icon: goal.icon, definition: goal.definition, version: goal.version };
 
-    const name = patch.name ?? tool.name;
-    const icon = patch.icon !== undefined ? patch.icon : tool.icon;
+    const name = patch.name ?? goal.name;
+    const icon = patch.icon !== undefined ? patch.icon : goal.icon;
     const result = applyEditOps(currentDefinition, patch);
-    if ('error' in result) throw new ToolActionError('invalid_input', result.error);
+    if ('error' in result) throw new GoalActionError('invalid_input', result.error);
 
     const noChange =
-      name === tool.name && icon === tool.icon && JSON.stringify(result.definition) === JSON.stringify(tool.definition);
-    if (noChange) return { tool };
+      name === goal.name && icon === goal.icon && JSON.stringify(result.definition) === JSON.stringify(goal.definition);
+    if (noChange) return { goal };
 
     const [updated] = await tx
-      .update(tools)
-      .set({ name, icon, definition: result.definition, version: tool.version + 1 })
-      .where(eq(tools.id, tool.id))
+      .update(goals)
+      .set({ name, icon, definition: result.definition, version: goal.version + 1 })
+      .where(eq(goals.id, goal.id))
       .returning();
-    if (!updated) throw new Error('tool_update_failed');
+    if (!updated) throw new Error('goal_update_failed');
 
     await tx.insert(records).values({
       userId,
-      kind: 'tool_edited',
-      payload: { toolId: tool.id, name: updated.name, prior },
+      kind: 'goal_edited',
+      payload: { goalId: goal.id, name: updated.name, prior },
       source: opts.source,
       sourceMessageId: opts.sourceMessageId ?? null,
       toolCallId: opts.toolCallId ?? null,
     });
 
-    return { tool: updated };
+    return { goal: updated };
   });
 }
 
 // --- log entry -----------------------------------------------------------
 
-export async function logToolEntry(
+export async function logGoalEntry(
   userId: string,
-  toolId: string,
-  patch: LogToolEntryPatch,
+  goalId: string,
+  patch: LogGoalEntryPatch,
   opts: ActionSource,
-): Promise<{ tool: ToolRow; entry: ToolEntryRow }> {
+): Promise<{ goal: GoalRow; entry: GoalEntryRow }> {
   return db.transaction(async (tx) => {
-    const idempotent = await findIdempotentToolRecord(tx, userId, opts, 'tool_entry', toolId);
+    const idempotent = await findIdempotentGoalRecord(tx, userId, opts, 'goal_entry', goalId);
     if (idempotent) {
       const payload = idempotent.payload as { entryId?: string };
       if (payload.entryId) {
-        const [entry] = await tx.select().from(toolEntries).where(eq(toolEntries.id, payload.entryId)).limit(1);
-        if (entry) return { tool: await loadTool(tx, userId, toolId), entry };
+        const [entry] = await tx.select().from(goalEntries).where(eq(goalEntries.id, payload.entryId)).limit(1);
+        if (entry) return { goal: await loadGoal(tx, userId, goalId), entry };
       }
     }
 
-    const tool = await loadTool(tx, userId, toolId);
-    const definition = tool.definition as ToolDefinition;
+    const goal = await loadGoal(tx, userId, goalId);
+    const definition = goal.definition as GoalDefinition;
     const error = validateEntryValues(definition.fields, patch.values);
-    if (error) throw new ToolActionError('invalid_input', error);
+    if (error) throw new GoalActionError('invalid_input', error);
 
     // patch.entryAt, when set, has already been normalized to a real UTC
     // instant by the caller (lib/ai/actions.ts, via localDatetimeToUtcIso) —
@@ -306,8 +306,8 @@ export async function logToolEntry(
       .insert(records)
       .values({
         userId,
-        kind: 'tool_entry',
-        payload: { toolId: tool.id, name: tool.name, data, entryAt: entryAt.toISOString() },
+        kind: 'goal_entry',
+        payload: { goalId: goal.id, name: goal.name, data, entryAt: entryAt.toISOString() },
         source: opts.source,
         sourceMessageId: opts.sourceMessageId ?? null,
         toolCallId: opts.toolCallId ?? null,
@@ -320,68 +320,68 @@ export async function logToolEntry(
     // own `records.toolCallId`-backed idempotency lives on the record, not
     // here, so this insert never needs its own conflict handling.
     const [entry] = await tx
-      .insert(toolEntries)
-      .values({ toolId: tool.id, recordId: record.id, data, entryAt })
+      .insert(goalEntries)
+      .values({ goalId: goal.id, recordId: record.id, data, entryAt })
       .returning();
     if (!entry) throw new Error('entry_insert_failed');
 
     // Stamp the entry id onto the just-inserted record's payload so a
     // retried call (idempotency path above) and undo (which reads the
     // record, not the entry, as its source of truth) both know exactly
-    // which tool_entries row this created.
+    // which goal_entries row this created.
     await tx.update(records).set({ payload: { ...record.payload as object, entryId: entry.id } }).where(eq(records.id, record.id));
 
-    return { tool, entry };
+    return { goal, entry };
   });
 }
 
 // --- read (history) ------------------------------------------------------
 
 // Newest-first, cursor-paginated live entries (backed by a non-reverted
-// record) for a tool's history view. Ownership is the caller's
-// responsibility (routes/tools.ts checks getTool first) — this only reads.
-export async function listToolEntries(
-  toolId: string,
+// record) for a goal's history view. Ownership is the caller's
+// responsibility (routes/goals.ts checks getGoal first) — this only reads.
+export async function listGoalEntries(
+  goalId: string,
   opts: { limit: number; before?: Date },
-): Promise<ToolEntryRow[]> {
-  const conditions = [eq(toolEntries.toolId, toolId), isNull(records.revertedAt)];
-  if (opts.before) conditions.push(lt(toolEntries.entryAt, opts.before));
+): Promise<GoalEntryRow[]> {
+  const conditions = [eq(goalEntries.goalId, goalId), isNull(records.revertedAt)];
+  if (opts.before) conditions.push(lt(goalEntries.entryAt, opts.before));
   return db
     .select({
-      id: toolEntries.id,
-      toolId: toolEntries.toolId,
-      recordId: toolEntries.recordId,
-      data: toolEntries.data,
-      entryAt: toolEntries.entryAt,
-      createdAt: toolEntries.createdAt,
+      id: goalEntries.id,
+      goalId: goalEntries.goalId,
+      recordId: goalEntries.recordId,
+      data: goalEntries.data,
+      entryAt: goalEntries.entryAt,
+      createdAt: goalEntries.createdAt,
     })
-    .from(toolEntries)
-    .innerJoin(records, eq(toolEntries.recordId, records.id))
+    .from(goalEntries)
+    .innerJoin(records, eq(goalEntries.recordId, records.id))
     .where(and(...conditions))
-    .orderBy(desc(toolEntries.entryAt))
+    .orderBy(desc(goalEntries.entryAt))
     .limit(opts.limit);
 }
 
 // --- archive ---------------------------------------------------------
 
-export async function archiveTool(userId: string, toolId: string, opts: ActionSource): Promise<{ tool: ToolRow }> {
+export async function archiveGoal(userId: string, goalId: string, opts: ActionSource): Promise<{ goal: GoalRow }> {
   return db.transaction(async (tx) => {
-    const idempotent = await findIdempotentToolRecord(tx, userId, opts, 'tool_archived', toolId);
-    if (idempotent) return { tool: await loadTool(tx, userId, toolId) };
+    const idempotent = await findIdempotentGoalRecord(tx, userId, opts, 'goal_archived', goalId);
+    if (idempotent) return { goal: await loadGoal(tx, userId, goalId) };
 
-    const tool = await loadToolForUpdate(tx, userId, toolId);
-    const [updated] = await tx.update(tools).set({ archivedAt: new Date() }).where(eq(tools.id, tool.id)).returning();
-    if (!updated) throw new Error('tool_update_failed');
+    const goal = await loadGoalForUpdate(tx, userId, goalId);
+    const [updated] = await tx.update(goals).set({ archivedAt: new Date() }).where(eq(goals.id, goal.id)).returning();
+    if (!updated) throw new Error('goal_update_failed');
 
     await tx.insert(records).values({
       userId,
-      kind: 'tool_archived',
-      payload: { toolId: tool.id, name: tool.name },
+      kind: 'goal_archived',
+      payload: { goalId: goal.id, name: goal.name },
       source: opts.source,
       sourceMessageId: opts.sourceMessageId ?? null,
       toolCallId: opts.toolCallId ?? null,
     });
 
-    return { tool: updated };
+    return { goal: updated };
   });
 }

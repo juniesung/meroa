@@ -31,7 +31,7 @@ export function ymdInTz(date: Date, tz: string): string {
   }).format(date);
 }
 
-// Exported for reuse by lib/tools/summary.ts's chart/streak bucketing — the
+// Exported for reuse by lib/goals/summary.ts's chart/streak bucketing — the
 // same "no date library, just Intl + UTC-noon-anchored ymd strings"
 // approach applies to weekly/daily tool chart buckets as it does to task
 // recurrence, and duplicating this math risks the two drifting apart.
@@ -274,7 +274,7 @@ export async function materializeRecurringInstances(
             !!recurrence.time,
           ),
           recurrence: null,
-          toolId: template.toolId,
+          goalId: template.goalId,
           dueAt: recurrence.time
             ? ymdAndTimeToUtcDate(occurrenceDate, recurrence.time, tz)
             : ymdEndOfDayToUtcDate(occurrenceDate, tz),

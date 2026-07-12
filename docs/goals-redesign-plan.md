@@ -222,21 +222,31 @@ matched_regex: false`) and appended the corrective segment. Mitigations, cheapes
 
 1. **Migration + mechanical rename** — SQL migration (§2.1 table), `lib/tools/`→
    `lib/goals/`, routes, AI tool names + `G*` refs, client types/routes/tab, prompts.
-   App and old tests keep working against renamed shapes; typecheck both packages.
+   App keeps working against renamed shapes; typecheck both packages. (No automated
+   tests exist anywhere in the repo yet — the gate here is typecheck; vitest arrives
+   in item 3.)
 2. **Model v1 simplification** — delete the field/template builder; `savings` definition
    + fixed entry shape; rewrite `create_goal`/`edit_goal`/`log_goal_entry` schemas +
    executor + summary math (total, pace vs deadline); update seed.
 3. **Connected loop** — starter tasks in the preview + one-transaction create;
    `becameDone` auto-entry / `becameOpen` entry removal (§2.3 trap); undo verified both
-   directions; recent-changes narration for auto-logged contributions.
+   directions; recent-changes narration for auto-logged contributions. **Adds `vitest`
+   to `server/`** (devDependency + `npm test` script — the repo's first automated
+   tests) with unit tests pinning the done→open→re-done sequence: exactly one live
+   entry after re-completion, never two, and none while reopened.
 4. **Consistency engine** — `lib/goals/consistency.ts` (day verdicts, streaks, heatmap
-   buckets), `GET /goals/consistency`, tail-block line.
+   buckets), `GET /goals/consistency`, tail-block line. Written as pure
+   data-in/data-out functions (task rows in, verdicts/streaks/buckets out) so the
+   vitest suite covers the edge cases the manual protocol can't cheaply reach: tz
+   bucketing, neutral days skipped not broken, today's grace, postpone-off-today
+   leaving the denominator, longest-vs-current after a reset.
 5. **Goals tab UI** — header stats + mascot-lite `MeroaMark` states, `Heatmap.tsx`,
    goal cards w/ pace, stat tiles, wins strip, empty state, micro-interactions.
 6. **Hallucination mitigations** — §2.6 items 1–3.
-7. **Verify + docs** — protocol (§4), fix the user's small-bug list as it lands, update
-   CLAUDE.md §9 (Phase 4 row → "superseded by Goals redesign", Phase 5 row notes the
-   loop shipped early), record results here.
+7. **Verify + docs** — protocol (§4) plus `npm test` in `server/`, update CLAUDE.md §9
+   (Phase 4 row → "superseded by Goals redesign", Phase 5 row notes the loop shipped
+   early), record results here. (The user's small-bug list turned out to be mooted —
+   see the ledger below.)
 
 ## 4. Acceptance protocol (deepseek-v4-flash, isolated dev-token account)
 
@@ -260,4 +270,7 @@ matched_regex: false`) and appended the corrective segment. Mitigations, cheapes
 
 *Deferred-bug ledger (fill as the user reports):*
 - [x] create_tool preview narrated with zero calls (mitigations §2.6)
-- [ ] …user's list pending
+- [x] User's small-bug list collected: all of them live in the old Tools tab UI
+  (template/field-builder surfaces), which this redesign deletes outright — mooted, no
+  individual fixes carried forward. If any equivalent behavior resurfaces in the new
+  Goals UI during the §4 protocol, log it here as a fresh entry.

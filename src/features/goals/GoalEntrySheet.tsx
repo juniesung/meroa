@@ -5,15 +5,15 @@ import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { Sheet } from '@/components/Sheet';
 import { radii, theme } from '@/constants/theme';
-import type { ApiTool, ToolField } from '@/lib/api/types';
-import { useLogToolEntry } from './queries';
+import type { ApiGoal, GoalField } from '@/lib/api/types';
+import { useLogGoalEntry } from './queries';
 
 function FieldInput({
   field,
   value,
   onChange,
 }: {
-  field: ToolField;
+  field: GoalField;
   value: string | boolean | undefined;
   onChange: (v: string | boolean | undefined) => void;
 }) {
@@ -76,12 +76,12 @@ function FieldInput({
 
 // Remounted each time the sheet opens (the parent renders this only while
 // `visible`, matching TaskFormSheet's pattern) so state always starts fresh.
-function ToolEntryForm({ tool, onDone }: { tool: ApiTool; onDone: () => void }) {
-  const logEntry = useLogToolEntry();
+function GoalEntryForm({ goal, onDone }: { goal: ApiGoal; onDone: () => void }) {
+  const logEntry = useLogGoalEntry();
   const [values, setValues] = useState<Record<string, string | boolean | undefined>>({});
   const [error, setError] = useState<string | null>(null);
 
-  const fields = tool.definition.fields.filter((f) => !f.archived);
+  const fields = goal.definition.fields.filter((f) => !f.archived);
 
   const submit = () => {
     // Only fields the user actually filled in are sent — untouched optional
@@ -117,7 +117,7 @@ function ToolEntryForm({ tool, onDone }: { tool: ApiTool; onDone: () => void }) 
     }
     setError(null);
     logEntry.mutate(
-      { id: tool.id, patch: { values: payload } },
+      { id: goal.id, patch: { values: payload } },
       {
         onSuccess: () => {
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
@@ -150,18 +150,18 @@ function ToolEntryForm({ tool, onDone }: { tool: ApiTool; onDone: () => void }) 
   );
 }
 
-export function ToolEntrySheet({
+export function GoalEntrySheet({
   visible,
   onClose,
-  tool,
+  goal,
 }: {
   visible: boolean;
   onClose: () => void;
-  tool: ApiTool;
+  goal: ApiGoal;
 }) {
   return (
-    <Sheet visible={visible} onClose={onClose} title={`Log to "${tool.name}"`}>
-      {visible ? <ToolEntryForm tool={tool} onDone={onClose} /> : null}
+    <Sheet visible={visible} onClose={onClose} title={`Log to "${goal.name}"`}>
+      {visible ? <GoalEntryForm goal={goal} onDone={onClose} /> : null}
     </Sheet>
   );
 }

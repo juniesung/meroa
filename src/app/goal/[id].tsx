@@ -9,16 +9,16 @@ import { Icon } from '@/components/Icon';
 import { Progress } from '@/components/Progress';
 import { Ring } from '@/components/Ring';
 import { radii, theme } from '@/constants/theme';
-import { useArchiveTool, useTool } from '@/features/tools/queries';
-import { ToolEntrySheet } from '@/features/tools/ToolEntrySheet';
-import type { ApiToolEntry, ApiToolViewData, ToolDefinition } from '@/lib/api/types';
+import { useArchiveGoal, useGoal } from '@/features/goals/queries';
+import { GoalEntrySheet } from '@/features/goals/GoalEntrySheet';
+import type { ApiGoalEntry, ApiGoalViewData, GoalDefinition } from '@/lib/api/types';
 import { toIconName } from '@/lib/icon';
 
 function formatNumber(n: number): string {
   return Number.isInteger(n) ? n.toLocaleString() : n.toLocaleString(undefined, { maximumFractionDigits: 2 });
 }
 
-function formatEntryLine(definition: ToolDefinition, data: Record<string, unknown>): string {
+function formatEntryLine(definition: GoalDefinition, data: Record<string, unknown>): string {
   const fieldsById = new Map(definition.fields.map((f) => [f.id, f]));
   const parts: string[] = [];
   for (const [fieldId, value] of Object.entries(data)) {
@@ -37,7 +37,7 @@ function formatEntryDate(iso: string): string {
   return `${date} · ${time}`;
 }
 
-function ProgressTotalView({ view }: { view: Extract<ApiToolViewData, { kind: 'progress_total' }> }) {
+function ProgressTotalView({ view }: { view: Extract<ApiGoalViewData, { kind: 'progress_total' }> }) {
   const pct = Math.round((view.progress ?? 0) * 100);
   const unit = view.unit ? ` ${view.unit}` : '';
   return (
@@ -57,7 +57,7 @@ function ProgressTotalView({ view }: { view: Extract<ApiToolViewData, { kind: 'p
   );
 }
 
-function StreakView({ view }: { view: Extract<ApiToolViewData, { kind: 'streak' }> }) {
+function StreakView({ view }: { view: Extract<ApiGoalViewData, { kind: 'streak' }> }) {
   return (
     <View style={[styles.viewCard, { flexDirection: 'row', alignItems: 'center', gap: 10 }]}>
       <Icon name="flame" size={20} color={theme.blue} stroke={2} />
@@ -66,7 +66,7 @@ function StreakView({ view }: { view: Extract<ApiToolViewData, { kind: 'streak' 
   );
 }
 
-function BarsView({ view }: { view: Extract<ApiToolViewData, { kind: 'bars' }> }) {
+function BarsView({ view }: { view: Extract<ApiGoalViewData, { kind: 'bars' }> }) {
   return (
     <View style={styles.viewCard}>
       <Text style={styles.viewSub}>{view.bucket === 'day' ? 'Last 7 days' : 'Last 8 weeks'}</Text>
@@ -75,10 +75,10 @@ function BarsView({ view }: { view: Extract<ApiToolViewData, { kind: 'bars' }> }
   );
 }
 
-export default function ToolDetailScreen() {
+export default function GoalDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { data, isLoading } = useTool(id);
-  const archiveTool = useArchiveTool();
+  const { data, isLoading } = useGoal(id);
+  const archiveGoal = useArchiveGoal();
   const [entrySheetOpen, setEntrySheetOpen] = useState(false);
   const [confirmingRemove, setConfirmingRemove] = useState(false);
 
@@ -93,8 +93,8 @@ export default function ToolDetailScreen() {
     );
   }
 
-  const { tool, detail, entries } = data;
-  const definition = tool.definition;
+  const { goal, detail, entries } = data;
+  const definition = goal.definition;
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
@@ -107,11 +107,11 @@ export default function ToolDetailScreen() {
           </View>
         </Pressable>
         <View style={styles.iconChip}>
-          <Icon name={toIconName(tool.icon)} size={20} color={theme.blue} stroke={1.9} />
+          <Icon name={toIconName(goal.icon)} size={20} color={theme.blue} stroke={1.9} />
         </View>
         <View style={{ flex: 1 }}>
           <Text style={styles.title} numberOfLines={1}>
-            {tool.name}
+            {goal.name}
           </Text>
           <Text style={styles.subtitle}>{detail.card.sub}</Text>
         </View>
@@ -132,7 +132,7 @@ export default function ToolDetailScreen() {
           <Text style={styles.emptyText}>No entries yet — log your first one.</Text>
         ) : (
           <View style={{ gap: 8 }}>
-            {entries.map((entry: ApiToolEntry) => (
+            {entries.map((entry: ApiGoalEntry) => (
               <View key={entry.id} style={styles.entryRow}>
                 <Text style={styles.entryLine} numberOfLines={1}>
                   {formatEntryLine(definition, entry.data)}
@@ -152,17 +152,17 @@ export default function ToolDetailScreen() {
               <Pressable
                 onPress={() => {
                   Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
-                  archiveTool.mutate(tool.id, { onSuccess: () => router.back() });
+                  archiveGoal.mutate(goal.id, { onSuccess: () => router.back() });
                 }}
                 style={styles.removeConfirmButton}
                 hitSlop={8}
               >
-                <Text style={styles.removeConfirmText}>Remove tracker</Text>
+                <Text style={styles.removeConfirmText}>Remove goal</Text>
               </Pressable>
             </View>
           ) : (
             <Pressable onPress={() => setConfirmingRemove(true)} hitSlop={8}>
-              <Text style={styles.removeLink}>Remove this tracker</Text>
+              <Text style={styles.removeLink}>Remove this goal</Text>
             </Pressable>
           )}
         </View>
@@ -179,7 +179,7 @@ export default function ToolDetailScreen() {
         <Text style={styles.logButtonText}>Log</Text>
       </Pressable>
 
-      <ToolEntrySheet visible={entrySheetOpen} onClose={() => setEntrySheetOpen(false)} tool={tool} />
+      <GoalEntrySheet visible={entrySheetOpen} onClose={() => setEntrySheetOpen(false)} goal={goal} />
     </SafeAreaView>
   );
 }

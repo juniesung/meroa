@@ -2,8 +2,8 @@ import type OpenAI from 'openai';
 
 import { logger } from '../../../logger.ts';
 import type { TaskRow } from '../../tasks/executor.ts';
-import type { ToolRow } from '../../tools/executor.ts';
-import type { ToolPreview } from '../../tools/schema.ts';
+import type { GoalRow } from '../../goals/executor.ts';
+import type { GoalPreview } from '../../goals/schema.ts';
 import { didClaimAction } from '../claim-check.ts';
 import type { TurnRefs } from '../task-context.ts';
 
@@ -41,13 +41,13 @@ export type ChatStreamEvent =
   | { type: 'segment_end'; text: string }
   | { type: 'action'; toolName: string; task: TaskRow; summary: string; recordKind: string }
   | { type: 'action_bulk'; toolName: string; tasks: TaskRow[]; summary: string; recordKind: string }
-  // A tool (tracker) action — edit_tool/log_tool_entry, or an
-  // undo_last_action that reverted a tool_% record.
-  | { type: 'action_tool'; toolName: string; tool: ToolRow; summary: string; recordKind: string }
-  // create_tool — a preview only, nothing saved yet (phase-4-implementation-
-  // plan.md §1.3). routes/messages.ts persists this as a tool_preview
-  // message; POST /tools {previewMessageId} is the actual save.
-  | { type: 'action_preview'; toolName: string; preview: ToolPreview; summary: string; recordKind: string }
+  // A goal action — edit_goal/log_goal_entry, or an
+  // undo_last_action that reverted a goal_% record.
+  | { type: 'action_goal'; toolName: string; goal: GoalRow; summary: string; recordKind: string }
+  // create_goal — a preview only, nothing saved yet (docs/goals-redesign-
+  // plan.md §2.1). routes/messages.ts persists this as a goal_preview
+  // message; POST /goals {previewMessageId} is the actual save.
+  | { type: 'action_preview'; toolName: string; preview: GoalPreview; summary: string; recordKind: string }
   | { type: 'stream_end' }
   | { type: 'error'; retryable: boolean; message: string };
 
@@ -124,9 +124,13 @@ const FAKE_ACTION_PATTERN =
 // remove_tasks (plural) is its own alternative, not just implied by
 // remove_task — the trailing \b doesn't fire between "task" and a following
 // "s" (both word chars), so without it a leaked "[remove_tasks" marker
-// would silently fail to match at all.
+// would silently fail to match at all. The old create_tool/edit_tool/
+// log_tool_entry names are kept alongside the current create_goal/edit_goal/
+// log_goal_entry ones — a backstop against a leak of an older, cached
+// system-prompt or history string still using the pre-rename names
+// (docs/goals-redesign-plan.md §2.1).
 const TOOL_NAME_LEAK_PATTERN =
-  /\[(create_task|edit_task|complete_task|progress_task|postpone_task|remove_task|remove_tasks|create_tool|edit_tool|log_tool_entry)\b/i;
+  /\[(create_task|edit_task|complete_task|progress_task|postpone_task|remove_task|remove_tasks|create_goal|edit_goal|log_goal_entry|create_tool|edit_tool|log_tool_entry)\b/i;
 
 // Observed on DeepSeek v4-flash: instead of a structured tool_calls delta,
 // the model occasionally emits its own function-call templating as literal

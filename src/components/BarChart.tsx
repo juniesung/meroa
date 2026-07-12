@@ -5,7 +5,7 @@ import { theme } from '@/constants/theme';
 
 type Bucket = { label: string; ymd: string; value: number };
 
-/** Server-precomputed chart buckets (lib/tools/summary.ts) rendered as plain
+/** Server-precomputed chart buckets (lib/goals/summary.ts) rendered as plain
  * gradient bars — the client never re-derives or re-buckets the numbers. */
 export function BarChart({ buckets }: { buckets: Bucket[] }) {
   const max = Math.max(1, ...buckets.map((b) => b.value));

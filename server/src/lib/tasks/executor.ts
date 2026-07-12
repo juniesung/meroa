@@ -1,8 +1,8 @@
 import { and, desc, eq, inArray, isNull, like, or } from 'drizzle-orm';
 
 import { db } from '../../db/client.ts';
-import { records, tasks, tools } from '../../db/schema.ts';
-import type { ToolRow } from '../tools/executor.ts';
+import { records, tasks, goals } from '../../db/schema.ts';
+import type { GoalRow } from '../goals/executor.ts';
 import { materializeRecurringInstances, rollPastToNextDay, ymdInTz, type Tx } from './recurrence.ts';
 import {
   reduceTaskProgress,
@@ -24,11 +24,11 @@ import {
 } from './schema.ts';
 
 export type TaskRow = typeof tasks.$inferSelect;
-// Shared by the tasks and tools executors (lib/tools/executor.ts) — a tool
-// action sourced from the tool's own UI (a quick-entry sheet, an archive
-// tap) uses 'tool_ui', the same way a Tasks-tab tap uses 'tasks_ui'.
+// Shared by the tasks and goals executors (lib/goals/executor.ts) — a goal
+// action sourced from the goal's own UI (a quick-entry sheet, an archive
+// tap) uses 'goal_ui', the same way a Tasks-tab tap uses 'tasks_ui'.
 export type ActionSource = {
-  source: 'chat' | 'tasks_ui' | 'tool_ui';
+  source: 'chat' | 'tasks_ui' | 'goal_ui';
   sourceMessageId?: string;
   // The Anthropic tool_use block id for this specific call — see
   // db/schema.ts's records.toolCallId for why this exists.
@@ -653,21 +653,21 @@ export async function removeTasks(
 
 // --- undo ------------------------------------------------------------
 //
-// Undo covers both tasks and tools under one entry point (undo_last_action
+// Undo covers both tasks and goals under one entry point (undo_last_action
 // is a single AI tool and a single "undo that" REST route) — the most
 // recent non-reverted records row across either kind gets reverted,
-// whichever domain it belongs to. Tool records are handled by
-// undoToolRecord below; task records keep their existing, unchanged logic.
+// whichever domain it belongs to. Goal records are handled by
+// undoGoalRecord below; task records keep their existing, unchanged logic.
 
 export type UndoResult = {
   action: string;
   task?: TaskRow;
   tasks?: TaskRow[];
-  tool?: ToolRow;
-  // Only set for a 'tool_entry' undo — the values that were logged, so the
+  goal?: GoalRow;
+  // Only set for a 'goal_entry' undo — the values that were logged, so the
   // caller can narrate what got removed (docs/ai-reliability-hardening.md
   // lesson 16: a bare "reverted" summary forces the model to guess).
-  toolEntryData?: Record<string, unknown>;
+  goalEntryData?: Record<string, unknown>;
 };
 
 export async function undoLastAction(userId: string, opts: ActionSource): Promise<UndoResult> {
@@ -679,74 +679,74 @@ export async function undoLastAction(userId: string, opts: ActionSource): Promis
         and(
           eq(records.userId, userId),
           isNull(records.revertedAt),
-          or(like(records.kind, 'task_%'), like(records.kind, 'tool_%')),
+          or(like(records.kind, 'task_%'), like(records.kind, 'goal_%')),
         ),
       )
       .orderBy(desc(records.createdAt))
       .limit(1);
     if (!record) throw new TaskActionError('nothing_to_undo', 'nothing to undo');
 
-    if (record.kind.startsWith('tool_')) return undoToolRecord(tx, userId, record, opts);
+    if (record.kind.startsWith('goal_')) return undoGoalRecord(tx, userId, record, opts);
     return undoTaskRecord(tx, userId, record, opts);
   });
 }
 
-async function undoToolRecord(
+async function undoGoalRecord(
   tx: Tx,
   userId: string,
   record: typeof records.$inferSelect,
   opts: ActionSource,
 ): Promise<UndoResult> {
   const payload = record.payload as {
-    toolId?: string;
+    goalId?: string;
     name?: string;
     prior?: { name: string; icon: string | null; definition: unknown; version: number };
     data?: Record<string, unknown>;
   };
-  const toolId = payload.toolId;
-  if (!toolId) throw new TaskActionError('not_found', 'the tool for that action no longer exists');
+  const goalId = payload.goalId;
+  if (!goalId) throw new TaskActionError('not_found', 'the goal for that action no longer exists');
 
-  // Not filtered to isNull(archivedAt) — undoing a tool_archived action must
-  // find the tool while it's still archived.
-  const [tool] = await tx
+  // Not filtered to isNull(archivedAt) — undoing a goal_archived action must
+  // find the goal while it's still archived.
+  const [goal] = await tx
     .select()
-    .from(tools)
-    .where(and(eq(tools.id, toolId), eq(tools.userId, userId)))
+    .from(goals)
+    .where(and(eq(goals.id, goalId), eq(goals.userId, userId)))
     .for('update')
     .limit(1);
-  if (!tool) throw new TaskActionError('not_found', 'the tool for that action no longer exists');
+  if (!goal) throw new TaskActionError('not_found', 'the goal for that action no longer exists');
 
-  let updated: ToolRow;
+  let updated: GoalRow;
   switch (record.kind) {
-    case 'tool_created': {
-      const [t] = await tx.update(tools).set({ archivedAt: new Date() }).where(eq(tools.id, tool.id)).returning();
-      if (!t) throw new Error('tool_update_failed');
-      updated = t;
+    case 'goal_created': {
+      const [g] = await tx.update(goals).set({ archivedAt: new Date() }).where(eq(goals.id, goal.id)).returning();
+      if (!g) throw new Error('goal_update_failed');
+      updated = g;
       break;
     }
-    case 'tool_edited': {
+    case 'goal_edited': {
       const prior = payload.prior;
-      if (!prior) throw new Error('tool_edited record missing prior snapshot');
-      const [t] = await tx
-        .update(tools)
+      if (!prior) throw new Error('goal_edited record missing prior snapshot');
+      const [g] = await tx
+        .update(goals)
         .set({ name: prior.name, icon: prior.icon, definition: prior.definition, version: prior.version })
-        .where(eq(tools.id, tool.id))
+        .where(eq(goals.id, goal.id))
         .returning();
-      if (!t) throw new Error('tool_update_failed');
-      updated = t;
+      if (!g) throw new Error('goal_update_failed');
+      updated = g;
       break;
     }
-    case 'tool_archived': {
-      const [t] = await tx.update(tools).set({ archivedAt: null }).where(eq(tools.id, tool.id)).returning();
-      if (!t) throw new Error('tool_update_failed');
-      updated = t;
+    case 'goal_archived': {
+      const [g] = await tx.update(goals).set({ archivedAt: null }).where(eq(goals.id, goal.id)).returning();
+      if (!g) throw new Error('goal_update_failed');
+      updated = g;
       break;
     }
-    case 'tool_entry': {
+    case 'goal_entry': {
       // The generic revertedAt flip below on `record` IS the undo for an
-      // entry — lib/tools/summary.ts's entry queries already exclude
-      // reverted records. Nothing else to mutate on the tool row itself.
-      updated = tool;
+      // entry — lib/goals/summary.ts's entry queries already exclude
+      // reverted records. Nothing else to mutate on the goal row itself.
+      updated = goal;
       break;
     }
     default:
@@ -759,8 +759,8 @@ async function undoToolRecord(
   // out-of-band mutation the next chat turn needs to know about.
   await tx.insert(records).values({
     userId,
-    kind: 'tool_undo',
-    payload: { undidKind: record.kind, toolId: updated.id, name: updated.name },
+    kind: 'goal_undo',
+    payload: { undidKind: record.kind, goalId: updated.id, name: updated.name },
     source: opts.source,
     sourceMessageId: opts.sourceMessageId ?? null,
     toolCallId: opts.toolCallId ?? null,
@@ -768,8 +768,8 @@ async function undoToolRecord(
 
   return {
     action: record.kind,
-    tool: updated,
-    toolEntryData: record.kind === 'tool_entry' ? payload.data : undefined,
+    goal: updated,
+    goalEntryData: record.kind === 'goal_entry' ? payload.data : undefined,
   };
 }
 

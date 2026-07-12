@@ -267,12 +267,12 @@ export async function* streamChatReplyDeepseek(
               recordKind: result.recordKind,
             };
             toolResultMessages.push({ role: 'tool', tool_call_id: call.id, content: result.summary });
-          } else if (result.ok && 'tool' in result) {
-            toolCallLog.push({ name: call.name, ok: true, taskId: result.tool.id });
+          } else if (result.ok && 'goal' in result) {
+            toolCallLog.push({ name: call.name, ok: true, taskId: result.goal.id });
             yield {
-              type: 'action_tool',
+              type: 'action_goal',
               toolName: result.toolName,
-              tool: result.tool,
+              goal: result.goal,
               summary: result.summary,
               recordKind: result.recordKind,
             };

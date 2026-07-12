@@ -9,11 +9,11 @@ import {
   recurrenceSchema,
 } from '../tasks/schema.ts';
 import {
-  createToolParamsSchema,
-  TOOL_FIELD_TYPES,
-  TOOL_TEMPLATES,
-  toolFieldInputSchema,
-} from '../tools/schema.ts';
+  createGoalParamsSchema,
+  GOAL_FIELD_TYPES,
+  GOAL_TEMPLATES,
+  goalFieldInputSchema,
+} from '../goals/schema.ts';
 
 // Content-relevant subset of the app's icon set (src/components/Icon.tsx) —
 // excludes chrome-only icons (chat, tasks, tools, plus, chevron, etc.) that
@@ -41,19 +41,19 @@ const TASK_REF_PROPERTY = {
     "The task's ref exactly as shown in the task list in context, e.g. \"T2\" — never a database id, and never invented.",
 };
 
-// Same pattern as TASK_REF_PROPERTY/TITLE_HINT_PROPERTY, for tools.
-const TOOL_REF_PROPERTY = {
+// Same pattern as TASK_REF_PROPERTY/TITLE_HINT_PROPERTY, for goals.
+const GOAL_REF_PROPERTY = {
   type: 'string' as const,
   description:
-    "The tool's ref exactly as shown in the tools list in context, e.g. \"L2\" — never a database id, and never invented.",
+    "The goal's ref exactly as shown in the goals list in context, e.g. \"G2\" — never a database id, and never invented.",
 };
-const TOOL_NAME_HINT_PROPERTY = {
+const GOAL_NAME_HINT_PROPERTY = {
   type: 'string' as const,
   description:
-    "The tool's name exactly as it appears in the tools list in context — checked against the real tool before this runs, so it must match what toolRef actually points to.",
+    "The goal's name exactly as it appears in the goals list in context — checked against the real goal before this runs, so it must match what goalRef actually points to.",
 };
-const TOOL_TEMPLATES_ENUM = [...TOOL_TEMPLATES];
-const TOOL_FIELD_TYPES_ENUM = [...TOOL_FIELD_TYPES];
+const GOAL_TEMPLATES_ENUM = [...GOAL_TEMPLATES];
+const GOAL_FIELD_TYPES_ENUM = [...GOAL_FIELD_TYPES];
 
 // Six allow-listed task actions, per phase-3-tasks.md. Field names are kept
 // identical to the corresponding zod schema in lib/tasks/schema.ts wherever
@@ -271,24 +271,24 @@ export const AI_TOOLS: Anthropic.Tool[] = [
       required: ['items'],
     },
   },
-  // --- tools (long-term trackers) --------------------------------------
-  // A tool's own ref namespace ("L2", "L2.1" — mnemonic: tooL) is distinct
-  // from task refs ("T2") so a regex can't confuse the two families; both
-  // resolve through the same per-turn TurnRefs map (lib/ai/task-context.ts).
+  // --- goals (long-term outcomes) ----------------------------------------
+  // A goal's own ref namespace ("G2", "G2.1") is distinct from task refs
+  // ("T2") so a regex can't confuse the two families; both resolve through
+  // the same per-turn TurnRefs map (lib/ai/task-context.ts).
   {
-    name: 'create_tool',
+    name: 'create_goal',
     description:
-      'Show the user a preview of a new tracker/tool before saving it — this does NOT save anything by itself. Call it as soon as there\'s enough to render a sensible preview (a template + name is usually enough on its own); don\'t ask "should I set this up?" in chat text first — the Create button on the preview card is the only confirmation, so asking again in words makes them confirm twice. Only ask a real question when something required is missing or genuinely ambiguous — never interrogate for optional specifics nobody brought up, and never invent a target/goal number, a unit, or an extra field the user didn\'t actually mention. If the user asks for a change before tapping Create, call this again with the revision for a fresh preview.',
+      'Show the user a preview of a new goal before saving it — this does NOT save anything by itself. Call it as soon as there\'s enough to render a sensible preview (a template + name is usually enough on its own); don\'t ask "should I set this up?" in chat text first — the Create button on the preview card is the only confirmation, so asking again in words makes them confirm twice. Only ask a real question when something required is missing or genuinely ambiguous — never interrogate for optional specifics nobody brought up, and never invent a target number, a unit, or an extra field the user didn\'t actually mention. If the user asks for a change before tapping Create, call this again with the revision for a fresh preview.',
     input_schema: {
       type: 'object',
       properties: {
         template: {
           type: 'string',
-          enum: TOOL_TEMPLATES_ENUM,
+          enum: GOAL_TEMPLATES_ENUM,
           description:
             'workout: exercise/sets/reps/weight log. habit: a daily/weekly check-in with a streak. numeric: track a single number over time (pages read, weight, anything countable) toward an optional total. money: track contributions toward a savings/spending goal. journal: freeform entries with an optional rating — for things with no natural number.',
         },
-        name: { type: 'string', description: 'Short name for the tracker, e.g. "Savings for Berlin".' },
+        name: { type: 'string', description: 'Short name for the goal, e.g. "Savings for Berlin".' },
         icon: { type: 'string', enum: ICON_ENUM, description: 'Pick whichever best matches what this tracks.' },
         unit: {
           type: 'string',
@@ -297,12 +297,12 @@ export const AI_TOOLS: Anthropic.Tool[] = [
         },
         currency: {
           type: 'string',
-          description: 'Currency symbol for a money tracker, e.g. "$" — only for template=money.',
+          description: 'Currency symbol for a money goal, e.g. "$" — only for template=money.',
         },
         targetValue: {
           type: 'number',
           description:
-            'The target/goal amount, only if the user actually gave one (e.g. "$2,000", "3 times a week"). Never invent a number they did not say — omit this entirely rather than guess, and a tool without a target is completely fine.',
+            'The target amount, only if the user actually gave one (e.g. "$2,000", "3 times a week"). Never invent a number they did not say — omit this entirely rather than guess, and a goal without a target is completely fine.',
         },
         targetPeriod: {
           type: 'string',
@@ -315,7 +315,7 @@ export const AI_TOOLS: Anthropic.Tool[] = [
             type: 'object',
             properties: {
               label: { type: 'string' },
-              type: { type: 'string', enum: TOOL_FIELD_TYPES_ENUM },
+              type: { type: 'string', enum: GOAL_FIELD_TYPES_ENUM },
               unit: { type: 'string' },
               options: { type: 'array', items: { type: 'string' }, description: 'choice fields only.' },
               required: { type: 'boolean' },
@@ -335,19 +335,19 @@ export const AI_TOOLS: Anthropic.Tool[] = [
     },
   },
   {
-    name: 'edit_tool',
+    name: 'edit_goal',
     description:
-      "Edit an existing tool's name, icon, target amount, unit, or fields — use the tool's ref from the tools list in context, never guess one. Only include what the user actually asked to change; never resend the whole thing. You can: rename the tool or a field, change the target number, change the unit, add new field(s) (max 5 at a time), or remove a field (its past entries keep their data — they just stop showing that field going forward). You cannot change a tool's template type or fully redesign its layout — if the user wants something structurally different, suggest creating a new tool instead of forcing it through this. Applies immediately (it's undoable, unlike create_tool's preview) — state the concrete before/after value when you confirm it.",
+      "Edit an existing goal's name, icon, target amount, unit, or fields — use the goal's ref from the goals list in context, never guess one. Only include what the user actually asked to change; never resend the whole thing. You can: rename the goal or a field, change the target number, change the unit, add new field(s) (max 5 at a time), or remove a field (its past entries keep their data — they just stop showing that field going forward). You cannot change a goal's template type or fully redesign its layout — if the user wants something structurally different, suggest creating a new goal instead of forcing it through this. Applies immediately (it's undoable, unlike create_goal's preview) — state the concrete before/after value when you confirm it.",
     input_schema: {
       type: 'object',
       properties: {
-        toolRef: TOOL_REF_PROPERTY,
-        nameHint: TOOL_NAME_HINT_PROPERTY,
+        goalRef: GOAL_REF_PROPERTY,
+        nameHint: GOAL_NAME_HINT_PROPERTY,
         name: { type: 'string' },
         icon: { type: 'string', enum: ICON_ENUM },
         targetValue: {
           type: 'number',
-          description: "New target/goal amount — only if this tool already has a target to change.",
+          description: "New target amount — only if this goal already has a target to change.",
         },
         unit: { type: 'string' },
         addFields: {
@@ -356,7 +356,7 @@ export const AI_TOOLS: Anthropic.Tool[] = [
             type: 'object',
             properties: {
               label: { type: 'string' },
-              type: { type: 'string', enum: TOOL_FIELD_TYPES_ENUM },
+              type: { type: 'string', enum: GOAL_FIELD_TYPES_ENUM },
               unit: { type: 'string' },
               options: { type: 'array', items: { type: 'string' } },
               required: { type: 'boolean' },
@@ -367,7 +367,7 @@ export const AI_TOOLS: Anthropic.Tool[] = [
         removeFieldRefs: {
           type: 'array',
           items: { type: 'string' },
-          description: 'Field refs to remove, e.g. ["L1.3"] — from that tool\'s [fields: ...] list in context.',
+          description: 'Field refs to remove, e.g. ["G1.3"] — from that goal\'s [fields: ...] list in context.',
         },
         renameFields: {
           type: 'array',
@@ -378,18 +378,18 @@ export const AI_TOOLS: Anthropic.Tool[] = [
           },
         },
       },
-      required: ['toolRef', 'nameHint'],
+      required: ['goalRef', 'nameHint'],
     },
   },
   {
-    name: 'log_tool_entry',
+    name: 'log_goal_entry',
     description:
-      'Log an explicit entry to an existing tool the user just told you about — e.g. "log $150 to savings", "did 3 sets of 10 at 135lb". Only for a value the user actually stated; never invent a missing required field — ask instead. Use the tool\'s ref and its field refs exactly as shown in the tools list in context, e.g. toolRef "L1", fieldRef "L1.1".',
+      'Log an explicit entry to an existing goal the user just told you about — e.g. "log $150 to savings", "did 3 sets of 10 at 135lb". Only for a value the user actually stated; never invent a missing required field — ask instead. Use the goal\'s ref and its field refs exactly as shown in the goals list in context, e.g. goalRef "G1", fieldRef "G1.1".',
     input_schema: {
       type: 'object',
       properties: {
-        toolRef: TOOL_REF_PROPERTY,
-        nameHint: TOOL_NAME_HINT_PROPERTY,
+        goalRef: GOAL_REF_PROPERTY,
+        nameHint: GOAL_NAME_HINT_PROPERTY,
         values: {
           type: 'array',
           items: {
@@ -397,7 +397,7 @@ export const AI_TOOLS: Anthropic.Tool[] = [
             properties: {
               fieldRef: {
                 type: 'string',
-                description: 'A field ref from that tool\'s [fields: ...] list, e.g. "L1.1" — never a guess.',
+                description: 'A field ref from that goal\'s [fields: ...] list, e.g. "G1.1" — never a guess.',
               },
               value: { description: 'The value for that field — a number, text, true/false, or (rating) 1-5.' },
             },
@@ -411,13 +411,13 @@ export const AI_TOOLS: Anthropic.Tool[] = [
             'Optional — only set if the user specified a different time than now (e.g. "log yesterday\'s run").',
         },
       },
-      required: ['toolRef', 'nameHint', 'values'],
+      required: ['goalRef', 'nameHint', 'values'],
     },
   },
   {
     name: 'undo_last_action',
     description:
-      'Reverse the most recent action (a task create/complete/edit/postpone/remove, or a tool create/edit/entry) across chat, the Tasks tab, and the Tools tab. Call this when the user says something like "undo that" or "undo the last thing".',
+      'Reverse the most recent action (a task create/complete/edit/postpone/remove, or a goal create/edit/entry) across chat, the Tasks tab, and the Goals tab. Call this when the user says something like "undo that" or "undo the last thing".',
     input_schema: { type: 'object', properties: {} },
   },
 ];
@@ -459,31 +459,31 @@ const progressTaskToolSchema = z.discriminatedUnion('action', [
 
 const removeTasksItemSchema = z.object({ taskRef: z.string().regex(/^T\d+$/), titleHint: z.string().min(1) });
 
-// toolRef: a turn-scoped alias ("L2"), never a raw database id — same
+// goalRef: a turn-scoped alias ("G2"), never a raw database id — same
 // resolve-then-verify pattern as taskRefSchema above, just against
-// lib/ai/tool-context.ts's tool refs instead of task refs.
-const toolRefSchema = z.object({
-  toolRef: z.string().regex(/^L\d+$/, 'must be a tool ref like "L2", not a database id'),
+// lib/ai/goal-context.ts's goal refs instead of task refs.
+const goalRefSchema = z.object({
+  goalRef: z.string().regex(/^G\d+$/, 'must be a goal ref like "G2", not a database id'),
   nameHint: z.string().min(1),
 });
 
-const toolFieldRefSchema = z
+const goalFieldRefSchema = z
   .string()
-  .regex(/^L\d+\.\d+$/, 'must be a field ref like "L1.1", not a database id');
+  .regex(/^G\d+\.\d+$/, 'must be a field ref like "G1.1", not a database id');
 
-const editToolToolSchema = toolRefSchema.extend({
+const editGoalToolSchema = goalRefSchema.extend({
   name: z.string().trim().min(1).max(60).optional(),
   icon: z.string().trim().max(40).optional(),
   targetValue: z.number().min(0.0001).optional(),
   unit: z.string().trim().max(20).optional(),
-  addFields: z.array(toolFieldInputSchema).max(5).optional(),
-  removeFieldRefs: z.array(toolFieldRefSchema).max(20).optional(),
-  renameFields: z.array(z.object({ fieldRef: toolFieldRefSchema, label: z.string().trim().min(1).max(60) })).max(20).optional(),
+  addFields: z.array(goalFieldInputSchema).max(5).optional(),
+  removeFieldRefs: z.array(goalFieldRefSchema).max(20).optional(),
+  renameFields: z.array(z.object({ fieldRef: goalFieldRefSchema, label: z.string().trim().min(1).max(60) })).max(20).optional(),
 });
 
-const logToolEntryToolSchema = toolRefSchema.extend({
+const logGoalEntryToolSchema = goalRefSchema.extend({
   values: z
-    .array(z.object({ fieldRef: toolFieldRefSchema, value: z.union([z.number(), z.string(), z.boolean()]) }))
+    .array(z.object({ fieldRef: goalFieldRefSchema, value: z.union([z.number(), z.string(), z.boolean()]) }))
     .min(1)
     .max(20),
   entryAt: z.string().optional(),
@@ -500,9 +500,9 @@ export const AI_TOOL_SCHEMAS = {
   postpone_task: taskRefSchema.merge(postponeInputSchema),
   remove_task: taskRefSchema.extend({ scope: scopeSchema }),
   remove_tasks: z.object({ items: z.array(removeTasksItemSchema).min(1).max(50), scope: scopeSchema }),
-  create_tool: createToolParamsSchema,
-  edit_tool: editToolToolSchema,
-  log_tool_entry: logToolEntryToolSchema,
+  create_goal: createGoalParamsSchema,
+  edit_goal: editGoalToolSchema,
+  log_goal_entry: logGoalEntryToolSchema,
   undo_last_action: z.object({}),
 } as const;
 

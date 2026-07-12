@@ -10,7 +10,7 @@ import { streamChatReply, type ChatHistoryMessage } from '../lib/ai/chat.ts';
 import { buildRecentChangesFeed } from '../lib/ai/recent-changes.ts';
 import { buildTailBlock } from '../lib/ai/system-prompt.ts';
 import { buildTaskContext } from '../lib/ai/task-context.ts';
-import { buildToolContext } from '../lib/ai/tool-context.ts';
+import { buildGoalContext } from '../lib/ai/goal-context.ts';
 import { getOrCreateAppConversation, getRecentMessages } from '../lib/conversations.ts';
 import { materializeRecurringInstances } from '../lib/tasks/recurrence.ts';
 import { computeAllowance, withUserChatLock } from '../lib/usage.ts';
@@ -62,8 +62,8 @@ function historyContentFor(m: { content: string; meta: unknown }): string {
     meta?.kind === 'task_action' ||
     meta?.kind === 'task_removal_pending' ||
     meta?.kind === 'task_bulk_removal_pending' ||
-    meta?.kind === 'tool_action' ||
-    meta?.kind === 'tool_preview'
+    meta?.kind === 'goal_action' ||
+    meta?.kind === 'goal_preview'
   )
     return '';
   return m.content;
@@ -130,8 +130,8 @@ messageRoutes.post('/', zValidator('json', sendSchema), async (c) => {
   await materializeRecurringInstances(userId, userContext.timezone, db);
   const taskContext = await buildTaskContext(userId, userContext.timezone);
   // Appends into the same TurnRefs map task context just built — one ref
-  // namespace ("T*"/"L*") covers both tasks and tools for the turn.
-  const toolContext = await buildToolContext(userId, userContext.timezone, taskContext.refs);
+  // namespace ("T*"/"G*") covers both tasks and goals for the turn.
+  const goalContext = await buildGoalContext(userId, userContext.timezone, taskContext.refs);
 
   // Out-of-band mutations (a Tasks-tab tap, a removal-card confirm) since
   // the user's *previous* message are otherwise invisible to the model —
@@ -150,7 +150,7 @@ messageRoutes.post('/', zValidator('json', sendSchema), async (c) => {
     timezone: userContext.timezone,
     counts: taskContext.counts,
     taskListText: taskContext.text,
-    toolListText: toolContext.text,
+    goalListText: goalContext.text,
     recentChangesText,
   });
 
@@ -203,24 +203,24 @@ messageRoutes.post('/', zValidator('json', sendSchema), async (c) => {
             data: JSON.stringify({ message: assistantMessage, task: event.task }),
           });
         } else if (event.type === 'action_preview') {
-          // create_tool never saves — this is a preview card only. Its
-          // meta.preview is exactly what POST /tools {previewMessageId}
+          // create_goal never saves — this is a preview card only. Its
+          // meta.preview is exactly what POST /goals {previewMessageId}
           // re-validates and saves once the user taps Create
-          // (docs/phase-4-implementation-plan.md §1.3).
+          // (docs/goals-redesign-plan.md §2.1).
           const [assistantMessage] = await db
             .insert(messages)
             .values({
               conversationId: conversation.id,
               role: 'assistant',
               content: event.summary,
-              meta: { kind: 'tool_preview', action: event.toolName, preview: event.preview },
+              meta: { kind: 'goal_preview', action: event.toolName, preview: event.preview },
             })
             .returning();
           await stream.writeSSE({
             event: 'action',
             data: JSON.stringify({ message: assistantMessage, preview: event.preview }),
           });
-        } else if (event.type === 'action_tool') {
+        } else if (event.type === 'action_goal') {
           const [assistantMessage] = await db
             .insert(messages)
             .values({
@@ -228,16 +228,16 @@ messageRoutes.post('/', zValidator('json', sendSchema), async (c) => {
               role: 'assistant',
               content: event.summary,
               meta: {
-                kind: 'tool_action',
+                kind: 'goal_action',
                 action: event.toolName,
-                toolId: event.tool.id,
-                tool: event.tool,
+                goalId: event.goal.id,
+                goal: event.goal,
               },
             })
             .returning();
           await stream.writeSSE({
             event: 'action',
-            data: JSON.stringify({ message: assistantMessage, tool: event.tool }),
+            data: JSON.stringify({ message: assistantMessage, goal: event.goal }),
           });
         } else if (event.type === 'action_bulk') {
           // remove_tasks — one card, one confirm, for the whole batch. The
