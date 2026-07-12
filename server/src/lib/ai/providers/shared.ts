@@ -114,6 +114,15 @@ export function sleep(ms: number) {
 // detector) to avoid false-positives on ordinary conversation.
 const FAKE_ACTION_PATTERN =
   /\b(added|removed|deleted|marked|updated|moved|started|paused|logged|created)\b[^.!?]{0,30}["“]/i;
+// Its own pattern, not folded into FAKE_ACTION_PATTERN above — a preview
+// claim needs its own corrective copy (see maybeCorrectFakeAction below),
+// so it has to be distinguishable from the other matches, not just another
+// alternative in the same regex. Observed live (server log, July 12):
+// deepseek-v4-flash twice narrated a specific create_tool preview
+// ("Preview's up — Chest Day tracker… tap Create") with zero tool calls
+// (docs/goals-redesign-plan.md §2.6) — the classifier caught both, but the
+// free regex tier should catch this shape without waiting on it.
+const PREVIEW_CLAIM_PATTERN = /\b(preview|card)('s| is)? (up|sent|ready)|sent you a preview|tap create\b/i;
 // Second, independent signal: a literal mention of one of our tool names
 // in bracket notation. Legitimate replies never look like this — the only
 // known source was the model reproducing an internal history-compaction
@@ -176,7 +185,9 @@ export function createTurnState(actionCtx: ChatActionContext) {
     const text = emittedSegments.join(' ');
     if (!text.trim()) return;
 
+    const matchedPreviewClaim = PREVIEW_CLAIM_PATTERN.test(text);
     const matchedRegex =
+      matchedPreviewClaim ||
       FAKE_ACTION_PATTERN.test(text) ||
       TOOL_NAME_LEAK_PATTERN.test(text) ||
       RAW_TOOL_CALL_MARKUP_PATTERN.test(text);
@@ -188,6 +199,7 @@ export function createTurnState(actionCtx: ChatActionContext) {
         sourceMessageId: actionCtx.sourceMessageId,
         claim_check: claimed ? 'yes' : 'no',
         matched_regex: matchedRegex,
+        matched_preview_claim: matchedPreviewClaim,
       },
       'claim-check verdict',
     );
@@ -198,9 +210,15 @@ export function createTurnState(actionCtx: ChatActionContext) {
       { userId: actionCtx.userId, sourceMessageId: actionCtx.sourceMessageId, segments: emittedSegments },
       'chat turn self-corrected a likely unconfirmed action',
     );
+    // A preview/card claim gets a truthful, specific correction instead of
+    // the generic one — the failure here is always "no preview exists yet,"
+    // not an ambiguous "something may not have gone through"
+    // (docs/goals-redesign-plan.md §2.6 item 3).
     yield {
       type: 'segment_end',
-      text: "Hold on — I don't think that actually went through. Mind trying that again?",
+      text: matchedPreviewClaim
+        ? "Hm, that preview didn't actually go through — ask me again?"
+        : "Hold on — I don't think that actually went through. Mind trying that again?",
     };
   }
 
