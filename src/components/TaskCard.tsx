@@ -1,7 +1,13 @@
 import * as Haptics from 'expo-haptics';
 import { useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import Animated, { Easing, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
+import Animated, {
+  Easing,
+  useAnimatedStyle,
+  useSharedValue,
+  withSequence,
+  withTiming,
+} from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
 
 import { radii, theme } from '@/constants/theme';
@@ -320,22 +326,56 @@ export function TaskCard({
   );
 }
 
+// A brief bounce + glow the instant a task flips to done — satisfying, not
+// distracting (docs/goals-redesign-plan.md §2.5's micro-interactions).
+// Watches the `done` transition itself (not just "is done") so it never
+// replays on every re-render of an already-completed task, only the moment
+// it actually completes.
+function useCompletionPop(done: boolean) {
+  const scale = useSharedValue(1);
+  const glow = useSharedValue(0);
+  const wasDone = useRef(done);
+
+  useEffect(() => {
+    if (done && !wasDone.current) {
+      scale.value = withSequence(
+        withTiming(1.35, { duration: 140, easing: Easing.out(Easing.cubic) }),
+        withTiming(1, { duration: 220, easing: Easing.out(Easing.back(1.8)) }),
+      );
+      glow.value = withSequence(withTiming(1, { duration: 140 }), withTiming(0, { duration: 400 }));
+    }
+    wasDone.current = done;
+  }, [done, scale, glow]);
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: scale.value }],
+    shadowColor: theme.blue,
+    shadowOpacity: glow.value * 0.9,
+    shadowRadius: glow.value * 10,
+    shadowOffset: { width: 0, height: 0 },
+  }));
+
+  return animatedStyle;
+}
+
 /** Non-interactive status circle — filled + checked when done, empty ring when open. */
 function StatusDot({ done }: { done: boolean }) {
+  const popStyle = useCompletionPop(done);
   return (
-    <View style={[styles.checkbox, done && styles.checkboxOn]}>
+    <Animated.View style={[styles.checkbox, done && styles.checkboxOn, popStyle]}>
       {done && <Icon name="check" size={14} color="#fff" stroke={2.6} />}
-    </View>
+    </Animated.View>
   );
 }
 
 /** Duration's status indicator: blue while running, gray while idle, a checkmark once done. */
 function DurationStatusDot({ done, running }: { done: boolean; running: boolean }) {
   const highlighted = done || running;
+  const popStyle = useCompletionPop(done);
   return (
-    <View style={[styles.checkbox, highlighted && styles.checkboxOn]}>
+    <Animated.View style={[styles.checkbox, highlighted && styles.checkboxOn, popStyle]}>
       <Icon name={done ? 'check' : 'clock'} size={done ? 14 : 15} color={highlighted ? '#fff' : theme.dim} stroke={done ? 2.6 : 2} />
-    </View>
+    </Animated.View>
   );
 }
 

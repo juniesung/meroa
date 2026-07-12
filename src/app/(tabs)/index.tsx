@@ -23,7 +23,7 @@ import Animated, {
 import { AnimatedPressable, useTapFeedback } from '@/components/AnimatedPressable';
 import { Bubble } from '@/components/Bubble';
 import { Icon } from '@/components/Icon';
-import { MeroaMark } from '@/components/MeroaMark';
+import { MeroaMark, type MeroaMood } from '@/components/MeroaMark';
 import { TaskCard } from '@/components/TaskCard';
 import { radii, theme } from '@/constants/theme';
 import { type ChatMessage, useMessages, useSendMessage } from '@/features/chat/queries';
@@ -34,7 +34,7 @@ import {
   useProgressTask,
   useTasks,
 } from '@/features/tasks/queries';
-import { useCreateGoalFromPreview, useGoals } from '@/features/goals/queries';
+import { useCreateGoalFromPreview, useGoalConsistency, useGoals } from '@/features/goals/queries';
 import { useTabBarHeight } from '@/hooks/use-tab-bar-inset';
 import type { ApiTask, GoalPreview, StarterTask } from '@/lib/api/types';
 import { toIconName } from '@/lib/icon';
@@ -389,6 +389,13 @@ export default function ChatScreen() {
   const attachFeedback = useTapFeedback();
   const micSendFeedback = useTapFeedback(0.9);
   const tabBarHeight = useTabBarHeight();
+  // Mascot-lite reacts here too, not just the Goals tab header
+  // (docs/goals-redesign-plan.md §1) — same mood derivation as goals.tsx.
+  const { data: consistency } = useGoalConsistency();
+  const streakCurrent = consistency?.current ?? 0;
+  const streakLongest = consistency?.longest ?? 0;
+  const headerMood: MeroaMood =
+    streakCurrent >= 3 ? 'warm' : streakCurrent === 0 && streakLongest > 0 ? 'deflated' : 'idle';
 
   // The first scroll (loading a long history on open) snaps instantly —
   // animating through dozens of bubbles looks like a bug, and a large
@@ -434,7 +441,7 @@ export default function ChatScreen() {
     <SafeAreaView style={styles.safe} edges={['top']}>
       <View style={styles.header}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-          <MeroaMark size={26} glow />
+          <MeroaMark size={26} glow mood={headerMood} />
           <View>
             <Text style={styles.title}>Meroa</Text>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
