@@ -122,7 +122,21 @@ const FAKE_ACTION_PATTERN =
 // ("Preview's up — Chest Day tracker… tap Create") with zero tool calls
 // (docs/goals-redesign-plan.md §2.6) — the classifier caught both, but the
 // free regex tier should catch this shape without waiting on it.
-const PREVIEW_CLAIM_PATTERN = /\b(preview|card)('s| is)? (up|sent|ready)|sent you a preview|tap create\b/i;
+//
+// Widened after the §4 acceptance protocol's hallucination probe caught a
+// live miss this original version didn't: "Sending a preview your way —
+// **$500 laptop fund**... Check the card and tap **Create**" scored
+// matched_regex: false AND claim_check: no (the classifier's prompt didn't
+// name a preview claim as a qualifying case either — fixed in
+// claim-check.ts's CLASSIFIER_SYSTEM_PROMPT alongside this). Two gaps: (1)
+// present-tense "sending"/"here's" phrasing the original verb list didn't
+// cover, (2) "tap **Create**" — markdown bold sits between "tap" and
+// "Create", breaking the literal-adjacency assumption in the old `tap
+// create\b` alternative. `\**` between words below tolerates that; testing
+// against the markdown-stripped `text` in maybeCorrectFakeAction handles it
+// more generally for every pattern, not just this one.
+const PREVIEW_CLAIM_PATTERN =
+  /\b(preview|card)('s| is)?\s*(up|sent|ready)|(sending|sent|here'?s)\s+(you\s+)?(a|the)\s+(preview|card)|tap\s*\**\s*create\b/i;
 // Second, independent signal: a literal mention of one of our tool names
 // in bracket notation. Legitimate replies never look like this — the only
 // known source was the model reproducing an internal history-compaction
@@ -184,12 +198,18 @@ export function createTurnState(actionCtx: ChatActionContext) {
     if (toolCallLog.length > 0) return;
     const text = emittedSegments.join(' ');
     if (!text.trim()) return;
+    // Markdown bold/italic markers can sit right inside a phrase a pattern
+    // expects as literally adjacent (e.g. "tap **Create**") — stripped once
+    // here so every regex below matches on the words, not the formatting
+    // around them (docs/goals-redesign-plan.md §2.6, found live by the §4
+    // acceptance protocol's hallucination probe).
+    const stripped = text.replace(/[*_]{1,3}/g, '');
 
-    const matchedPreviewClaim = PREVIEW_CLAIM_PATTERN.test(text);
+    const matchedPreviewClaim = PREVIEW_CLAIM_PATTERN.test(stripped);
     const matchedRegex =
       matchedPreviewClaim ||
-      FAKE_ACTION_PATTERN.test(text) ||
-      TOOL_NAME_LEAK_PATTERN.test(text) ||
+      FAKE_ACTION_PATTERN.test(stripped) ||
+      TOOL_NAME_LEAK_PATTERN.test(stripped) ||
       RAW_TOOL_CALL_MARKUP_PATTERN.test(text);
     const claimed = await didClaimAction(emittedSegments);
 
