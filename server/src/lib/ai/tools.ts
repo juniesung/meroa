@@ -370,7 +370,7 @@ export const AI_TOOLS: Anthropic.Tool[] = [
   {
     name: 'edit_goal',
     description:
-      "Edit an existing goal's name or icon (any type), a savings or indirect goal's target amount or deadline, or an indirect goal's unit — use the goal's ref from the goals list in context, never guess one. A habit goal has no target, deadline, or unit to edit. Only include what the user actually asked to change; never resend the whole thing. Applies immediately (it's undoable, unlike create_goal's preview) — state the concrete before/after value when you confirm it.",
+      "Edit an existing goal's name or icon (any type), a savings or indirect goal's target amount or deadline, or an indirect goal's unit — use the goal's ref from the goals list in context, never guess one. A habit goal has no target, deadline, or unit to edit. An indirect goal's unit can only be changed before it has any logged entries — changing it afterward would relabel real history instead of converting it, so the call fails once entries exist; tell the user to start a new goal instead if that happens. Only include what the user actually asked to change; never resend the whole thing. Applies immediately (it's undoable, unlike create_goal's preview) — state the concrete before/after value when you confirm it.",
     input_schema: {
       type: 'object',
       properties: {

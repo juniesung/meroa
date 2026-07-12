@@ -310,6 +310,27 @@ export async function editGoal(
     const goal = await loadGoalForUpdate(tx, userId, goalId);
     const currentDefinition = goal.definition as GoalDefinition;
 
+    // A unit is only a display label, not stored per entry — changing it
+    // after entries exist would silently relabel real history rather than
+    // convert it (a "steps" log reading as "12,000mi" after a rename,
+    // caught live). Locked once the goal has any live entry; the user's
+    // explicit call after seeing that happen — start a new goal instead if
+    // the unit genuinely needs to change.
+    if (patch.unit !== undefined && currentDefinition.type === 'indirect') {
+      const [existingEntry] = await tx
+        .select({ id: goalEntries.id })
+        .from(goalEntries)
+        .innerJoin(records, eq(goalEntries.recordId, records.id))
+        .where(and(eq(goalEntries.goalId, goalId), isNull(records.revertedAt)))
+        .limit(1);
+      if (existingEntry) {
+        throw new GoalActionError(
+          'invalid_input',
+          `"${goal.name}" already has logged entries in "${currentDefinition.unit}" — changing the unit now would relabel that history instead of converting it, so it can't be changed. Start a new goal instead if the unit needs to change.`,
+        );
+      }
+    }
+
     const prior = { name: goal.name, icon: goal.icon, definition: goal.definition, version: goal.version };
 
     const name = patch.name ?? goal.name;
