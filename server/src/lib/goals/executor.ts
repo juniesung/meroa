@@ -173,12 +173,16 @@ export async function createGoal(
         // record" pick nondeterministic.
         { skipRecord: true },
       );
-      // Recurring: createTaskInTx already materialized and returned *today's*
-      // instance, not the template — the template needs the stamp too (every
-      // future instance reads goalContribution off the template's config at
-      // materialization time — recurrence.ts's resetConfigForNewInstance),
-      // and if today's instance already exists it needs its own copy right
-      // now rather than waiting for tomorrow's materialization.
+      // Recurring: createTaskInTx materialized instances from the template
+      // BEFORE the goal link exists on it (the stamp below) — so every
+      // instance row that materialization just created must be stamped too,
+      // not only the template. Crucially that is NOT always just today's:
+      // the first-ever-run bump in recurrence.ts can materialize the first
+      // instance for *tomorrow* (a daily time that already passed — hit
+      // live: the model set time "11:53" at 11:53:38, the instance landed
+      // on tomorrow, was never returned as "today's instance", stayed
+      // unlinked, and completing it moved nothing). Stamping every instance
+      // of the template closes that hole for any occurrence date.
       const templateId = created.templateId ?? created.id;
       const [templateRow] = await tx.select().from(tasks).where(eq(tasks.id, templateId)).limit(1);
       if (!templateRow) throw new Error('task_insert_failed');
@@ -192,20 +196,22 @@ export async function createGoal(
         .returning();
       if (!updatedTemplate) throw new Error('task_update_failed');
 
-      if (created.id === templateId) {
-        createdTasks.push(updatedTemplate);
-      } else {
+      const instances = await tx.select().from(tasks).where(eq(tasks.templateId, templateId));
+      let returnedInstance: TaskRow | null = null;
+      for (const instance of instances) {
         const [updatedInstance] = await tx
           .update(tasks)
           .set({
             goalId: goal.id,
-            config: { ...(created.config as Record<string, unknown>), goalContribution: starter.contribution },
+            config: { ...(instance.config as Record<string, unknown>), goalContribution: starter.contribution },
           })
-          .where(eq(tasks.id, created.id))
+          .where(eq(tasks.id, instance.id))
           .returning();
         if (!updatedInstance) throw new Error('task_update_failed');
-        createdTasks.push(updatedInstance);
+        if (created.id === instance.id) returnedInstance = updatedInstance;
       }
+
+      createdTasks.push(returnedInstance ?? updatedTemplate);
     }
 
     // The goal_created record is inserted *after* the starter tasks' own

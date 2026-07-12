@@ -308,7 +308,11 @@ export const AI_TOOLS: Anthropic.Tool[] = [
                   freq: { type: 'string', enum: ['daily', 'weekly', 'every_n_days'] },
                   byWeekday: { type: 'array', items: { type: 'string', enum: ['mo', 'tu', 'we', 'th', 'fr', 'sa', 'su'] } },
                   n: { type: 'number' },
-                  time: { type: 'string' },
+                  time: {
+                    type: 'string',
+                    description:
+                      'Local "HH:mm" — ONLY if the user actually said a time of day. Never invent one, and never copy the current clock time from context; omit entirely for a plain "daily" (observed live: an invented just-passed time silently pushed the first occurrence to tomorrow).',
+                  },
                 },
               },
               contribution: {
