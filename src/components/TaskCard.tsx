@@ -11,6 +11,7 @@ import Animated, {
 import { LinearGradient } from 'expo-linear-gradient';
 
 import { radii, theme } from '@/constants/theme';
+import { useGoals } from '@/features/goals/queries';
 import { useMe } from '@/features/profile/queries';
 import { useLiveNow } from '@/hooks/use-live-now';
 import type { ApiTask, ChecklistConfig, CounterConfig, DurationConfig } from '@/lib/api/types';
@@ -166,6 +167,23 @@ function metaText(
   return undefined;
 }
 
+// "$5 → Rave savings" for a savings link, "→ Daily meditation" for habit/
+// indirect (a linked task's own contribution is savings-only) — null when
+// the task isn't goal-linked or its goal isn't loaded yet.
+function goalLinkLabel(
+  task: ApiTask,
+  goals: { id: string; name: string; definition: { type: string; currency?: string } }[] | undefined,
+): string | null {
+  if (!task.goalId) return null;
+  const goal = goals?.find((g) => g.id === task.goalId);
+  if (!goal) return null;
+  const contribution = (task.config as { goalContribution?: number }).goalContribution;
+  if (goal.definition.type === 'savings' && typeof contribution === 'number') {
+    return `${goal.definition.currency}${contribution} → ${goal.name}`;
+  }
+  return `→ ${goal.name}`;
+}
+
 function counterPct(c: CounterConfig): number {
   return c.target > 0 ? Math.min(100, Math.round((c.count / c.target) * 100)) : 0;
 }
@@ -232,7 +250,9 @@ export function TaskCard({
   // continuously on the UI thread (see LiveDurationBar) independent of this.
   const now = useLiveNow(running);
   const { data: me } = useMe();
+  const { data: goals } = useGoals();
   const meta = metaText(task, now, me?.user.timezone);
+  const goalLabel = goalLinkLabel(task, goals);
   const rim = useRimHighlight();
 
   // Server-side auto-complete only runs when a progress action actually
@@ -300,6 +320,14 @@ export function TaskCard({
               {task.templateId && <Icon name="repeat" size={12} color={theme.faint} stroke={2.2} />}
             </View>
             {meta && <Text style={[styles.meta, meta.danger && styles.metaDanger]}>{meta.text}</Text>}
+            {goalLabel && (
+              <View style={styles.goalChip}>
+                <Icon name="goals" size={10} color={theme.blue} stroke={2.4} />
+                <Text style={styles.goalChipText} numberOfLines={1}>
+                  {goalLabel}
+                </Text>
+              </View>
+            )}
           </View>
         </Pressable>
 
@@ -499,6 +527,14 @@ const styles = StyleSheet.create({
   title: { color: theme.text, fontSize: 15, fontWeight: '600', flexShrink: 1 },
   meta: { color: theme.dim, fontSize: 12, marginTop: 2 },
   metaDanger: { color: theme.danger },
+  goalChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 4,
+    alignSelf: 'flex-start',
+  },
+  goalChipText: { color: theme.blue, fontSize: 11, fontWeight: '600' },
   strike: { textDecorationLine: 'line-through', color: theme.dim },
   checkbox: {
     width: 24,

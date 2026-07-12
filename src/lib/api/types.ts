@@ -95,6 +95,12 @@ type SharedCreateFields = {
   note?: string;
   recurrence?: Recurrence;
   reminder?: boolean;
+  // Link to an existing goal at creation time — completing this task (or
+  // its recurring instances) will count toward it. goalContribution is
+  // required for a savings goal, forbidden for habit/indirect (server-
+  // enforced; see server/src/lib/tasks/executor.ts's validateGoalLinkTarget).
+  goalId?: string;
+  goalContribution?: number;
 };
 
 export type CreateTaskInput =
@@ -114,6 +120,9 @@ export type EditTaskPatch = {
   unit?: string;
   targetMinutes?: number;
   reminder?: boolean;
+  // null unlinks; undefined leaves the current link untouched.
+  goalId?: string | null;
+  goalContribution?: number;
 };
 
 export type ProgressInput =

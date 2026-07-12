@@ -9,6 +9,7 @@ import { PrimaryButton } from '@/components/PrimaryButton';
 import { Icon, type IconName } from '@/components/Icon';
 import { isOverdue } from '@/components/TaskCard';
 import { useMe } from '@/features/profile/queries';
+import { useGoals } from '@/features/goals/queries';
 import { radii, theme } from '@/constants/theme';
 import type {
   ApiTask,
@@ -143,6 +144,30 @@ function TaskFormBody({ task, onClose }: { task?: ApiTask; onClose: () => void }
     () => !!(task?.config as { reminder?: boolean } | undefined)?.reminder,
   );
 
+  // Goal link — "None" plus every live goal, filtered to what this task
+  // could actually count toward: a habit goal needs a recurring check-in
+  // task, so it's only offered once the task already repeats (edit) or the
+  // user has picked a repeat schedule below (create). goalTouched mirrors
+  // dueTouched: only send goalId on an edit if the user actually opened
+  // this picker, so an unrelated field edit never silently re-sends
+  // (and re-records) the task's existing link.
+  const { data: goals = [] } = useGoals();
+  const [goalId, setGoalId] = useState<string | null>(task?.goalId ?? null);
+  const [goalTouched, setGoalTouched] = useState(false);
+  const [contribution, setContribution] = useState(() => {
+    const c = (task?.config as { goalContribution?: number } | undefined)?.goalContribution;
+    return c !== undefined ? String(c) : '';
+  });
+  const willRepeat = isTemplate || (!isEdit && recurrenceChoice !== 'none');
+  const linkableGoals = goals.filter((g) => g.definition.type !== 'habit' || willRepeat);
+  const selectedGoal = goalId ? goals.find((g) => g.id === goalId) : undefined;
+  const selectedGoalNeedsContribution = selectedGoal?.definition.type === 'savings';
+
+  function goalContributionValid() {
+    if (!goalId || !selectedGoalNeedsContribution) return true;
+    return Number.isFinite(Number(contribution)) && Number(contribution) > 0;
+  }
+
   const submitting = createTask.isPending || editTask.isPending;
 
   function validTitle() {
@@ -169,7 +194,7 @@ function TaskFormBody({ task, onClose }: { task?: ApiTask; onClose: () => void }
   }
 
   function canSubmit() {
-    return validTitle() && recurrenceValid() && targetValid();
+    return validTitle() && recurrenceValid() && targetValid() && goalContributionValid();
   }
 
   function toggleWeekday(day: Weekday) {
@@ -210,12 +235,24 @@ function TaskFormBody({ task, onClose }: { task?: ApiTask; onClose: () => void }
         if (!Number.isFinite(n) || n <= 0) return;
         patch.targetMinutes = n;
       }
+      if (goalTouched) {
+        patch.goalId = goalId;
+        if (goalId && selectedGoalNeedsContribution) patch.goalContribution = Number(contribution);
+      }
       editTask.mutate({ id: task.id, patch }, { onSuccess: onClose });
       return;
     }
 
     const dueAt = buildDueAtIso(dueChoice, dueTime);
-    const shared = { title: title.trim(), icon, dueAt, recurrence, reminder };
+    const shared = {
+      title: title.trim(),
+      icon,
+      dueAt,
+      recurrence,
+      reminder,
+      goalId: goalId ?? undefined,
+      goalContribution: goalId && selectedGoalNeedsContribution ? Number(contribution) : undefined,
+    };
     let input: CreateTaskInput;
     switch (type) {
       case 'completion':
@@ -402,6 +439,46 @@ function TaskFormBody({ task, onClose }: { task?: ApiTask; onClose: () => void }
             placeholderTextColor={theme.faint}
             style={styles.input}
           />
+        </>
+      )}
+
+      {linkableGoals.length > 0 && (
+        <>
+          <FieldLabel>GOAL (OPTIONAL)</FieldLabel>
+          <View style={styles.chipRow}>
+            <Chip
+              label="None"
+              selected={!goalId}
+              onPress={() => {
+                setGoalId(null);
+                setGoalTouched(true);
+              }}
+            />
+            {linkableGoals.map((g) => (
+              <Chip
+                key={g.id}
+                label={g.name}
+                selected={goalId === g.id}
+                onPress={() => {
+                  setGoalId(g.id);
+                  setGoalTouched(true);
+                }}
+              />
+            ))}
+          </View>
+          {selectedGoalNeedsContribution && (
+            <>
+              <FieldLabel>AMOUNT PER COMPLETION</FieldLabel>
+              <TextInput
+                value={contribution}
+                onChangeText={setContribution}
+                keyboardType="decimal-pad"
+                placeholder="5"
+                placeholderTextColor={theme.faint}
+                style={styles.input}
+              />
+            </>
+          )}
         </>
       )}
 
