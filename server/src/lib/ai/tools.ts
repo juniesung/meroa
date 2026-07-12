@@ -398,6 +398,25 @@ export const OPENAI_AI_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = AI_
   },
 }));
 
+// The action pass's escape hatch (providers/act-narrate.ts): tool_choice is
+// forced there, so "this message needs no task/goal action" must itself be
+// expressible as a call. Never included in the single-pass tool list, never
+// executed against the DB — the orchestrator treats it as "skip to the
+// narrate pass."
+export const NO_ACTION_TOOL_NAME = 'no_action';
+export const OPENAI_ACTION_PASS_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
+  ...OPENAI_AI_TOOLS,
+  {
+    type: 'function',
+    function: {
+      name: NO_ACTION_TOOL_NAME,
+      description:
+        "The user's newest message requires no task/goal action this turn — it's conversation, a question, a status check, feelings, or something a reply alone should handle (including asking for a missing required detail). Call this instead of guessing at an action.",
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+];
+
 // taskRef: a turn-scoped alias ("T2"), never a raw database id — resolved
 // server-side against the current TurnRefs map (lib/ai/actions.ts) before
 // anything executes, so a hallucinated or out-of-range ref is rejected

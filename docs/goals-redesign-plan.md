@@ -386,6 +386,47 @@ recap-tolerant classifier); history-over-context narration in long sessions (sta
 totals, a never-created goal recalled as existing); currency contamination across
 goals in one conversation (€ leaked from an Oktoberfest goal onto a parking ticket).
 
+## The act/narrate split (2026-07-12) — built, measured, kept on
+
+The deferred split from docs/ai-reliability-hardening.md, built once the measured
+zero-call claim rate justified it (16% of all turns; 4/5 first-try failures on the
+creation probe). Design (providers/act-narrate.ts, AI_ACT_NARRATE=on default for the
+OpenAI-compatible providers; 'off' = instant rollback to the single-pass loop):
+
+- **Action pass, isolated context**: action-only prompt + the volatile state block +
+  the last 4 messages only, non-streamed, tool choice forced (real tool or a
+  `no_action` escape). Saved state lives in the live lists; pending state — the one
+  thing that exists nowhere but conversation, an un-tapped preview — is promoted into
+  the state block (lib/ai/pending-preview.ts, derived from already-fetched history,
+  unit tested). Deep history, the measured contamination source (failures clustered on
+  creations 2..N after "Preview's up" replies piled up), never enters this pass.
+- **Narrate pass, full context**: personality prompt + full history + the pass-1
+  results injected as authoritative facts, tools disabled, extra output headroom
+  (flash's invisible reasoning once ate the whole shared budget and produced an empty
+  reply). Claim-check stays as the backstop on no-action turns.
+- Found live: flash's thinking mode 400s on tool_choice 'required' — handled with a
+  remembered per-model fallback to 'auto'; degradation is graceful because pass-1
+  prose is discarded, so a miss becomes an honest no-action, never a false claim.
+
+**Before/after, same model, same test shapes (fresh account, live server):**
+
+| Metric | single-pass baseline | act/narrate split |
+| --- | --- | --- |
+| Zero-call false claims | 15 / 92 turns (16%) | **0 / 21 turns** |
+| Corrections appended | 15 (+1 missed catch) | **0** |
+| Creation probe (5 varied asks) | 1/5 called the tool first try | **5/5** |
+| Raw markup leaks | 2 | 0 |
+| Empty replies | 2 | 1 (headroom fix landed after) |
+
+Also verified through the split: pending-preview revision across a 3-turn chitchat
+gap ("make it $120" resolved from state, not window), the bench create+log chain,
+two-turn intent flows ("1500 by christmas" after being asked the amount), starter
+tasks in previews, re-report guard, explicit unmark, remove_goal + chained undo,
+ad-hoc entries, accurate recap and streak answers. Remaining observed wobble class:
+occasional imprecise *prose* around correct actions ("then I'll set up the weekly
+task" for a starter already in the preview) — factual drift in narration with the
+facts also on screen, never a false success claim. Cost: two model calls per turn.
+
 ## §4 results (2026-07-12, deepseek-v4-flash, isolated dev-token account +15555559911)
 
 Ran end-to-end against the live server (not a simulation) — real chat turns through the

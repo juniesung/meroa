@@ -13,6 +13,12 @@ const schema = z.object({
   OPENAI_MODEL: z.string().default('gpt-4o-mini'),
   DEEPSEEK_API_KEY: z.string().optional(),
   DEEPSEEK_MODEL: z.string().default('deepseek-v4-flash'),
+  // The act/narrate split (providers/act-narrate.ts): an isolated,
+  // forced-tool-choice action pass followed by a full-context narrate pass.
+  // 'off' falls back to the original single-pass loop for the
+  // OpenAI-compatible providers — kept as an instant rollback lever and for
+  // A/B comparison of the false-claim rate (docs/goals-redesign-plan.md).
+  AI_ACT_NARRATE: z.enum(['on', 'off']).default('on'),
   // The claim-check classifier (lib/ai/claim-check.ts) always calls
   // DeepSeek regardless of AI_PROVIDER — cheapest option for a ~100-token
   // yes/no call that runs on every zero-tool-call turn. Falls back to the

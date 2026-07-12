@@ -44,6 +44,25 @@ You can create, edit, complete, postpone, and remove tasks, and undo the last ch
 - No emoji unless it fits how the user themselves texts.
 - Most replies are a single text. When it genuinely reads like more than one — an acknowledgment landing separately from the thought that follows it, two distinct reactions, a quick reply plus an unrelated follow-up — send them as separate texts by leaving one blank line between them. A blank line means "these are two separate messages," not a paragraph break. Never split a single sentence, or a setup and its punchline, across two texts just to seem chattier.`;
 
+// The act/narrate split's ACTION pass prompt (providers/act-narrate.ts) —
+// tool rules only, none of the personality prose. This pass runs on an
+// isolated context (live lists + a tiny recent-turn window), decides, and
+// acts; a second full-context pass does the talking. Deliberately short:
+// everything entity-shaped the model needs is in the state block, and the
+// less prose here, the less there is to pattern-complete instead of acting.
+export const ACTION_SYSTEM_PROMPT = `You are the action-selection layer for Meroa, a task and savings-goal companion app. Your ONLY job this pass: decide which tool call (if any) the user's newest message requires, and make it. You never write the reply — a separate pass does that afterward. Do not produce prose; produce tool calls.
+
+Rules:
+- The task list, goals list, and pending-preview line in context are the complete, current truth. Anything not listed does not exist.
+- Use refs exactly as listed ("T2", "G1") — never invented, never from memory.
+- create_task only for a clearly-stated concrete to-do; never invent numbers, times, or dates the user didn't give. If something required is missing (e.g. a savings goal with no amount), call no_action — the reply pass will ask.
+- create_goal renders a preview card (it saves nothing). If a pending preview is shown in context and the user wants it changed, call create_goal again with the FULL revised version. A target amount is required.
+- Completing a goal-linked task IS the goal logging (auto-logs its amount) — never also log_goal_entry for the same money. log_goal_entry only for amounts outside a task.
+- A done task stays done — to un-mark one the user says they did NOT do, use complete_task with reopen: true.
+- remove_task/remove_tasks show a confirm card — call them as soon as the target is clear. remove_goal applies immediately — only on clear, stated intent to remove (a "maybe" gets no_action; the reply pass will ask).
+- "undo that" -> undo_last_action.
+- If the message needs no task/goal action at all — conversation, questions, status recaps, feelings, anything else — call no_action. When in doubt between acting on a guess and no_action, choose no_action.`;
+
 export type ChatUserContext = { displayName: string | null; timezone: string | null };
 
 export function buildSystemPrompt(user: ChatUserContext): string {
@@ -66,6 +85,10 @@ export type TailBlockInput = {
   // by lib/goals/consistency.ts, never derived here (docs/goals-redesign-
   // plan.md §2.4).
   streakText: string;
+  // The one piece of pending (unsaved) state that exists nowhere but the
+  // conversation: an un-tapped create_goal preview
+  // (lib/ai/pending-preview.ts). '' when nothing is pending.
+  pendingPreviewText: string;
 };
 
 /**
@@ -101,6 +124,7 @@ export function buildTailBlock(input: TailBlockInput): string {
     '# Their goals',
     input.goalListText,
   ];
+  if (input.pendingPreviewText) parts.push('', '# Pending preview', input.pendingPreviewText);
   if (input.recentChangesText) parts.push('', input.recentChangesText);
   parts.push(
     '',

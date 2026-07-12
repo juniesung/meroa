@@ -11,6 +11,7 @@ import { buildRecentChangesFeed } from '../lib/ai/recent-changes.ts';
 import { buildTailBlock } from '../lib/ai/system-prompt.ts';
 import { buildTaskContext } from '../lib/ai/task-context.ts';
 import { buildGoalContext } from '../lib/ai/goal-context.ts';
+import { findPendingPreview, renderPendingPreview } from '../lib/ai/pending-preview.ts';
 import { buildGoalConsistency } from '../lib/goals/consistency.ts';
 import { getOrCreateAppConversation, getRecentMessages } from '../lib/conversations.ts';
 import { materializeRecurringInstances } from '../lib/tasks/recurrence.ts';
@@ -156,6 +157,12 @@ messageRoutes.post('/', zValidator('json', sendSchema), async (c) => {
     previousUserMessage?.createdAt ?? null,
   );
 
+  // Pending (unsaved) preview state — derived from the history already
+  // fetched above, no extra query. The act/narrate action pass depends on
+  // this: it sees only a tiny recent-turn window, so "make it $120 instead"
+  // must resolve against state rather than deep history.
+  const pendingPreviewText = renderPendingPreview(findPendingPreview(history));
+
   const tailText = buildTailBlock({
     now: new Date(),
     timezone: userContext.timezone,
@@ -164,6 +171,7 @@ messageRoutes.post('/', zValidator('json', sendSchema), async (c) => {
     goalListText: goalContext.text,
     recentChangesText,
     streakText,
+    pendingPreviewText,
   });
 
   return streamSSE(c, async (stream) => {

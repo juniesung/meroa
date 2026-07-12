@@ -5,6 +5,7 @@ import { logger } from '../../../logger.ts';
 import { executeAiToolCall } from '../actions.ts';
 import { buildSystemPrompt, type ChatUserContext } from '../system-prompt.ts';
 import { OPENAI_AI_TOOLS } from '../tools.ts';
+import { streamChatReplyActNarrate } from './act-narrate.ts';
 import {
   buildTailedMessages,
   createTurnState,
@@ -35,6 +36,14 @@ export async function* streamChatReplyDeepseek(
   tailText: string,
   actionCtx: ChatActionContext,
 ): AsyncGenerator<ChatStreamEvent> {
+  // The act/narrate split is the default — this file's single-pass loop
+  // below is the AI_ACT_NARRATE=off rollback path (kept for A/B comparison
+  // of the false-claim rate; see providers/act-narrate.ts).
+  if (env.AI_ACT_NARRATE === 'on') {
+    yield* streamChatReplyActNarrate(client, env.DEEPSEEK_MODEL, 'max_tokens', history, user, tailText, actionCtx);
+    return;
+  }
+
   const windowed = windowHistory(history).filter((m) => m.content.trim().length > 0);
 
   // See providers/shared.ts's buildTailedMessages: stable prefix first, the

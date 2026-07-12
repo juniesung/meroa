@@ -5,6 +5,7 @@ import { logger } from '../../../logger.ts';
 import { executeAiToolCall } from '../actions.ts';
 import { buildSystemPrompt, type ChatUserContext } from '../system-prompt.ts';
 import { OPENAI_AI_TOOLS } from '../tools.ts';
+import { streamChatReplyActNarrate } from './act-narrate.ts';
 import {
   buildTailedMessages,
   createTurnState,
@@ -33,6 +34,21 @@ export async function* streamChatReplyOpenai(
   tailText: string,
   actionCtx: ChatActionContext,
 ): AsyncGenerator<ChatStreamEvent> {
+  // The act/narrate split is the default — the single-pass loop below is
+  // the AI_ACT_NARRATE=off rollback path (see providers/act-narrate.ts).
+  if (env.AI_ACT_NARRATE === 'on') {
+    yield* streamChatReplyActNarrate(
+      client,
+      env.OPENAI_MODEL,
+      'max_completion_tokens',
+      history,
+      user,
+      tailText,
+      actionCtx,
+    );
+    return;
+  }
+
   const windowed = windowHistory(history).filter((m) => m.content.trim().length > 0);
 
   // Stable system prompt + history first, volatile tail block right before
