@@ -40,11 +40,17 @@ function GoalEntryForm({ goal, onDone }: { goal: ApiGoal; onDone: () => void }) 
     <ScrollView style={{ maxHeight: 420 }} keyboardShouldPersistTaps="handled">
       <View style={{ gap: 16, paddingBottom: 8 }}>
         <View style={{ gap: 8 }}>
-          <Text style={styles.label}>Amount</Text>
+          <Text style={styles.label}>{goal.definition.type === 'indirect' ? `Current ${goal.definition.unit}` : 'Amount'}</Text>
           <TextInput
             value={amount}
             onChangeText={setAmount}
-            placeholder={goal.definition.type === 'savings' ? goal.definition.currency : ''}
+            placeholder={
+              goal.definition.type === 'savings'
+                ? goal.definition.currency
+                : goal.definition.type === 'indirect'
+                  ? goal.definition.unit
+                  : ''
+            }
             placeholderTextColor={theme.faint}
             keyboardType="decimal-pad"
             style={styles.textInput}

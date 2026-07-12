@@ -146,11 +146,13 @@ export type PostponeTaskInput = {
 };
 
 // --- goals (mirrors server/src/lib/goals/schema.ts) ------------------------
-// Two goal types: savings (a fixed { currency, targetValue, deadline? }
-// shape) and habit (no numbers — a linked daily task + streak is the whole
-// mechanic). No field builder.
+// Three goal types: savings (a fixed { currency, targetValue, deadline? }
+// shape), habit (no numbers — a linked daily task + streak is the whole
+// mechanic), and indirect (a real measurement logged over time — targetValue
+// is optional; a linked task is supporting activity only, never a source of
+// the number). No field builder.
 
-export type GoalTemplateKey = 'savings' | 'habit';
+export type GoalTemplateKey = 'savings' | 'habit' | 'indirect';
 
 export type GoalDefinition =
   | {
@@ -163,13 +165,21 @@ export type GoalDefinition =
   | {
       type: 'habit';
       checkInCadence?: 'weekly' | 'off';
+    }
+  | {
+      type: 'indirect';
+      unit: string;
+      targetValue?: number;
+      deadline?: string;
+      checkInCadence?: 'weekly' | 'off';
     };
 
 export type StarterTask = {
   title: string;
   recurrence?: Recurrence;
   // Savings only — the amount completing the task auto-logs. Habit
-  // check-in tasks carry no amount.
+  // check-in tasks carry no amount; indirect starters are supporting
+  // activity and never carry one either.
   contribution?: number;
 };
 
@@ -202,7 +212,7 @@ export type ApiGoal = {
   sub?: string;
   progress?: number | null;
   paceLine?: string | null;
-  // Habit goals only — null/absent for savings.
+  // Habit goals only — null/absent for savings/indirect.
   streak?: GoalStreak | null;
   lastEntryAt?: string | null;
 };
@@ -219,17 +229,22 @@ export type ApiGoalEntry = {
 };
 
 export type ApiGoalDetail = {
-  type: 'savings' | 'habit';
+  type: 'savings' | 'habit' | 'indirect';
   card: { headline: string; sub: string; progress: number | null; paceLine: string | null };
-  // Savings fields — null on a habit detail.
+  // Savings fields — null on a habit/indirect detail. targetValue and
+  // deadline are shared with indirect.
   total: number | null;
   targetValue: number | null;
   currency: string | null;
   deadline: string | null;
-  // Habit field — null on a savings detail.
+  // Habit field — null on every other type.
   streak: GoalStreak | null;
   entryCount: number;
   lastEntryAt: string | null;
+  // Indirect only — null on every other type.
+  unit: string | null;
+  currentValue: number | null;
+  startValue: number | null;
 };
 
 // Mirrors server/src/lib/goals/consistency.ts — client renders, never
@@ -251,10 +266,11 @@ export type ApiGoalConsistency = {
 };
 
 export type CreateGoalParams = {
-  type?: 'savings' | 'habit';
+  type?: 'savings' | 'habit' | 'indirect';
   name: string;
   icon?: string;
   currency?: string;
+  unit?: string;
   targetValue?: number;
   deadline?: string;
 };
@@ -264,6 +280,7 @@ export type EditGoalPatch = {
   icon?: string;
   targetValue?: number;
   deadline?: string;
+  unit?: string;
 };
 
 export type LogGoalEntryPatch = {

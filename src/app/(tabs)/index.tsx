@@ -262,12 +262,19 @@ function GoalPreviewCard({ message }: { message: ChatMessage }) {
   const createdButRemoved = created && !!liveGoals && !liveGoals.some((g) => g.id === createdGoalId);
 
   // A habit has no target amount or deadline — the check-in task + streak is
-  // the whole mechanic, and the card says so instead of faking numbers.
+  // the whole mechanic, and the card says so instead of faking numbers. An
+  // indirect goal has no target either unless the user actually stated one —
+  // "just track it" is a complete goal on its own.
   const isSavings = definition.type === 'savings';
+  const isIndirect = definition.type === 'indirect';
   const targetLine = isSavings
     ? `Target: ${definition.currency}${definition.targetValue}`
-    : 'Habit — daily check-ins build the streak';
-  const deadlineLine = isSavings && definition.deadline ? `By ${definition.deadline}` : null;
+    : isIndirect
+      ? definition.targetValue !== undefined
+        ? `Target: ${definition.targetValue}${definition.unit}`
+        : `Tracking ${definition.unit} — no target set`
+      : 'Habit — daily check-ins build the streak';
+  const deadlineLine = (isSavings || isIndirect) && definition.deadline ? `By ${definition.deadline}` : null;
   const starterTasks = preview.starterTasks ?? [];
 
   const statusText = created

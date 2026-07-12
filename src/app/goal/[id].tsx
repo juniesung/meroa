@@ -7,6 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Icon } from '@/components/Icon';
 import { Progress } from '@/components/Progress';
 import { Ring } from '@/components/Ring';
+import { TrendChart, type TrendPoint } from '@/components/TrendChart';
 import { radii, theme } from '@/constants/theme';
 import { useArchiveGoal, useGoal } from '@/features/goals/queries';
 import { GoalEntrySheet } from '@/features/goals/GoalEntrySheet';
@@ -17,8 +18,12 @@ function formatNumber(n: number): string {
   return Number.isInteger(n) ? n.toLocaleString() : n.toLocaleString(undefined, { maximumFractionDigits: 2 });
 }
 
-function formatEntryLine(currency: string, data: { amount: number; note?: string }): string {
-  return data.note ? `${currency}${formatNumber(data.amount)} — ${data.note}` : `${currency}${formatNumber(data.amount)}`;
+function formatEntryLine(detail: ApiGoalDetail, data: { amount: number; note?: string }): string {
+  const value =
+    detail.type === 'indirect'
+      ? `${formatNumber(data.amount)}${detail.unit ?? ''}`
+      : `${detail.currency ?? ''}${formatNumber(data.amount)}`;
+  return data.note ? `${value} — ${data.note}` : value;
 }
 
 function formatEntryDate(iso: string): string {
@@ -72,6 +77,27 @@ function StreakView({ detail }: { detail: ApiGoalDetail }) {
   );
 }
 
+// Indirect goals never derive a number from a task (docs/goals-redesign-
+// plan.md's indirect goal type, locked decision) — the hero here is the
+// logged-entries trend line itself, not a ring toward a fabricated fraction.
+function TrendView({ detail, entries }: { detail: ApiGoalDetail; entries: ApiGoalEntry[] }) {
+  const [width, setWidth] = useState(0);
+  const points: TrendPoint[] = entries.map((e) => ({ entryAt: e.entryAt, amount: e.data.amount }));
+
+  return (
+    <View style={styles.viewCard}>
+      {detail.card.paceLine ? <Text style={styles.viewSub}>{detail.card.paceLine}</Text> : null}
+      {points.length > 0 ? (
+        <View onLayout={(e) => setWidth(e.nativeEvent.layout.width)}>
+          <TrendChart entries={points} unit={detail.unit ?? ''} targetValue={detail.targetValue} width={width} />
+        </View>
+      ) : (
+        <Text style={styles.emptyText}>Log your first {detail.unit} to start the chart.</Text>
+      )}
+    </View>
+  );
+}
+
 export default function GoalDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { data, isLoading } = useGoal(id);
@@ -92,6 +118,7 @@ export default function GoalDetailScreen() {
 
   const { goal, detail, entries } = data;
   const isHabit = detail.type === 'habit';
+  const isIndirect = detail.type === 'indirect';
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
@@ -117,7 +144,7 @@ export default function GoalDetailScreen() {
       <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 120, gap: 12 }}>
         <Text style={styles.headline}>{detail.card.headline}</Text>
 
-        {isHabit ? <StreakView detail={detail} /> : <TotalView detail={detail} />}
+        {isHabit ? <StreakView detail={detail} /> : isIndirect ? <TrendView detail={detail} entries={entries} /> : <TotalView detail={detail} />}
 
         {!isHabit && (
           <>
@@ -129,7 +156,7 @@ export default function GoalDetailScreen() {
                 {entries.map((entry: ApiGoalEntry) => (
                   <View key={entry.id} style={styles.entryRow}>
                     <Text style={styles.entryLine} numberOfLines={1}>
-                      {formatEntryLine(detail.currency ?? '', entry.data)}
+                      {formatEntryLine(detail, entry.data)}
                     </Text>
                     <Text style={styles.entryDate}>{formatEntryDate(entry.entryAt)}</Text>
                   </View>

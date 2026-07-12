@@ -201,10 +201,11 @@ export default function GoalsScreen() {
                 }}
               >
                 <GoalCard
+                  type={goal.definition.type}
                   icon={toIconName(goal.icon)}
                   title={goal.name}
                   subtitle={goal.headline ?? goal.sub ?? `${goal.entryCount} entries logged`}
-                  progress={Math.round((goal.progress ?? 0) * 100)}
+                  progress={goal.progress != null ? Math.round(goal.progress * 100) : null}
                   paceLine={goal.paceLine}
                   streak={goal.streak}
                 />
