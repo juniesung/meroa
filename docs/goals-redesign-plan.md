@@ -613,3 +613,110 @@ the renderer (45/45 total).
 *Known wobble:* given "undo that delete" after two separate deletions, the
 model chained two undo calls in one turn (restored both) — over-eager but
 state-correct; same narrate-wobble ledger as before.
+
+## Session: post-creation task→goal linking + indirect goal type + nits (2026-07-12) — built, tested, shipped
+
+Picked up Phase 5's two biggest remaining gaps per the pickup plan, plus the
+small-nits ledger. Implemented server-first then client per item, each typechecked
++ tested along the way; closed with a live as-a-user pass (fresh dev-token
+account, deepseek-v4-flash, act/narrate on, real DB checked between REST/chat
+steps) rather than trusting unit tests alone.
+
+**A. Post-creation task→goal linking** — `create_task`/`edit_task` gain
+`goalLink` (savings requires `contribution`, habit forbids it and requires the
+task already repeat, indirect forbids it); `edit_task` gains `unlinkGoal`.
+Validation (`validateGoalLinkTarget`) lives once in `lib/tasks/executor.ts`,
+shared by the REST path and the AI path — not just at the AI layer, so a
+REST-originated link (the client's new `TaskFormSheet` goal picker) gets the
+same guarantees. **Retro-credit** (locked decision: linking a task already
+completed *today* also credits that completion, an earlier day is left alone):
+`decideRetroGoalEntry` in `lib/tasks/goal-entry-decision.ts`, unit-tested
+against the done-today/done-earlier/open/archived/habit/indirect/already-credited
+matrix. Link/unlink cascades to a recurring template's open instances (not
+separately undoable, same precedent as the existing reminder cascade); the
+template's own `task_edited` record's prior/retroEntry payload is what undo
+restores. Client: `TaskFormSheet` gained a goal picker (filtered — habit only
+once the task repeats) with a contribution field; `TaskCard` shows a linked-goal
+chip.
+
+**B. Indirect goal type** (third of four locked types) — `definition = {
+type: 'indirect', unit, targetValue?, deadline? }`; target is optional ("track
+my weight" with just a unit is a complete goal). No stored start/direction
+field — `computeIndirectProgress`/`computeIndirectPace`
+(`lib/goals/summary.ts`) derive both from `start` (the first logged entry) vs
+`current` vs `target`, generalized to work whether the metric rises (a bench
+PR) or falls (weight loss) toward its target. Entries reuse the savings
+`goal_entries` shape (`amount` = the measurement itself); a linked task is
+guarded at every layer (schema superRefine, executor validation, task-context's
+label, `goalImpactSuffix`) to **never** auto-log a number — completing one
+narrates "supporting activity," nothing numeric. `log_goal_entry`'s reply
+states the delta vs. the previous entry (`goalHeadlineWithDelta`) — a down
+payment on Phase 5's history-aware-replies task. Client: new
+`components/TrendChart.tsx` (single-series SVG line + dashed target line, no
+legend needed per the dataviz skill for one series); `GoalCard` refactored
+from an implicit streak-presence branch to an explicit `type` switch so an
+indirect goal with no target renders without a misleading 0% ring; goal detail
+screen gained a `TrendView`.
+
+**C. Small nits closed:** `formatMoney` (mirrored server `lib/goals/summary.ts`
++ client `lib/format.ts`) fixes "$0.5" → "$0.50" everywhere money renders;
+`checkStarterPace` (`lib/goals/starter-pace.ts`) flags a savings goal whose
+proposed starter pace can't reach its deadline (advisory only, never blocks) —
+live-verified against the ledger's own named example ($5/day proposed for
+$1000/week correctly surfaced "$40 by [date], $960 short"); the act/narrate
+results-block preamble now explicitly says fresh action facts override the
+model's own conversational memory on conflict (the narrate-wobble class).
+Chained-undo restraint was left as-is per the user's call (state-correct, just
+eager).
+
+**Found and fixed one real bug via the live pass, not unit tests:**
+`AI_TOOL_SCHEMAS.create_task` intersected `createTaskInputSchema` with a
+`.strict()` wrapper object for the new `goalLink` field — `z.intersection`
+validates the raw input against both operands independently, so the strict
+operand rejected every key it didn't itself declare (`title`, `type`, `icon`)
+even though the first operand already accepted them. Every `create_task` call
+failed 100% of the time; both packages typechecked clean throughout because
+the bug is a runtime validation-composition mistake, invisible to `tsc`.
+Caught within minutes of driving real chat turns against a fresh account.
+Fixed (dropped `.strict()`, matching every other AI tool schema's
+default-strip backstop pattern) and pinned with a new regression suite
+(`lib/ai/tools.test.ts`) asserting every ordinary field plus `goalLink`
+parses together. Lesson for future AI-tool-schema changes: **a schema
+addition needs a live smoke call, not just a typecheck** — this class of bug
+is structurally invisible to static analysis.
+
+**Live-verified end to end** (fresh dev-token account, real DB state): link
+with a stated contribution → complete → one entry referencing the completion
+record; un-complete → entry gone, re-complete → fresh entry, no double-count;
+unlink preserves history (doesn't delete a past entry); relink to the *same*
+goal a task already has a live entry for is correctly idempotent (no double
+retro-credit); relink to a *different* already-done-today task correctly
+retro-credits; `undo_last_action` after a retro-credited link restores the
+prior (unlinked) state and deletes the retro entry; asking to link without a
+stated contribution correctly asks rather than invents one; linking a
+non-recurring task to a habit goal is correctly rejected with a clear message
+(both via chat and via a direct REST PATCH probe). Indirect: creation invents
+neither a target nor a unit; logging narrates the real delta vs. the previous
+entry; adding a target/deadline later produces direction-aware pace math
+(falling toward 165 from 175 → "0.1lb/day", not the savings-shaped "reached"
+miscalculation a naive port would have produced); a linked supporting task's
+completion changes zero numeric state on the goal; savings and habit
+regression (money formatting, streaks) intact throughout.
+
+**Server test suite: 93/93 passing** (up from 45 at the start of this
+session — retro-credit decision matrix, indirect schema/summary/pace, starter-
+pace shortfall, formatMoney, and the create_task regression suite are new).
+Both packages typecheck clean; client `expo lint` clean; `expo export`
+clean (1831 modules).
+
+*Still open from Phase 5:* milestone goal type (fourth and last locked type);
+the rest of history-aware replies beyond indirect's delta narration (a
+same-week "4th workout this week" style count); the formal §4-style DoD
+protocol run and CLAUDE.md §9 tick for Phase 5 (reconcile edge cases:
+completion-with-no-linked-goal already covered by the pre-existing archived-
+goal guard, ambiguous-goal-name disambiguation already covered by
+`verifyNameHint`/`verifyGoalNameHint`, multiple-candidate-tasks already
+covered by `titleMatches`'s lenient matching — none newly regressed this
+session, but no dedicated end-to-end protocol pass has been run against them
+specifically). Provider decision (deepseek-v4-flash is still the test
+provider) remains the gate before Phase 6.
