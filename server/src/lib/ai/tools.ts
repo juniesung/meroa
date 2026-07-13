@@ -510,8 +510,14 @@ export const OPENAI_ACTION_PASS_TOOLS: OpenAI.Chat.Completions.ChatCompletionToo
             description:
               'Why nothing was called — and, when the reply needs to ask the user something, exactly what it must ask. The reply pass sees only this string, never your reasoning, so name the real candidates or the missing value outright. Examples: "ambiguous — \'water\' matches both \'Water the plants\' and \'Water filter change\'; ask which one they mean", "savings goal has no target amount; ask for it", "just conversation, nothing to do".',
           },
+          intent: {
+            type: 'string',
+            enum: ['conversation', 'unfulfilled'],
+            description:
+              'Did the user\'s newest message ask for ANY task or goal action at all? "conversation" = no, there is nothing here to create, complete, log, remove, or track — a greeting, small talk, venting, a feeling, a question about you. "unfulfilled" = they wanted something done and you could not do it (a number is missing, the reference is ambiguous, intent is only a "maybe", a card is pending), OR they mentioned their tasks/goals at all (reporting progress, asking about it). When in doubt, choose "unfulfilled" — that is the cautious answer.',
+          },
         },
-        required: ['reason'],
+        required: ['reason', 'intent'],
       },
     },
   },

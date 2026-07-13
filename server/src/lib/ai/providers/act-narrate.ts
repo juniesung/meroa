@@ -8,6 +8,7 @@ import {
   buildTailedMessages,
   createTurnState,
   isToolCallMarkupLeak,
+  looksPurelyConversational,
   MAX_OUTPUT_TOKENS,
   MAX_TOOL_ITERATIONS,
   SEGMENT_PAUSE_MAX_MS,
@@ -73,6 +74,11 @@ export async function* streamChatReplyActNarrate(
   // Empty for OpenAI proper, which rejects unknown body params outright.
   actExtra: Record<string, unknown> = {},
   narrateExtra: Record<string, unknown> = {},
+  // Used INSTEAD of narrateExtra when the action pass reports that the user's
+  // message held no task/goal intent at all (no_action intent: 'conversation').
+  // See providers/deepseek.ts: that is the one narrate turn where reasoning
+  // buys nothing, because there is no request in flight to falsely confirm.
+  narrateConversationExtra: Record<string, unknown> = {},
 ): AsyncGenerator<ChatStreamEvent> {
   const windowed = windowHistory(history).filter((m) => m.content.trim().length > 0);
   const { toolCallLog, emittedSegments, logTurn, maybeCorrectFakeAction, maybeCorrectConcealedAction } =
@@ -109,6 +115,11 @@ export async function* streamChatReplyActNarrate(
     // claim-check to retract it. The right reply was "which one?", and only
     // the act pass knew that.
     let noActionReason = '';
+    // 'conversation' = the user asked for nothing at all (greeting, venting,
+    // banter). 'unfulfilled' = they DID want something, and it couldn't be
+    // done yet (missing number, ambiguous ref, a pending card). Only the
+    // former unlocks the fast reply path — see the narrate call below.
+    let noActionIntent: 'conversation' | 'unfulfilled' | '' = '';
 
     for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
       // Forced on the first round — the whole point of the pass. Later
@@ -172,6 +183,8 @@ export async function* streamChatReplyActNarrate(
             const args = call.function.arguments.trim() ? JSON.parse(call.function.arguments) : {};
             const reason = (args as { reason?: unknown }).reason;
             if (typeof reason === 'string' && reason.trim()) noActionReason = reason.trim();
+            const intent = (args as { intent?: unknown }).intent;
+            if (intent === 'conversation' || intent === 'unfulfilled') noActionIntent = intent;
           } catch {
             // A malformed no_action argument is not worth failing a turn
             // over — the reply pass just falls back to the generic
@@ -258,13 +271,51 @@ export async function* streamChatReplyActNarrate(
         : `# No action was taken this turn${noActionReason ? `\nThe action layer declined, and this is why: ${noActionReason}\nIf that reason says something is ambiguous or missing, ASK for exactly that — one short, specific question naming the real options or the missing value. Do not answer it yourself, and do not act as though it were already resolved.` : ''}\nReply conversationally. If the user asked for something that needs a missing required detail, ask for it. Do not claim or imply that anything was created, changed, logged, removed, or previewed — nothing was. The user is looking at an unchanged list: a reply that says you completed, created, or logged something is simply false, and they will see that it is.`;
     narrateMessages.push({ role: 'system', content: resultsBlock });
 
+    /**
+     * The fast reply path. Reasoning on the narrate pass is emitted BEFORE the
+     * first content token, so it lands directly on time-to-first-token — worth
+     * ~1.7s of the ~4.1s a "hey, rough day" turn takes. Disabling it globally
+     * was tried and reverted: on a no-action turn the reply pass has one hard
+     * job, resist the pull of what the user just asked for, and without
+     * reasoning it confirmed the request it had read ("No problem, undid that",
+     * "Nice — $5 logged") on turns where nothing ran.
+     *
+     * But look at WHICH turns those were: every one had a real request in
+     * flight that couldn't be fulfilled (ambiguous ref, missing number, a
+     * pending card). A greeting has nothing to falsely confirm. So the fast
+     * path is gated on the action pass explicitly declaring intent:
+     * 'conversation' — no task/goal ask in the message at all.
+     *
+     * The gate is safe by construction, and that is the whole point: this is
+     * decided AFTER the action pass has already run and judged. Nothing is
+     * bypassed, no request can be routed away from the tools — the only thing
+     * riding on this flag is how the reply is *written*. A mislabel is still
+     * backstopped by the claim-check, which runs on every zero-tool turn.
+     */
+    // TWO keys, and they must both turn. The action pass saying 'conversation'
+    // is not sufficient on its own — see looksPurelyConversational in shared.ts
+    // for the measurement that proves it ("saved my $5 today" was labelled
+    // 'conversation' 3 of 3 times, and the reply then confirmed a save that
+    // never happened this turn).
+    const newestUserMessage = windowed[windowed.length - 1]?.content ?? '';
+    const fastPath =
+      actionFacts.length === 0 &&
+      noActionIntent === 'conversation' &&
+      looksPurelyConversational(newestUserMessage);
+    if (fastPath) {
+      logger.info(
+        { userId: actionCtx.userId, sourceMessageId: actionCtx.sourceMessageId },
+        'narrate fast path — no task/goal intent this turn',
+      );
+    }
+
     const stream = await client.chat.completions.create({
       model,
       stream: true,
       ...maxTokens(NARRATE_MAX_OUTPUT_TOKENS),
       messages: narrateMessages,
       // No tools at all — this pass talks; it cannot act.
-      ...narrateExtra,
+      ...(fastPath ? narrateConversationExtra : narrateExtra),
     } as OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming);
 
     let buffer = '';

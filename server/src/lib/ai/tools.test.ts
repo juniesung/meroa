@@ -170,4 +170,18 @@ describe('no_action carries a reason', () => {
     expect(params.properties).toHaveProperty('reason');
     expect(params.required).toContain('reason');
   });
+
+  // The narrate fast path (providers/act-narrate.ts) turns reasoning off for
+  // the reply ONLY when this says 'conversation'. Disabling it on a turn where
+  // the user actually asked for something is what produced false claims ("No
+  // problem, undid that" on a turn where nothing ran), so the two values are
+  // load-bearing, not decorative.
+  it('requires an intent the fast reply path can gate on', () => {
+    const params = (noAction as { function: { parameters: unknown } }).function.parameters as {
+      properties?: Record<string, { enum?: string[] }>;
+      required?: string[];
+    };
+    expect(params.required).toContain('intent');
+    expect(params.properties?.intent?.enum).toEqual(['conversation', 'unfulfilled']);
+  });
 });

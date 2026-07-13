@@ -76,6 +76,18 @@ const client = new OpenAI({ apiKey: env.DEEPSEEK_API_KEY, baseURL: 'https://api.
 const DEEPSEEK_ACT_EXTRA = {}; // thinking ON (default) — see above
 const DEEPSEEK_NARRATE_EXTRA = {}; // thinking ON (default) — see above
 
+/**
+ * The one exception, and the reason the "thinking off" measurement above is
+ * kept rather than deleted: it is only *unsafe on turns with a request in
+ * flight*. When the action pass reports no_action with intent 'conversation'
+ * — the user asked for nothing at all; a greeting, venting, banter — there is
+ * no claim to falsely confirm, and the 1.97s -> 0.80s TTFT win is free.
+ *
+ * Applied only after the action pass has run and judged, so nothing is
+ * bypassed or routed around the tools; the claim-check still guards the turn.
+ */
+const DEEPSEEK_NARRATE_CONVERSATION_EXTRA = { thinking: { type: 'disabled' } };
+
 type AccumulatedToolCall = { id: string; name: string; argsJson: string };
 
 export async function* streamChatReplyDeepseek(
@@ -98,6 +110,7 @@ export async function* streamChatReplyDeepseek(
       actionCtx,
       DEEPSEEK_ACT_EXTRA,
       DEEPSEEK_NARRATE_EXTRA,
+      DEEPSEEK_NARRATE_CONVERSATION_EXTRA,
     );
     return;
   }

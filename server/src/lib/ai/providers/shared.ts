@@ -205,6 +205,29 @@ export function isToolCallMarkupLeak(text: string): boolean {
   return RAW_TOOL_CALL_MARKUP_PATTERN.test(text) || TOOL_MECHANICS_LEAK_PATTERN.test(text);
 }
 
+// The SECOND key on the narrate fast path (providers/act-narrate.ts). The first
+// key is the action pass declaring no_action intent: 'conversation', and on its
+// own that was not safe enough — asked to judge "was there any task/goal intent
+// here", the model reliably said 'conversation' for "saved my $5 today" (3 of 3)
+// because there was nothing left to DO about it, conflating "nothing to do" with
+// "nothing asked". With reasoning then off, the reply confirmed the save it had
+// just read: "You're on it — $5 logged for today." Tightening the wording only
+// swung it the other way — the fast path then never fired at all, on anything.
+//
+// So the model's judgment is not the gate; it is one of two. This is the other:
+// a dumb, literal scan of what the USER actually typed. Both keys must agree
+// before reasoning is turned off. The asymmetry is the point — a false positive
+// here (calling a greeting task-ish) costs a little latency and nothing else,
+// while a false negative is caught by the model's own 'unfulfilled'. Neither
+// key can, alone, route a real request into the fast lane.
+const TASK_INTENT_SIGNAL_PATTERN =
+  /\d|\$|£|€|\btask|\bgoal|\bhabit|\bstreak|\bsav(e|ed|ing)|\bspent|\blog(ged)?\b|\btrack|\bremind|\bdone\b|\bfinish|\bcomplet|\bundo\b|\bdelete|\bremove|\bcancel|\badd\b|\bcreate\b|\bmark\b|\bdid\b|\bworkout|\bgym\b|\brun\b|\bprogress|\bdue\b|\btoday\b|\btomorrow\b|\bweek\b|\bmonth\b/i;
+
+/** True when the user's own message shows no sign of touching their tasks/goals. */
+export function looksPurelyConversational(userMessage: string): boolean {
+  return !TASK_INTENT_SIGNAL_PATTERN.test(userMessage);
+}
+
 // `pending` marks a successful call whose recordKind is a tap-to-confirm
 // card (task_removal_pending, task_bulk_removal_pending, goal_preview,
 // goal_advance_pending) — nothing was actually mutated, only shown. Distinct
