@@ -66,6 +66,23 @@ export function isOverdue(task: ApiTask, timezone?: string | null): boolean {
   return dueYmd < todayYmd;
 }
 
+/**
+ * The mirror of isOverdue: due on a *later calendar day* than today, in the
+ * account's own timezone. Same whole-day granularity — a task due at 9am
+ * tomorrow is upcoming all of today, not "due soon".
+ *
+ * Unlike isOverdue this does NOT gate on status: a task's section is about WHEN
+ * it is due, not what state it is in, so completing tomorrow's task early leaves
+ * it under Tomorrow rather than jumping it into today's list.
+ *
+ * A task with no dueAt is never upcoming — it belongs to today by default (the
+ * server only leaves dueAt unset when the user never implied any timing at all).
+ */
+export function isUpcoming(task: ApiTask, timezone?: string | null): boolean {
+  if (!task.dueAt) return false;
+  return ymdInTz(new Date(task.dueAt), timezone) > ymdInTz(new Date(), timezone);
+}
+
 function formatTime(iso: string, timezone?: string | null): string {
   return new Date(iso).toLocaleString(undefined, {
     timeZone: tzOrLocal(timezone),

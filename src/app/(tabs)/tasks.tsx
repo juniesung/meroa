@@ -1,4 +1,5 @@
 import * as Haptics from 'expo-haptics';
+import { useIsFocused } from 'expo-router';
 import { useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Animated from 'react-native-reanimated';
@@ -8,7 +9,7 @@ import { AnimatedPressable, useRimHighlight, useTapFeedback } from '@/components
 import { Icon } from '@/components/Icon';
 import { Ring } from '@/components/Ring';
 import { SwipeToDelete } from '@/components/SwipeToDelete';
-import { isOverdue, TaskCard, taskProgressFraction } from '@/components/TaskCard';
+import { isOverdue, isUpcoming, TaskCard, taskProgressFraction } from '@/components/TaskCard';
 import { theme } from '@/constants/theme';
 import { useGoals } from '@/features/goals/queries';
 import { useMe } from '@/features/profile/queries';
@@ -33,6 +34,7 @@ export default function TasksScreen() {
   const deleteTask = useDeleteTask();
   const tabBarHeight = useTabBarHeight();
   const addFeedback = useTapFeedback(0.9);
+  const isFocused = useIsFocused();
 
   // Deleting a goal-linked recurring task is never a silent swipe
   // (user rule): a template takes its goal with it (the server cascade in
@@ -81,7 +83,16 @@ export default function TasksScreen() {
   const nonTemplates = tasks.filter((t) => t.status !== 'archived' && !t.recurrence);
   const templates = tasks.filter((t) => !!t.recurrence);
   const overdueTasks = nonTemplates.filter((t) => isOverdue(t, timezone));
-  const visibleTasks = nonTemplates.filter((t) => !isOverdue(t, timezone));
+  // Anything due after today drops out of the day list into its own section at
+  // the bottom — the top of this screen is "what do I have to do today", and a
+  // task due Friday sitting in it is just noise you have to read past every time.
+  // Soonest first, so the next thing you'll actually face is at the top of it.
+  const upcomingTasks = nonTemplates
+    .filter((t) => isUpcoming(t, timezone))
+    .sort((a, b) => (a.dueAt ?? '').localeCompare(b.dueAt ?? ''));
+  const visibleTasks = nonTemplates.filter(
+    (t) => !isOverdue(t, timezone) && !isUpcoming(t, timezone),
+  );
 
   const hasRunningTimer = visibleTasks.some(
     (t) => t.type === 'duration' && !!(t.config as { runningSince?: string | null }).runningSince,
@@ -102,7 +113,11 @@ export default function TasksScreen() {
     day: 'numeric',
   });
 
-  const isEmpty = visibleTasks.length === 0 && templates.length === 0 && overdueTasks.length === 0;
+  const isEmpty =
+    visibleTasks.length === 0 &&
+    templates.length === 0 &&
+    overdueTasks.length === 0 &&
+    upcomingTasks.length === 0;
 
   function renderTaskCard(t: ApiTask) {
     return (
@@ -150,7 +165,7 @@ export default function TasksScreen() {
               {visibleTasks.length ? `${doneCount} of ${visibleTasks.length} done` : 'Nothing yet'}
             </Text>
           </View>
-          <Ring value={pct} size={64} stroke={6} />
+          <Ring value={pct} size={64} stroke={6} celebrate={isFocused && !isLoading} />
           <AnimatedPressable
             onPressIn={addFeedback.onPressIn}
             onPressOut={addFeedback.onPressOut}
@@ -175,6 +190,13 @@ export default function TasksScreen() {
           </View>
         ) : (
           visibleTasks.length > 0 && <View style={{ gap: 10, marginTop: 20 }}>{visibleTasks.map(renderTaskCard)}</View>
+        )}
+
+        {upcomingTasks.length > 0 && (
+          <View style={{ marginTop: 28 }}>
+            <Text style={styles.sectionTitle}>TOMORROW</Text>
+            <View style={{ gap: 10, marginTop: 10 }}>{upcomingTasks.map(renderTaskCard)}</View>
+          </View>
         )}
 
         {templates.length > 0 && (
