@@ -1,11 +1,11 @@
 import { zValidator } from '@hono/zod-validator';
-import { eq } from 'drizzle-orm';
+import { and, eq, gt, isNull } from 'drizzle-orm';
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { z } from 'zod';
 
 import { db } from '../db/client.ts';
-import { messages, users } from '../db/schema.ts';
+import { messages, records, users } from '../db/schema.ts';
 import { streamChatReply, type ChatHistoryMessage } from '../lib/ai/chat.ts';
 import { buildRecentChangesFeed, renderUndoTarget } from '../lib/ai/recent-changes.ts';
 import { buildConversationTailBlock, buildTailBlock } from '../lib/ai/system-prompt.ts';
@@ -212,12 +212,39 @@ messageRoutes.post('/', zValidator('json', sendSchema), async (c) => {
   // refers to.
   const newestAssistant = [...history].reverse().find((m) => m.role === 'assistant');
   const newestMeta = (newestAssistant?.meta ?? null) as { kind?: string } | null;
-  const pendingConfirmCard =
+  const newestIsConfirmCard =
     newestMeta?.kind === 'task_removal_pending' ||
     newestMeta?.kind === 'task_bulk_removal_pending' ||
-    newestMeta?.kind === 'goal_advance_pending'
-      ? (newestAssistant?.content ?? 'a confirmation card')
-      : null;
+    newestMeta?.kind === 'goal_advance_pending';
+
+  // A confirm card is only "pending" until it is TAPPED. The first version of this
+  // guard asked "is the newest assistant message a confirm card?" — but the card
+  // message stays newest after the tap, so it went on refusing undo forever. Seen
+  // live end-to-end: tap Delete, say "undo that", and the undo is REFUSED — the
+  // task stays deleted while the reply says "Undid the deletion, it's back."
+  // Exactly the false refusal the guard was built to prevent, pointed the wrong
+  // way.
+  //
+  // The right question is not "is a card on screen" but "did that card change
+  // anything?" — and that is a fact, not a guess: a tap writes a record. If any
+  // live record was written AFTER the card was shown, it was acted on, and there
+  // is something real to undo. If none was, the card truly did nothing and "undo
+  // that" must not reach past it.
+  let pendingConfirmCard: string | null = null;
+  if (newestIsConfirmCard && newestAssistant) {
+    const [actedOn] = await db
+      .select({ id: records.id })
+      .from(records)
+      .where(
+        and(
+          eq(records.userId, userId),
+          isNull(records.revertedAt),
+          gt(records.occurredAt, newestAssistant.createdAt),
+        ),
+      )
+      .limit(1);
+    if (!actedOn) pendingConfirmCard = newestAssistant.content ?? 'a confirmation card';
+  }
 
   // The AI action layer needs a settled, up-to-date task list to reference
   // by ref and see today's recurring instances. Materialization has to land
