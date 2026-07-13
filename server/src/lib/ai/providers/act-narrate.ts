@@ -66,9 +66,17 @@ export async function* streamChatReplyActNarrate(
   user: ChatUserContext,
   tailText: string,
   actionCtx: ChatActionContext,
+  // Provider-specific request fields the OpenAI SDK's types don't know about
+  // (DeepSeek's `thinking` toggle), set PER PASS — the two passes want
+  // opposite things, and a single shared value was measurably wrong. See
+  // providers/deepseek.ts for what it sends and the measurements behind it.
+  // Empty for OpenAI proper, which rejects unknown body params outright.
+  actExtra: Record<string, unknown> = {},
+  narrateExtra: Record<string, unknown> = {},
 ): AsyncGenerator<ChatStreamEvent> {
   const windowed = windowHistory(history).filter((m) => m.content.trim().length > 0);
-  const { toolCallLog, emittedSegments, logTurn, maybeCorrectFakeAction } = createTurnState(actionCtx);
+  const { toolCallLog, emittedSegments, logTurn, maybeCorrectFakeAction, maybeCorrectConcealedAction } =
+    createTurnState(actionCtx);
 
   const maxTokens = (n: number) =>
     maxTokensParam === 'max_tokens' ? { max_tokens: n } : { max_completion_tokens: n };
@@ -115,7 +123,8 @@ export async function* streamChatReplyActNarrate(
           messages: actionMessages,
           tools: OPENAI_ACTION_PASS_TOOLS,
           tool_choice: wantRequired ? 'required' : 'auto',
-        });
+          ...actExtra,
+        } as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming);
       } catch (err) {
         const message = (err as Error).message ?? '';
         if (!wantRequired || (err as { status?: number }).status !== 400 || !/tool_choice/i.test(message)) {
@@ -129,7 +138,8 @@ export async function* streamChatReplyActNarrate(
           messages: actionMessages,
           tools: OPENAI_ACTION_PASS_TOOLS,
           tool_choice: 'auto',
-        });
+          ...actExtra,
+        } as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming);
       }
 
       const message = completion.choices[0]?.message;
@@ -139,6 +149,19 @@ export async function* streamChatReplyActNarrate(
       const assistantToolCalls: OpenAI.Chat.Completions.ChatCompletionMessageToolCall[] = [];
       const toolResultMessages: OpenAI.Chat.Completions.ChatCompletionToolMessageParam[] = [];
       let sawRealCall = false;
+      // Another round costs a full ~9k-token round trip (~1.5-2s, measured),
+      // so it has to earn its place. Exactly two things earn it:
+      //   1. A create_task succeeded — it minted a NEW ref the model couldn't
+      //      have known at turn start, and the create->act chain ("created the
+      //      counter, now log your current 165") needs a round to use it.
+      //   2. A call FAILED — the tool result is a corrective message ("that
+      //      titleHint doesn't match", "arguments were not valid JSON — retry")
+      //      and the retry is the whole point of sending it.
+      // Everything else (complete/log/edit/postpone/remove/undo/no_action) is
+      // terminal: the model has nothing left to decide, and the extra round
+      // just returns zero calls and breaks. That wasted round was firing on
+      // nearly every action turn — the act pass averaged 2 rounds.
+      let needsAnotherRound = false;
 
       for (const call of calls) {
         if (call.type !== 'function') continue;
@@ -168,6 +191,7 @@ export async function* streamChatReplyActNarrate(
             tool_call_id: call.id,
             content: 'Your arguments were not valid JSON — retry with corrected arguments, or call no_action.',
           });
+          needsAnotherRound = true; // the retry is the whole point of that message
           continue;
         }
 
@@ -204,10 +228,15 @@ export async function* streamChatReplyActNarrate(
           yield { type: 'action', toolName: result.toolName, task: result.task, summary: result.summary, recordKind: result.recordKind };
           actionFacts.push(result.modelSummary ?? result.summary);
           toolResultMessages.push({ role: 'tool', tool_call_id: call.id, content: result.modelSummary ?? result.summary });
+          // Only create_task hands back a ref that didn't exist at turn start
+          // (registerCreatedTaskRef) — that's the one success worth another
+          // round, so a "created it, now log my current 165" chain can land.
+          if (result.toolName === 'create_task') needsAnotherRound = true;
         } else {
           toolCallLog.push({ name: call.function.name, ok: false, error: result.error });
           actionFacts.push(result.error);
           toolResultMessages.push({ role: 'tool', tool_call_id: call.id, content: result.error });
+          needsAnotherRound = true; // corrective error — give it a chance to fix and retry
         }
       }
 
@@ -215,8 +244,10 @@ export async function* streamChatReplyActNarrate(
       actionMessages.push(...toolResultMessages);
 
       // A pure-no_action round means the pass decided nothing (more) needs
-      // doing — don't loop it into deciding again.
-      if (!sawRealCall) break;
+      // doing — don't loop it into deciding again. And a round of purely
+      // terminal successes has nothing left to decide either: looping there
+      // buys a guaranteed-empty round trip (see needsAnotherRound above).
+      if (!sawRealCall || !needsAnotherRound) break;
     }
 
     // ---- pass 2: narrate ---------------------------------------------------
@@ -233,7 +264,8 @@ export async function* streamChatReplyActNarrate(
       ...maxTokens(NARRATE_MAX_OUTPUT_TOKENS),
       messages: narrateMessages,
       // No tools at all — this pass talks; it cannot act.
-    });
+      ...narrateExtra,
+    } as OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming);
 
     let buffer = '';
     let emittedLength = 0;
@@ -318,6 +350,14 @@ export async function* streamChatReplyActNarrate(
     // comment). no_action deliberately doesn't count as a real call either
     // way.
     yield* maybeCorrectFakeAction();
+    // The other half of the same guarantee. maybeCorrectFakeAction returns
+    // the instant a real mutation exists, so it has never once looked at an
+    // action turn's narration — and the reply passing a fresh action off as
+    // pre-existing ("already done — you're good") measured 8.3% of action
+    // turns. Exactly one of these two can fire on any given turn: that one
+    // guards "said it happened when it didn't", this one guards "it happened
+    // and the reply hid it".
+    yield* maybeCorrectConcealedAction(actionFacts);
     logTurn();
     yield { type: 'stream_end' };
   } catch (err) {

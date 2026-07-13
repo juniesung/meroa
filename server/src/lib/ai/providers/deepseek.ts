@@ -28,6 +28,54 @@ import {
 // by the OpenAI provider — no separate wrapping needed.
 const client = new OpenAI({ apiKey: env.DEEPSEEK_API_KEY, baseURL: 'https://api.deepseek.com' });
 
+/**
+ * DeepSeek's v4 models think by default. The two passes want OPPOSITE things
+ * here, and the 27-scenario accuracy battery is what settled it — turning
+ * thinking off on BOTH looked like a pure win on paper (it's faster, it's
+ * cheaper, and it's the only way to get `tool_choice: 'required'` accepted)
+ * and it regressed accuracy from 27/27 to 23/27.
+ *
+ * ACT PASS — thinking stays ON. It looked like a mere classifier, but it is
+ * the pass that has to *judge*: is "mark water done" ambiguous between two
+ * open tasks? Does "undo that" refer to a pending card that changed nothing,
+ * or to a real earlier change? With thinking disabled it stopped reasoning
+ * and started pattern-matching, and both of those judgments collapsed —
+ * undo-pending failed 3/3 (silently reverting an unrelated completion, the
+ * exact data-integrity bug the rule exists to prevent) and ambiguous-task
+ * failed 1/3. The cost of keeping thinking on is real and accepted: thinking
+ * mode REJECTS `tool_choice: 'required'` (400), so act-narrate.ts falls back
+ * to 'auto' and the "must call a tool" guarantee is not structurally
+ * enforced. It is backstopped instead — by no_action carrying a reason, by
+ * the claim-check, and by this battery. Correct beats fast.
+ *
+ * NARRATE PASS — thinking also stays ON, for the same reason, and this one
+ * was the bigger surprise. It looked like the safe half: this pass judges
+ * nothing, it just restates facts handed to it in the results block, and
+ * disabling thinking cut time-to-first-token from 1.97s to 0.80s (reasoning
+ * is emitted BEFORE the first content token, so it lands straight on TTFT).
+ * The replies read fine in isolation. But on a NO-ACTION turn the reply pass
+ * has one hard job — resist the pull of what the user just asked for and obey
+ * "nothing happened this turn" — and that is a judgment, not a restatement.
+ * Without reasoning it pattern-matched the request and confirmed it: "No
+ * problem, undid that", "Nice — $5 logged", on turns where zero tools ran.
+ * Four such false claims in 27 (all on no-action turns), each one caught and
+ * retracted by the claim-check, versus zero at baseline.
+ *
+ * So: the thinking toggle is a trap on both passes. It is faster, cheaper,
+ * and it is the ONLY way to get `tool_choice: 'required'` accepted (thinking
+ * mode 400s on it) — and it costs accuracy on exactly the turns that matter
+ * most. The forced-tool-call guarantee is therefore NOT available on a
+ * thinking model, and act-narrate.ts's fallback to 'auto' is load-bearing,
+ * not a wart. The guarantee is backstopped instead: no_action carries a
+ * reason, the claim-check catches false claims, and the battery gates it.
+ *
+ * Left as an empty object rather than deleted so the next person who has this
+ * idea finds the measurement instead of re-running it. OpenAI proper rejects
+ * unknown body params, so this stays DeepSeek-local either way.
+ */
+const DEEPSEEK_ACT_EXTRA = {}; // thinking ON (default) — see above
+const DEEPSEEK_NARRATE_EXTRA = {}; // thinking ON (default) — see above
+
 type AccumulatedToolCall = { id: string; name: string; argsJson: string };
 
 export async function* streamChatReplyDeepseek(
@@ -40,7 +88,17 @@ export async function* streamChatReplyDeepseek(
   // below is the AI_ACT_NARRATE=off rollback path (kept for A/B comparison
   // of the false-claim rate; see providers/act-narrate.ts).
   if (env.AI_ACT_NARRATE === 'on') {
-    yield* streamChatReplyActNarrate(client, env.DEEPSEEK_MODEL, 'max_tokens', history, user, tailText, actionCtx);
+    yield* streamChatReplyActNarrate(
+      client,
+      env.DEEPSEEK_MODEL,
+      'max_tokens',
+      history,
+      user,
+      tailText,
+      actionCtx,
+      DEEPSEEK_ACT_EXTRA,
+      DEEPSEEK_NARRATE_EXTRA,
+    );
     return;
   }
 

@@ -18,6 +18,7 @@ import { peekUndoTarget } from '../lib/tasks/executor.ts';
 import { materializeRecurringInstances } from '../lib/tasks/recurrence.ts';
 import { computeAllowance, withUserChatLock } from '../lib/usage.ts';
 import { logger } from '../logger.ts';
+import { isToolCallMarkupLeak } from '../lib/ai/providers/shared.ts';
 import { requireAuth, type AuthVariables } from '../middleware/auth.ts';
 
 export const messageRoutes = new Hono<{ Variables: AuthVariables }>();
@@ -127,16 +128,33 @@ messageRoutes.post('/', zValidator('json', sendSchema), async (c) => {
   const history = await getRecentMessages(userId, 50);
   const chatHistory: ChatHistoryMessage[] = history
     .filter((m): m is typeof m & { role: 'user' | 'assistant' } => isChatRole(m.role))
-    .map((m) => ({ role: m.role, content: historyContentFor(m) }));
+    .map((m) => ({ role: m.role, content: historyContentFor(m) }))
+    // Never feed a past tool-call leak back to the model. This is the fix that
+    // actually matters, because a leak is SELF-REINFORCING: any leaked reply is
+    // persisted as an assistant message, so on the next turn the model reads its
+    // own `calling create_task with title "..."` in history and does it again —
+    // observed live, and the copy it produced was degraded ("calling create"),
+    // slipping past a guard that only knew the full tool name. Suppressing the
+    // leak at the output boundary is not enough on its own: one that escaped
+    // before the guard existed keeps teaching the model forever. An assistant
+    // message that looks like tool mechanics carries no conversational value
+    // worth preserving, so dropping it from context costs nothing.
+    .filter((m) => !(m.role === 'assistant' && isToolCallMarkupLeak(m.content)));
 
   // The AI action layer needs a settled, up-to-date task list to reference
-  // by ref and see today's recurring instances.
+  // by ref and see today's recurring instances. Materialization has to land
+  // before anything reads tasks, but after that only ONE real dependency
+  // remains — goal context needs the ref map task context builds — so the
+  // rest runs concurrently instead of as a four-query chain (measured 418ms
+  // sequential, and every millisecond here is upstream of the first token).
   await materializeRecurringInstances(userId, userContext.timezone, db);
-  const taskContext = await buildTaskContext(userId, userContext.timezone);
+  const [taskContext, consistency] = await Promise.all([
+    buildTaskContext(userId, userContext.timezone),
+    buildGoalConsistency(userId, userContext.timezone),
+  ]);
   // Appends into the same TurnRefs map task context just built — one ref
   // namespace ("T*"/"G*") covers both tasks and goals for the turn.
   const goalContext = await buildGoalContext(userId, userContext.timezone, taskContext.refs);
-  const consistency = await buildGoalConsistency(userId, userContext.timezone);
   // Always a concrete sentence, never '' — with nothing here, "do I have a
   // streak?" left the model to invent an explanation (observed live:
   // "none of your tasks are set up for it", which isn't how streaks work).

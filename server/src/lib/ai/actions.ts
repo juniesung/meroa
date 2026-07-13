@@ -1040,7 +1040,7 @@ async function executeAiToolCallInner(
           ok: true,
           toolName,
           preview,
-          summary: `Preview card shown — nothing is saved yet; the user taps Create on the card to save it. Do not ask them to confirm in chat text. ${describeGoalPreviewForSummary(preview)} Describe only what's listed here — never add, invent, or assume a starter task that isn't in that list, even if it seems like an obvious next step for this kind of goal.${paceNote}`,
+          summary: `Preview card shown — nothing is saved yet; the user taps Create on the card to save it. Do not ask them to confirm in chat text. This card is appearing for the FIRST time, right now, because you just called this tool — it was not up before and the user has not seen it; never tell them it was "already up" or "already there" (that reads as though you did nothing). ${describeGoalPreviewForSummary(preview)} Describe only what's listed here — never add, invent, or assume a starter task that isn't in that list, even if it seems like an obvious next step for this kind of goal.${paceNote}`,
           recordKind: 'goal_preview',
         };
       }
