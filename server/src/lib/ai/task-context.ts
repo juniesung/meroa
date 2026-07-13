@@ -180,9 +180,22 @@ export async function buildTaskContext(userId: string, timezone: string | null):
   // *before* today are excluded here on purpose — those are genuinely
   // missed occurrences the missed-task-recovery flow still needs to
   // surface individually, not folded away.
+  //
+  // Folding is only safe while the template is actually HERE to be folded into.
+  // An instance whose template row is gone (deleted, while the instance itself
+  // survived) would otherwise be hidden behind a stand-in that doesn't exist,
+  // and drop out of the model's world entirely. That happened: "delete all
+  // tasks" spared completed instances, orphaning them, and this block then hid
+  // them — so the context block read "They have no tasks yet." while the Tasks
+  // tab still showed three. The model said everything was gone, in good faith,
+  // and the claim-check guard had to retract it. The removal cascade no longer
+  // creates orphans, but a row can only be trusted to represent itself, so an
+  // orphan must still render rather than vanish.
+  const liveTemplateIds = new Set(rows.filter((r) => r.recurrence).map((r) => r.id));
   const currentInstanceByTemplate = new Map<string, Row>();
   for (const r of rows) {
     if (!r.templateId || !r.occurrenceDate || r.occurrenceDate < todayYmd) continue;
+    if (!liveTemplateIds.has(r.templateId)) continue;
     const existing = currentInstanceByTemplate.get(r.templateId);
     if (!existing || r.occurrenceDate < existing.occurrenceDate!) {
       currentInstanceByTemplate.set(r.templateId, r);

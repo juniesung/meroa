@@ -853,10 +853,13 @@ export async function postponeTask(
  * than in goals/executor because tasks/executor may not value-import it
  * (goals/executor already value-imports createTaskInTx from here — the
  * reverse edge would be a runtime cycle), same reason undoGoalRecord lives
- * here. Recurring templates cascade regardless of status (they're never
- * 'done'); instances and standalone linked tasks only while open — a done
- * instance is history and keeps its record. Writes the one goal_archived
- * record whose payload.cascadedTaskIds lets undo restore the whole unit.
+ * here. Every live linked task cascades, DONE ONES INCLUDED: sparing completed
+ * instances stranded them as unreachable rows that still rendered on the Tasks
+ * tab but were invisible to the model (task-context folds an instance into its
+ * template, and the template is gone) — see the note in removeTask. Their
+ * completion records are untouched, so a goal's logged total is unaffected.
+ * Writes the one goal_archived record whose payload.cascadedTaskIds lets undo
+ * restore the whole unit.
  */
 export async function archiveGoalCascadeInTx(
   tx: Tx,
@@ -872,17 +875,16 @@ export async function archiveGoalCascadeInTx(
   if (!updated) throw new Error('goal_update_failed');
 
   const linked = await tx
-    .select({ id: tasks.id, title: tasks.title, recurrence: tasks.recurrence, status: tasks.status })
+    .select({ id: tasks.id, title: tasks.title })
     .from(tasks)
     .where(and(eq(tasks.goalId, goal.id), isNull(tasks.deletedAt)));
-  const toCascade = linked.filter((t) => t.recurrence !== null || t.status === 'open');
-  const cascadedTaskIds = toCascade.map((t) => t.id);
+  const cascadedTaskIds = linked.map((t) => t.id);
   if (cascadedTaskIds.length) {
     await tx.update(tasks).set({ deletedAt: new Date() }).where(inArray(tasks.id, cascadedTaskIds));
   }
   // One title per template/task, not per materialized instance — for the
   // "removed along with …" summary.
-  const cascadedTaskTitles = [...new Set(toCascade.map((t) => t.title))];
+  const cascadedTaskTitles = [...new Set(linked.map((t) => t.title))];
 
   await tx.insert(records).values({
     userId,
@@ -950,21 +952,31 @@ export async function removeTask(
       .returning();
     if (!updated) throw new Error('task_update_failed');
 
-    // Removing a template also clears its not-yet-completed instances so
-    // they don't linger on the Tasks tab. Their ids are recorded on the
-    // template's own removal record so undoing it can restore exactly
-    // these alongside the template — otherwise the materialization cursor
-    // (recurrence.ts's lastInstance query) would treat those days as
-    // already handled and never regenerate them, even after the template
-    // comes back.
+    // Removing a template clears its instances — DONE ONES INCLUDED — so none
+    // linger on the Tasks tab. This used to spare completed instances on the
+    // theory that a done instance is history worth keeping. It isn't worth
+    // keeping once its template is gone: it survives as a task nobody can
+    // reach, it still renders on the Tasks tab, and (worse) task-context folds
+    // instances into their template for the model, so with the template deleted
+    // it is folded into nothing and goes INVISIBLE to the model. That is how
+    // "delete all tasks" left three tasks on screen while the model said, in
+    // good faith, that everything was gone.
+    //
+    // Their ids are recorded on the template's own removal record so undoing it
+    // restores exactly these alongside the template — otherwise the
+    // materialization cursor (recurrence.ts's lastInstance query) would treat
+    // those days as already handled and never regenerate them, even after the
+    // template comes back.
+    //
+    // The completion RECORD is untouched (we only set deletedAt; nothing is
+    // reverted), so a goal's logged total is unaffected — that lives in
+    // goal_entries -> records, which never reads the tasks table.
     let cascadedInstanceIds: string[] = [];
     if (task.recurrence) {
       const cascaded = await tx
         .update(tasks)
         .set({ deletedAt: new Date() })
-        .where(
-          and(eq(tasks.templateId, task.id), eq(tasks.status, 'open'), isNull(tasks.deletedAt)),
-        )
+        .where(and(eq(tasks.templateId, task.id), isNull(tasks.deletedAt)))
         .returning({ id: tasks.id });
       cascadedInstanceIds = cascaded.map((r) => r.id);
     }
@@ -1047,14 +1059,13 @@ export async function removeTasks(
       if (!updated) throw new Error('task_update_failed');
       removed.push(updated);
 
+      // Done instances included — see the note in removeTask.
       let cascadedInstanceIds: string[] = [];
       if (task.recurrence) {
         const cascaded = await tx
           .update(tasks)
           .set({ deletedAt: new Date() })
-          .where(
-            and(eq(tasks.templateId, task.id), eq(tasks.status, 'open'), isNull(tasks.deletedAt)),
-          )
+          .where(and(eq(tasks.templateId, task.id), isNull(tasks.deletedAt)))
           .returning({ id: tasks.id });
         cascadedInstanceIds = cascaded.map((r) => r.id);
       }
