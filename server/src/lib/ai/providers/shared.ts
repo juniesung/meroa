@@ -38,7 +38,16 @@ export const MAX_TOOL_ITERATIONS = 3;
 // real history (the assistant did reply, and dropping them left a hole the model
 // tried to fill — routes/messages.ts), but on a pure-conversation turn they are
 // exactly the thing it should not be commenting on.
-export type ChatHistoryMessage = { role: 'user' | 'assistant'; content: string; isCard?: boolean };
+export type ChatHistoryMessage = {
+  role: 'user' | 'assistant';
+  content: string;
+  // A CARD turn rather than spoken words. The conversation fast path drops these.
+  isCard?: boolean;
+  // A card that changed NOTHING and awaits a tap. The ACT pass needs these (their
+  // absence tore a hole in the record and it stopped acting); the REPLY pass must
+  // not have them (their text reads as an open request it owes a follow-up on).
+  isPendingCard?: boolean;
+};
 
 export type ChatStreamEvent =
   | { type: 'delta'; text: string }
@@ -73,6 +82,12 @@ export type ChatActionContext = {
   // hasn't acted on — i.e. the thing they are looking at right now changed
   // nothing. "undo that" in that state must not reach past it (lib/ai/actions.ts).
   pendingConfirmCard?: string | null;
+  // True when a create_goal preview really IS on screen, un-tapped. Without this,
+  // PREVIEW_CLAIM_PATTERN retracted an honest reply for saying the true thing:
+  // "the PS5 one is still in preview, waiting for you to tap Create" tripped the
+  // pattern and got "Hm, that preview didn't actually go through" stapled on. The
+  // pattern's whole premise is "no preview exists"; when one does, it is off.
+  hasPendingPreview?: boolean;
   // This turn's alias -> real-id map (task-context.ts) — every taskRef/
   // itemRef a tool call sends is resolved against this before it executes.
   refs: TurnRefs;
@@ -353,7 +368,11 @@ export function createTurnState(actionCtx: ChatActionContext) {
     // success can still falsely claim the underlying change is done, just
     // never falsely claim a card exists (one genuinely does).
     const hadPendingSuccess = toolCallLog.some((t) => t.ok && t.pending);
-    const matchedPreviewClaim = !hadPendingSuccess && PREVIEW_CLAIM_PATTERN.test(stripped);
+    // ...and equally off when a preview from an EARLIER turn is still on screen.
+    // Describing a card that genuinely exists is not a false claim about one that
+    // doesn't (see hasPendingPreview).
+    const matchedPreviewClaim =
+      !hadPendingSuccess && !actionCtx.hasPendingPreview && PREVIEW_CLAIM_PATTERN.test(stripped);
     const matchedRegex =
       matchedPreviewClaim ||
       FAKE_ACTION_PATTERN.test(stripped) ||

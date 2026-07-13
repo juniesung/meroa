@@ -153,6 +153,10 @@ export async function* streamChatReplyActNarrate(
     const actionMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
       { role: 'system', content: ACTION_SYSTEM_PROMPT },
       { role: 'system', content: tailText },
+      // The FULL record, pending cards included. Filtering them out here left two
+      // user messages back-to-back with no assistant turn, and the act pass —
+      // seeing a request it appeared never to have answered — stopped acting on
+      // the next one. See routes/messages.ts.
       ...windowed.slice(-ACTION_PASS_HISTORY_MESSAGES).map(
         (m): OpenAI.Chat.Completions.ChatCompletionMessageParam => ({
           role: m.role,
@@ -448,7 +452,13 @@ export async function* streamChatReplyActNarrate(
     }
 
     // ---- pass 2: narrate ---------------------------------------------------
-    const narrateMessages = buildTailedMessages(buildSystemPrompt(user), narrateTailText, windowed);
+    // The reply pass does not get the loose ends: a pending card's text is an
+    // instruction to the USER ("Tap to confirm removing X"), and replayed as a past
+    // assistant turn it reads as an open request still owed a follow-up. It learns
+    // what it needs about a pending card from a server fact instead
+    // (actionCtx.pendingConfirmCard).
+    const narrateHistory = windowed.filter((m) => !m.isPendingCard);
+    const narrateMessages = buildTailedMessages(buildSystemPrompt(user), narrateTailText, narrateHistory);
     narrateMessages.push({
       role: 'system',
       content:

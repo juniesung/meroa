@@ -81,35 +81,49 @@ function isCardMessage(m: { meta: unknown }): boolean {
   return !!meta?.kind && CARD_KINDS.has(meta.kind);
 }
 
+// A card that mutated NOTHING and is still waiting on a tap. These belong in the
+// ACT pass's history — dropping them tore a hole in the record (two user messages
+// in a row, no assistant turn) and the act pass, seeing an apparently-unanswered
+// request, stopped acting on the NEXT one: "add gym mon wed fri and remind me to
+// call my mom sunday" created neither task, and the reply pass then claimed it had.
+//
+// But they must NOT reach the REPLY pass. Their text is an instruction to the user
+// ("Tap to confirm removing X"), and replayed there it reads as an open request the
+// assistant still owes a follow-up on — which is how a plain "What's up dawg" came
+// back as "Already got you — just tapped that confirm, so they're all gone now."
+//
+// So: same history, filtered per pass (providers/act-narrate.ts). The pass that
+// ACTS gets the full record; the pass that TALKS doesn't get the loose ends.
+const PENDING_CARD_KINDS = new Set([
+  'task_removal_pending',
+  'task_bulk_removal_pending',
+  'goal_advance_pending',
+  'goal_preview',
+]);
+
+function isPendingCardMessage(m: { meta: unknown }): boolean {
+  const meta = m.meta as { kind?: string } | null;
+  return !!meta?.kind && PENDING_CARD_KINDS.has(meta.kind);
+}
+
 function historyContentFor(m: { content: string; meta: unknown }): string {
   const meta = m.meta as { kind?: string; preview?: { name?: string } } | null;
   switch (meta?.kind) {
-    // Dropped from model-visible history entirely, and the reason is a bug I
-    // caused: a placeholder here ("[showed a confirmation card — nothing changes
-    // unless the user taps it]") got COPIED VERBATIM into a real reply — the user
-    // asked to delete a task and Meroa answered "[showing a confirmation card —
-    // tap it to confirm]" as prose, with no card. The original comment on this
-    // function warned of exactly that: *any* fixed, repeated shape in the model's
-    // own history is a template it will eventually reproduce. It is not that
-    // bracket markup is worse than prose; it is that a constant string is.
-    //
-    // And nothing is lost by dropping them, because a PENDING card is not an
-    // action — it changed nothing — and the one thing the reply pass needs to
-    // know about it now arrives as a server-authored fact instead
-    // (actionCtx.pendingConfirmCard, see providers/act-narrate.ts). The hole in
-    // history that started all this was left by real, COMPLETED actions; those
-    // still appear below.
-    case 'task_removal_pending':
-    case 'task_bulk_removal_pending':
-    case 'goal_advance_pending':
+    // create_goal's stored `content` is written for the MODEL mid-turn ("do not
+    // ask them to confirm in chat text…") — instructions, not something the
+    // assistant said. Synthesized from the preview instead, and deliberately
+    // VARIABLE (the goal's real name), never a constant: a fixed, repeated string
+    // in history is a template the model eventually reproduces, which is how
+    // "[showing a confirmation card — tap it to confirm]" once reached the chat.
+    // This is only ever shown to the ACT pass (see isPendingCard below), and the
+    // act pass emits no prose at all — so there is nothing here to copy into.
     case 'goal_preview':
-      return '';
-    // A real, completed change. Its `content` is already the user-facing,
-    // server-computed sentence describing exactly what happened — that is the
-    // truth, and it is what the assistant "said" by putting the card up.
-    case 'task_action':
-    case 'goal_action':
-      return m.content;
+      return meta.preview?.name
+        ? `Put a preview card up for a "${meta.preview.name}" goal — not saved until they tap Create.`
+        : 'Put a goal preview card up.';
+    // Every other card's `content` is the user-facing, server-computed sentence
+    // for exactly what happened. That is what the assistant "said" by putting the
+    // card up, and it must be in the record — see isPendingCard.
     default:
       return m.content;
   }
@@ -173,7 +187,12 @@ messageRoutes.post('/', zValidator('json', sendSchema), async (c) => {
     // The conversation fast path drops these entirely (providers/act-narrate.ts):
     // on a plain "What's up dawg" the model has no business narrating a task, and
     // the surest way to stop it is to not show it one.
-    .map((m) => ({ role: m.role, content: historyContentFor(m), isCard: isCardMessage(m) }))
+    .map((m) => ({
+      role: m.role,
+      content: historyContentFor(m),
+      isCard: isCardMessage(m),
+      isPendingCard: isPendingCardMessage(m),
+    }))
     // Never feed a past tool-call leak back to the model. This is the fix that
     // actually matters, because a leak is SELF-REINFORCING: any leaked reply is
     // persisted as an assistant message, so on the next turn the model reads its
@@ -240,7 +259,8 @@ messageRoutes.post('/', zValidator('json', sendSchema), async (c) => {
   // fetched above, no extra query. The act/narrate action pass depends on
   // this: it sees only a tiny recent-turn window, so "make it $120 instead"
   // must resolve against state rather than deep history.
-  const pendingPreviewText = renderPendingPreview(findPendingPreview(history));
+  const pendingPreview = findPendingPreview(history);
+  const pendingPreviewText = renderPendingPreview(pendingPreview);
 
   // "undo that" must work even when the thing to undo happened in the app,
   // not in chat — state it as a fact rather than leaving the model to infer
@@ -301,6 +321,7 @@ messageRoutes.post('/', zValidator('json', sendSchema), async (c) => {
         sourceMessageId: userMessage.id,
         refs: taskContext.refs,
         pendingConfirmCard,
+        hasPendingPreview: !!pendingPreview,
       })) {
         if (event.type === 'delta') {
           await stream.writeSSE({ event: 'delta', data: JSON.stringify({ text: event.text }) });
