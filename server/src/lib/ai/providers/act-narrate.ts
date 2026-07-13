@@ -49,6 +49,21 @@ type MaxTokensParam = 'max_tokens' | 'max_completion_tokens';
 // taken" narrate pass — never a false success claim.
 const requiredToolChoiceUnsupported = new Set<string>();
 
+// The two results blocks the narrate pass can be handed, lifted out so the
+// SPECULATIVE narrate (dispatched before the action pass has finished) can be
+// built from the same text the real one would get.
+function actionResultsBlock(actionFacts: string[]): string {
+  return `# Actions already taken this turn (by you, just now — the user can see their cards above your reply)\n${actionFacts.map((f) => `- ${f}`).join('\n')}\n\nThese facts are freshly computed from the real database state — they override anything you remember from earlier in this conversation, including a number, streak, or status you stated in a previous reply. If a fact here conflicts with your own memory of the conversation, the fact here is correct and your memory is stale; restate it exactly, never "correct" it back toward what you recalled. Describe what actually happened in your own words, short and casual. State only these facts — no other action, preview, or change happened this turn, and you cannot take further actions in this reply.`;
+}
+
+// `reason` is empty for the speculative call — the action pass hasn't spoken
+// yet. That costs nothing, because a speculation is only ever SHOWN on an
+// intent: 'conversation' turn, where the reason is "nothing to do" and there is
+// no question for the reply to ask.
+function noActionResultsBlock(reason: string): string {
+  return `# No action was taken this turn${reason ? `\nThe action layer declined, and this is why: ${reason}\nIf that reason says something is ambiguous or missing, ASK for exactly that — one short, specific question naming the real options or the missing value. Do not answer it yourself, and do not act as though it were already resolved.` : ''}\nReply conversationally. If the user asked for something that needs a missing required detail, ask for it. Do not claim or imply that anything was created, changed, logged, removed, or previewed — nothing was. The user is looking at an unchanged list: a reply that says you completed, created, or logged something is simply false, and they will see that it is.`;
+}
+
 /**
  * The act/narrate split. Pass 1 (action) runs non-streamed on an isolated
  * context — action-only prompt, the volatile state block, and a tiny
@@ -120,6 +135,46 @@ export async function* streamChatReplyActNarrate(
     // done yet (missing number, ambiguous ref, a pending card). Only the
     // former unlocks the fast reply path — see the narrate call below.
     let noActionIntent: 'conversation' | 'unfulfilled' | '' = '';
+
+    /**
+     * SPECULATION — start the reply before we know whether we'll need it.
+     *
+     * A pure-conversation turn is strictly serial today: context -> act (~2.2s)
+     * -> narrate (~1.1s). But the second key of the fast-path gate
+     * (looksPurelyConversational) reads ONLY the user's own message — it does
+     * not depend on the action pass at all. So when that key already turns, the
+     * reply can be dispatched CONCURRENTLY with the action pass rather than
+     * after it, and time-to-first-token becomes max(act, narrate) instead of
+     * act + narrate.
+     *
+     * Safety is unchanged, and this is the crux: a speculation is only ever
+     * SHOWN if BOTH keys turn — the action pass must still come back with
+     * no_action AND intent 'conversation'. The action pass still runs, still
+     * judges, and still owns every tool call; nothing is bypassed or routed
+     * around it. If it acted, or declined for any reason other than "there was
+     * nothing here to act on", this stream is aborted unread and the real
+     * narrate runs exactly as before. A wrong guess costs tokens, never
+     * correctness.
+     */
+    const newestUserMessage = windowed[windowed.length - 1]?.content ?? '';
+    const mayBeConversational = looksPurelyConversational(newestUserMessage);
+    const speculation = mayBeConversational
+      ? client.chat.completions
+          .create({
+            model,
+            stream: true,
+            ...maxTokens(NARRATE_MAX_OUTPUT_TOKENS),
+            messages: [
+              ...buildTailedMessages(buildSystemPrompt(user), tailText, windowed),
+              { role: 'system', content: noActionResultsBlock('') },
+            ],
+            ...narrateConversationExtra,
+          } as OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming)
+          .then((stream) => ({ ok: true as const, stream }))
+          // A failed speculation is a non-event: fall through to the real
+          // narrate below, which will surface any genuine outage itself.
+          .catch((err: unknown) => ({ ok: false as const, err }))
+      : null;
 
     for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
       // Forced on the first round — the whole point of the pass. Later
@@ -265,58 +320,72 @@ export async function* streamChatReplyActNarrate(
 
     // ---- pass 2: narrate ---------------------------------------------------
     const narrateMessages = buildTailedMessages(buildSystemPrompt(user), tailText, windowed);
-    const resultsBlock =
-      actionFacts.length > 0
-        ? `# Actions already taken this turn (by you, just now — the user can see their cards above your reply)\n${actionFacts.map((f) => `- ${f}`).join('\n')}\n\nThese facts are freshly computed from the real database state — they override anything you remember from earlier in this conversation, including a number, streak, or status you stated in a previous reply. If a fact here conflicts with your own memory of the conversation, the fact here is correct and your memory is stale; restate it exactly, never "correct" it back toward what you recalled. Describe what actually happened in your own words, short and casual. State only these facts — no other action, preview, or change happened this turn, and you cannot take further actions in this reply.`
-        : `# No action was taken this turn${noActionReason ? `\nThe action layer declined, and this is why: ${noActionReason}\nIf that reason says something is ambiguous or missing, ASK for exactly that — one short, specific question naming the real options or the missing value. Do not answer it yourself, and do not act as though it were already resolved.` : ''}\nReply conversationally. If the user asked for something that needs a missing required detail, ask for it. Do not claim or imply that anything was created, changed, logged, removed, or previewed — nothing was. The user is looking at an unchanged list: a reply that says you completed, created, or logged something is simply false, and they will see that it is.`;
-    narrateMessages.push({ role: 'system', content: resultsBlock });
+    narrateMessages.push({
+      role: 'system',
+      content:
+        actionFacts.length > 0 ? actionResultsBlock(actionFacts) : noActionResultsBlock(noActionReason),
+    });
 
     /**
-     * The fast reply path. Reasoning on the narrate pass is emitted BEFORE the
-     * first content token, so it lands directly on time-to-first-token — worth
-     * ~1.7s of the ~4.1s a "hey, rough day" turn takes. Disabling it globally
-     * was tried and reverted: on a no-action turn the reply pass has one hard
-     * job, resist the pull of what the user just asked for, and without
-     * reasoning it confirmed the request it had read ("No problem, undid that",
-     * "Nice — $5 logged") on turns where nothing ran.
+     * TWO keys, and both must turn before reasoning is dropped from the reply.
      *
-     * But look at WHICH turns those were: every one had a real request in
-     * flight that couldn't be fulfilled (ambiguous ref, missing number, a
-     * pending card). A greeting has nothing to falsely confirm. So the fast
-     * path is gated on the action pass explicitly declaring intent:
-     * 'conversation' — no task/goal ask in the message at all.
+     * Key 1 is the action pass declaring no_action with intent 'conversation'.
+     * On its own that is NOT safe: asked "was there any task/goal intent here",
+     * the model labelled "saved my $5 today" as 'conversation' 3 times out of 3
+     * — because there was nothing left to DO about it (already recorded), so it
+     * conflated "nothing to do" with "nothing asked". With reasoning then off,
+     * the reply confirmed the save it had just read, on a turn where zero tools
+     * ran. Tightening the wording only swung it the other way: the fast path
+     * then never fired at all.
      *
-     * The gate is safe by construction, and that is the whole point: this is
-     * decided AFTER the action pass has already run and judged. Nothing is
-     * bypassed, no request can be routed away from the tools — the only thing
-     * riding on this flag is how the reply is *written*. A mislabel is still
-     * backstopped by the claim-check, which runs on every zero-tool turn.
+     * Key 2 (looksPurelyConversational, shared.ts) is a dumb literal scan of
+     * what the USER typed. The asymmetry is deliberate — a false positive there
+     * costs a little latency and nothing else, while a false negative is still
+     * caught by the model's own 'unfulfilled'. Neither key can, alone, put a
+     * real request on the fast path.
      */
-    // TWO keys, and they must both turn. The action pass saying 'conversation'
-    // is not sufficient on its own — see looksPurelyConversational in shared.ts
-    // for the measurement that proves it ("saved my $5 today" was labelled
-    // 'conversation' 3 of 3 times, and the reply then confirmed a save that
-    // never happened this turn).
-    const newestUserMessage = windowed[windowed.length - 1]?.content ?? '';
-    const fastPath =
-      actionFacts.length === 0 &&
-      noActionIntent === 'conversation' &&
-      looksPurelyConversational(newestUserMessage);
-    if (fastPath) {
-      logger.info(
-        { userId: actionCtx.userId, sourceMessageId: actionCtx.sourceMessageId },
-        'narrate fast path — no task/goal intent this turn',
-      );
+    const fastPath = actionFacts.length === 0 && noActionIntent === 'conversation' && mayBeConversational;
+
+    let stream: Awaited<ReturnType<typeof client.chat.completions.create>> | null = null;
+    if (fastPath && speculation) {
+      const settled = await speculation;
+      if (settled.ok) {
+        stream = settled.stream;
+        logger.info(
+          { userId: actionCtx.userId, sourceMessageId: actionCtx.sourceMessageId },
+          'narrate fast path — speculation HIT (reply was already in flight during the action pass)',
+        );
+      }
     }
 
-    const stream = await client.chat.completions.create({
-      model,
-      stream: true,
-      ...maxTokens(NARRATE_MAX_OUTPUT_TOKENS),
-      messages: narrateMessages,
-      // No tools at all — this pass talks; it cannot act.
-      ...(fastPath ? narrateConversationExtra : narrateExtra),
-    } as OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming);
+    if (!stream) {
+      // Either we never speculated, or the action pass went somewhere the
+      // speculation can't legally answer for (it acted, or it declined because
+      // something was missing/ambiguous). Drop it unread — it was written
+      // against "nothing happened", which is now either false or incomplete.
+      if (speculation) {
+        const settled = await speculation;
+        if (settled.ok) {
+          try {
+            settled.stream.controller.abort();
+          } catch {
+            // Already finished or already aborted — nothing to clean up.
+          }
+        }
+        logger.info(
+          { userId: actionCtx.userId, sourceMessageId: actionCtx.sourceMessageId, acted: actionFacts.length > 0, intent: noActionIntent || 'none' },
+          'narrate speculation DISCARDED — the action pass went another way',
+        );
+      }
+      stream = await client.chat.completions.create({
+        model,
+        stream: true,
+        ...maxTokens(NARRATE_MAX_OUTPUT_TOKENS),
+        messages: narrateMessages,
+        // No tools at all — this pass talks; it cannot act.
+        ...(fastPath ? narrateConversationExtra : narrateExtra),
+      } as OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming);
+    }
 
     let buffer = '';
     let emittedLength = 0;

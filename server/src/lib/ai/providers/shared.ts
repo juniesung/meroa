@@ -220,8 +220,19 @@ export function isToolCallMarkupLeak(text: string): boolean {
 // here (calling a greeting task-ish) costs a little latency and nothing else,
 // while a false negative is caught by the model's own 'unfulfilled'. Neither
 // key can, alone, route a real request into the fast lane.
+// The trailing alternatives are progress QUESTIONS, and they earn their place:
+// "how am i doing so far?" trips none of the nouns or verbs above, so the regex
+// waved it through and the action pass — reasonably enough, since there is
+// nothing to DO about a status question — called it 'conversation'. Both keys
+// turned, and a numbers recap got written with reasoning off. It came back
+// correct in testing, but a recap is precisely where a fabricated figure would
+// land (the reply has to quote real totals from the state block), and the
+// claim-check only guards ACTION claims, not invented numbers. So a question
+// about their own progress never takes the fast path, whatever the model calls
+// it. Costs a reasoning pass on a handful of turns; buys back the one place the
+// backstops don't reach.
 const TASK_INTENT_SIGNAL_PATTERN =
-  /\d|\$|£|€|\btask|\bgoal|\bhabit|\bstreak|\bsav(e|ed|ing)|\bspent|\blog(ged)?\b|\btrack|\bremind|\bdone\b|\bfinish|\bcomplet|\bundo\b|\bdelete|\bremove|\bcancel|\badd\b|\bcreate\b|\bmark\b|\bdid\b|\bworkout|\bgym\b|\brun\b|\bprogress|\bdue\b|\btoday\b|\btomorrow\b|\bweek\b|\bmonth\b/i;
+  /\d|\$|£|€|\btask|\bgoal|\bhabit|\bstreak|\bsav(e|ed|ing)|\bspent|\blog(ged)?\b|\btrack|\bremind|\bdone\b|\bfinish|\bcomplet|\bundo\b|\bdelete|\bremove|\bcancel|\badd\b|\bcreate\b|\bmark\b|\bdid\b|\bworkout|\bgym\b|\brun\b|\bprogress|\bdue\b|\btoday\b|\btomorrow\b|\bweek\b|\bmonth\b|how (am|are|much|many|far)|where (am|are)\b|\bstatus\b|catch me up|\bso far\b|\bleft\b/i;
 
 /** True when the user's own message shows no sign of touching their tasks/goals. */
 export function looksPurelyConversational(userMessage: string): boolean {

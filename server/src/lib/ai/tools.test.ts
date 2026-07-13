@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { looksPurelyConversational } from './providers/shared.ts';
 import {
   AI_TOOL_SCHEMAS,
   NO_ACTION_TOOL_NAME,
@@ -183,5 +184,39 @@ describe('no_action carries a reason', () => {
     };
     expect(params.required).toContain('intent');
     expect(params.properties?.intent?.enum).toEqual(['conversation', 'unfulfilled']);
+  });
+});
+
+describe('looksPurelyConversational — the fast path\'s second key', () => {
+  // Pure function, no API. This is the key that does NOT depend on the model,
+  // and it is the only thing standing between a task request and a reply
+  // written with reasoning switched off.
+  it('lets genuine small talk through', () => {
+    for (const m of ['hey', 'haha fair enough', "what's your deal", 'kind of a rough day honestly', 'lol']) {
+      expect(looksPurelyConversational(m), m).toBe(true);
+    }
+  });
+
+  it('blocks anything that touches their tasks or goals', () => {
+    for (const m of [
+      'saved my $5 today', // labelled 'conversation' by the model 3/3 — this key is what stops it
+      'mark water done',
+      'add a task to call mom',
+      'undo that',
+      'i want to save for a laptop',
+      'did my workout',
+      'log 165',
+    ]) {
+      expect(looksPurelyConversational(m), m).toBe(false);
+    }
+  });
+
+  it('blocks progress questions — a numbers recap must never lose its reasoning', () => {
+    // Found live: "how am i doing so far?" tripped none of the nouns or verbs,
+    // so it was fast-pathed 3/3. A recap has to quote real totals, and the
+    // claim-check guards action claims, not invented numbers.
+    for (const m of ['how am i doing so far?', 'how much have i saved', 'where am i at', 'catch me up', "what's left"]) {
+      expect(looksPurelyConversational(m), m).toBe(false);
+    }
   });
 });
