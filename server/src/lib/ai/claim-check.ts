@@ -32,15 +32,42 @@ const CLASSIFIER_MAX_TOKENS = 800;
 // the distinction explicitly (declarative "doing it now" vs. conditional
 // "can do it if you want" / explaining what didn't happen) with concrete
 // examples of each, since without them the model reliably blurred it.
-const CLASSIFIER_SYSTEM_PROMPT = `You will be shown a message an AI assistant sent to its own user, inside an app for tracking tasks and goals (savings goals, and their linked tasks). The assistant made zero tool calls this turn — nothing was created, completed, edited, removed, postponed, logged, saved, or shown as a preview just now, no matter how the message reads. Answer with exactly YES or NO: does the message's wording falsely read as though something WAS just created, completed, edited, removed, postponed, logged, saved, or shown as a preview/card THIS turn?
+// GROUNDED, after it fired on two honest replies in eleven live turns (~18%) and
+// made the app look broken: "You good? \"Call the dentist\" is set for tomorrow at
+// 3 PM" (a task that really does exist) and "Kept. Dentist at 4 PM tomorrow" (said
+// when correctly declining to delete anything) both got "Hold on — I don't think
+// that actually went through" bolted onto them.
+//
+// The old prompt could not have got those right, because it was shown ONLY the
+// reply. Asked "does this sound like a claim", it had to guess — and it even
+// listed "Set for tomorrow at 2pm" as a YES example. But sounding like a claim is
+// not the question. The question is whether the claim is FALSE.
+//
+// And on a zero-tool turn that is decidable, because nothing changed this turn:
+// the user's current state IS their state from before the reply. So a reply that
+// merely describes something in that state is honest by construction, however
+// confidently it is phrased. Only a reply that asserts something the state
+// contradicts is a lie. Hand the classifier the state and it stops guessing.
+const CLASSIFIER_SYSTEM_PROMPT = `You will be shown (1) the user's CURRENT tasks and goals, and (2) a message an AI assistant just sent them.
 
-YES — the wording asserts or strongly implies a change (or a preview being shown) just happened in this reply, even if softened or paired with a caveat. Examples: "Added your task", "Marked it done", "Removing it now", "I'll remove the goal for you, just a moment!" (reads as already in motion), "Set for tomorrow at 2pm with a reminder" (claims a specific new detail was configured), "Sending a preview your way — tap Create" (claims a preview card was shown when create_goal was never called — describing a card that doesn't exist is the same lie as claiming a task was created), "Here's the card, take a look".
+The assistant made ZERO tool calls this turn — nothing was created, completed, edited, removed, postponed, logged, saved, or shown as a card. Because nothing changed, the state below is ALSO exactly what the state was before the assistant replied.
 
-NO — the wording only references a task's or goal's state from *before* this reply (created in an earlier turn, already existing), explains a limitation, or offers a conditional choice about the future — without asserting anything changed or was shown just now. Examples: "That's already on your list — T1, tomorrow at 2pm" (referring to something from earlier, not this turn), "No reminder attached" (stating an absence, not a change), "I can remove it if you want" (conditional offer), "I didn't set a reminder and can't add one retroactively" (explicitly says nothing changed), "Which day did you mean?", "Want me to set up a preview for that?" (asking, not claiming one already exists).
+Answer with exactly YES or NO: does the reply tell the user something FALSE about their tasks or goals?
 
-Also NO — a status recap of what the USER already did in the app: summarizing which tasks are done or open, running totals, streaks, or progress ("You crushed it today — packing list all checked off, bench target hit, savings at $14/$120") describes existing state the user created through their own taps, not an action the ASSISTANT performed this turn. Past-tense completion language inside a recap of the user's day is NO, even when enthusiastic.
+YES — the reply asserts something the state contradicts. That is the only thing you are looking for. Examples:
+- claims a change it did not make ("Added your task", "Marked it done", "Removed it", "Logged that", "Moved it to Friday") when the state shows otherwise: the task isn't there, is still open, is still on its old date.
+- describes a task or goal that does not appear in the state at all.
+- claims a preview or card was just shown ("Preview's up — tap Create", "Here's the card"). No card was shown this turn, so this is always false.
+- gets a fact wrong: says a task is due at 5pm when the state says 7pm; says a goal is at $50 when it is at $10.
 
-The test that matters: does this specific sentence claim the ASSISTANT changed or showed something THIS turn, or is it just describing tasks/goals (existing, absent, hypothetical, or the user's own activity) without claiming a fresh change of its own? Only YES for the former.`;
+NO — everything else. Crucially:
+- DESCRIBING something that really is in the state is honest, no matter how it is phrased. "Call the dentist is set for tomorrow at 3 PM" is NO if that task exists that way. It reads like a confirmation; that does not matter, because it is TRUE.
+- Declining to act is honest: "Kept it", "Nothing to undo", "I didn't delete anything", "Which one did you mean?".
+- Recapping what the USER did themselves — totals, streaks, what is done today — is honest.
+- Offers and questions about the future ("I can remove it if you want") are honest.
+- Ordinary conversation making no factual claim about their tasks is honest.
+
+Do not judge tone, confidence, or phrasing. Judge only truth against the state. If the reply says nothing the state contradicts, answer NO.`;
 
 // Lazy singleton — most requests never hit this (see the toolCallLog.length
 // guard in providers/shared.ts), so there's no reason to construct a client
@@ -73,7 +100,7 @@ function getClient(): OpenAI | null {
  * error — a missed catch here is far cheaper than blocking every reply on
  * an extra round trip that isn't guaranteed to succeed.
  */
-export async function didClaimAction(segments: string[]): Promise<boolean> {
+export async function didClaimAction(segments: string[], stateFacts: string): Promise<boolean> {
   const text = segments.join(' ').trim();
   if (!text) return false;
 
@@ -90,7 +117,10 @@ export async function didClaimAction(segments: string[]): Promise<boolean> {
         temperature: 0,
         messages: [
           { role: 'system', content: CLASSIFIER_SYSTEM_PROMPT },
-          { role: 'user', content: `Assistant's message:\n"""\n${text}\n"""` },
+          {
+            role: 'user',
+            content: `THE USER'S CURRENT TASKS AND GOALS (unchanged this turn):\n"""\n${stateFacts || '(no tasks or goals)'}\n"""\n\nTHE ASSISTANT'S MESSAGE:\n"""\n${text}\n"""`,
+          },
         ],
       },
       { signal: controller.signal },

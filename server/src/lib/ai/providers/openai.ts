@@ -38,6 +38,7 @@ export async function* streamChatReplyOpenai(
   // single-pass rollback path below, which has only one context to build.
   narrateTailText: string = tailText,
   conversationTailText: string = narrateTailText,
+  stateFactsText: string = tailText,
 ): AsyncGenerator<ChatStreamEvent> {
   // The act/narrate split is the default — the single-pass loop below is
   // the AI_ACT_NARRATE=off rollback path (see providers/act-narrate.ts).
@@ -55,6 +56,7 @@ export async function* streamChatReplyOpenai(
       {},
       narrateTailText,
       conversationTailText,
+      stateFactsText,
     );
     return;
   }
@@ -316,13 +318,13 @@ export async function* streamChatReplyOpenai(
         yield { type: 'segment_end', text: remaining };
         emittedSegments.push(remaining);
       }
-      yield* maybeCorrectFakeAction();
+      yield* maybeCorrectFakeAction(stateFactsText);
       logTurn();
       yield { type: 'stream_end' };
       return;
     }
 
-    yield* maybeCorrectFakeAction();
+    yield* maybeCorrectFakeAction(stateFactsText);
     logTurn();
     yield { type: 'stream_end' };
   } catch (err) {

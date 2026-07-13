@@ -280,13 +280,13 @@ export async function* streamChatReplyAnthropic(
         yield { type: 'segment_end', text: remaining };
         emittedSegments.push(remaining);
       }
-      yield* maybeCorrectFakeAction();
+      yield* maybeCorrectFakeAction(tailText);
       logTurn();
       yield { type: 'stream_end' };
       return;
     }
 
-    yield* maybeCorrectFakeAction();
+    yield* maybeCorrectFakeAction(tailText);
     logTurn();
     yield { type: 'stream_end' };
   } catch (err) {

@@ -322,7 +322,7 @@ export function createTurnState(actionCtx: ChatActionContext) {
   // verdict is logged unconditionally (alongside whether the regex also
   // matched) so item 8's per-model false-claim rate has real numbers behind
   // it, not just the regex's narrower catch rate.
-  async function* maybeCorrectFakeAction(): AsyncGenerator<ChatStreamEvent> {
+  async function* maybeCorrectFakeAction(stateFacts: string = ''): AsyncGenerator<ChatStreamEvent> {
     // A turn whose only successful calls were pending-confirmation cards
     // (recordKind task_removal_pending / task_bulk_removal_pending /
     // goal_preview / goal_advance_pending) mutated NOTHING — skipping self-
@@ -359,7 +359,7 @@ export function createTurnState(actionCtx: ChatActionContext) {
       FAKE_ACTION_PATTERN.test(stripped) ||
       TOOL_NAME_LEAK_PATTERN.test(stripped) ||
       RAW_TOOL_CALL_MARKUP_PATTERN.test(text);
-    const claimed = hadPendingSuccess ? false : await didClaimAction(emittedSegments);
+    const claimed = hadPendingSuccess ? false : await didClaimAction(emittedSegments, stateFacts);
 
     logger.info(
       {
@@ -373,7 +373,15 @@ export function createTurnState(actionCtx: ChatActionContext) {
       'claim-check verdict',
     );
 
-    if (!matchedRegex && !claimed) return;
+    // The GROUNDED classifier arbitrates; the regexes only tell us what to look
+    // at. This used to be an OR — a FAKE_ACTION_PATTERN hit forced a correction
+    // even when the classifier said the reply was fine — and that is how two
+    // perfectly honest replies got "Hold on, I don't think that actually went
+    // through" stapled to them in eleven live turns. A pattern can see that a
+    // sentence *sounds like* a claim; only the state can say whether the claim is
+    // false. The one exception stays forced: a preview/card claim on a turn where
+    // no card exists is false by construction, no state needed.
+    if (!matchedPreviewClaim && !claimed) return;
     corrected = true;
 
     logger.warn(

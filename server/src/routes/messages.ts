@@ -84,24 +84,26 @@ function isCardMessage(m: { meta: unknown }): boolean {
 function historyContentFor(m: { content: string; meta: unknown }): string {
   const meta = m.meta as { kind?: string; preview?: { name?: string } } | null;
   switch (meta?.kind) {
-    // create_goal's stored `content` is written for the model mid-turn (it is
-    // full of instructions — "do not ask them to confirm in chat text…"), so it
-    // is the one card whose text must not be replayed verbatim as a past reply.
-    case 'goal_preview':
-      return meta.preview?.name
-        ? `[showed a preview card for the "${meta.preview.name}" goal — not saved until they tap Create]`
-        : '[showed a goal preview card]';
-    // A tap-to-confirm card's `content` is an INSTRUCTION to the user ("Tap to
-    // confirm: remove "Pick up brother", "Pick up sister" for good"). Replayed
-    // as a past assistant turn it reads as an open request the model still owes
-    // a follow-up on — so after the user tapped Confirm, a plain "What's up
-    // dawg" came back as "Already got you — just tapped that confirm, so
-    // they're all gone now." Recorded as a neutral fact instead: it shows what
-    // the assistant did (put a card up), not something it is still waiting on.
+    // Dropped from model-visible history entirely, and the reason is a bug I
+    // caused: a placeholder here ("[showed a confirmation card — nothing changes
+    // unless the user taps it]") got COPIED VERBATIM into a real reply — the user
+    // asked to delete a task and Meroa answered "[showing a confirmation card —
+    // tap it to confirm]" as prose, with no card. The original comment on this
+    // function warned of exactly that: *any* fixed, repeated shape in the model's
+    // own history is a template it will eventually reproduce. It is not that
+    // bracket markup is worse than prose; it is that a constant string is.
+    //
+    // And nothing is lost by dropping them, because a PENDING card is not an
+    // action — it changed nothing — and the one thing the reply pass needs to
+    // know about it now arrives as a server-authored fact instead
+    // (actionCtx.pendingConfirmCard, see providers/act-narrate.ts). The hole in
+    // history that started all this was left by real, COMPLETED actions; those
+    // still appear below.
     case 'task_removal_pending':
     case 'task_bulk_removal_pending':
     case 'goal_advance_pending':
-      return '[showed a confirmation card — nothing changes unless the user taps it]';
+    case 'goal_preview':
+      return '';
     // A real, completed change. Its `content` is already the user-facing,
     // server-computed sentence describing exactly what happened — that is the
     // truth, and it is what the assistant "said" by putting the card up.
@@ -276,6 +278,14 @@ messageRoutes.post('/', zValidator('json', sendSchema), async (c) => {
   const tailText = buildTailBlock({ ...sharedTail, recentChangesText, undoTargetText });
   const narrateTailText = buildTailBlock({ ...sharedTail, recentChangesText });
   const conversationTailText = buildConversationTailBlock(sharedTail.now, userContext.timezone);
+  // What the GUARDS are shown (claim-check, figure-check): the plain truth about
+  // what the user has, and nothing else. Deliberately NOT tailText — that carries
+  // the recent-changes feed ("Since your last message, in the app: removed …") and
+  // the undo target, and handing those to a classifier whose whole premise is
+  // "nothing changed this turn" is a contradiction. It duly got confused and
+  // retracted two perfectly honest replies live. A guard can only be as good as
+  // the facts you give it.
+  const stateFactsText = buildTailBlock(sharedTail);
 
   return streamSSE(c, async (stream) => {
     await stream.writeSSE({ event: 'user_message', data: JSON.stringify(userMessage) });
@@ -285,7 +295,7 @@ messageRoutes.post('/', zValidator('json', sendSchema), async (c) => {
     // (rare, but possible) would leave the client's typing indicator hanging
     // forever with no error and no retry path.
     try {
-      for await (const event of streamChatReply(chatHistory, userContext, tailText, narrateTailText, conversationTailText, {
+      for await (const event of streamChatReply(chatHistory, userContext, tailText, narrateTailText, conversationTailText, stateFactsText, {
         userId,
         timezone: userContext.timezone,
         sourceMessageId: userMessage.id,

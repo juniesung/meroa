@@ -131,6 +131,9 @@ export async function* streamChatReplyActNarrate(
   // The state block for a PURE-CONVERSATION reply: just the clock. No task list,
   // no goals, no recent-changes feed. See the speculation below for why.
   conversationTailText: string = narrateTailText,
+  // Tasks + goals only — what the guards judge the reply against. See
+  // routes/messages.ts for why this is NOT tailText.
+  stateFactsText: string = tailText,
 ): AsyncGenerator<ChatStreamEvent> {
   const windowed = windowHistory(history).filter((m) => m.content.trim().length > 0);
   const {
@@ -618,7 +621,7 @@ export async function* streamChatReplyActNarrate(
     // only successful calls were pending-confirmation cards (see its
     // comment). no_action deliberately doesn't count as a real call either
     // way.
-    yield* maybeCorrectFakeAction();
+    yield* maybeCorrectFakeAction(stateFactsText);
     // The other half of the same guarantee. maybeCorrectFakeAction returns
     // the instant a real mutation exists, so it has never once looked at an
     // action turn's narration — and the reply passing a fresh action off as
@@ -632,7 +635,7 @@ export async function* streamChatReplyActNarrate(
     // the server actually did this turn, and the user's own words. A figure that
     // can't be justified from these was invented.
     yield* maybeCorrectFabricatedFigure(
-      [tailText, ...actionFacts, newestUserMessage].filter(Boolean).join('\n'),
+      [stateFactsText, ...actionFacts, newestUserMessage].filter(Boolean).join('\n'),
     );
     logTurn();
     yield { type: 'stream_end' };

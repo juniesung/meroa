@@ -28,9 +28,11 @@ export function streamChatReply(
   narrateTailText: string,
   // Just the clock — the state block a pure-conversation reply gets.
   conversationTailText: string,
+  // Tasks + goals only. What the claim-check and figure-check are judged against.
+  stateFactsText: string,
   actionCtx: ChatActionContext,
 ): AsyncGenerator<ChatStreamEvent> {
-  if (env.AI_PROVIDER === 'openai') return streamChatReplyOpenai(history, user, tailText, actionCtx, narrateTailText, conversationTailText);
-  if (env.AI_PROVIDER === 'deepseek') return streamChatReplyDeepseek(history, user, tailText, actionCtx, narrateTailText, conversationTailText);
+  if (env.AI_PROVIDER === 'openai') return streamChatReplyOpenai(history, user, tailText, actionCtx, narrateTailText, conversationTailText, stateFactsText);
+  if (env.AI_PROVIDER === 'deepseek') return streamChatReplyDeepseek(history, user, tailText, actionCtx, narrateTailText, conversationTailText, stateFactsText);
   return streamChatReplyAnthropic(history, user, tailText, actionCtx);
 }

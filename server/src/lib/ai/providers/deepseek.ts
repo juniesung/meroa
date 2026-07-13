@@ -100,6 +100,7 @@ export async function* streamChatReplyDeepseek(
   // single-pass rollback path below, which has only one context to build.
   narrateTailText: string = tailText,
   conversationTailText: string = narrateTailText,
+  stateFactsText: string = tailText,
 ): AsyncGenerator<ChatStreamEvent> {
   // The act/narrate split is the default — this file's single-pass loop
   // below is the AI_ACT_NARRATE=off rollback path (kept for A/B comparison
@@ -118,6 +119,7 @@ export async function* streamChatReplyDeepseek(
       DEEPSEEK_NARRATE_CONVERSATION_EXTRA,
       narrateTailText,
       conversationTailText,
+      stateFactsText,
     );
     return;
   }
@@ -276,7 +278,7 @@ export async function* streamChatReplyDeepseek(
           "Hm, that last step glitched on my end — it may not have gone through. Mind asking again?";
         yield { type: 'segment_end', text: glitchText };
         emittedSegments.push(glitchText);
-        yield* maybeCorrectFakeAction();
+        yield* maybeCorrectFakeAction(stateFactsText);
         logTurn();
         yield { type: 'stream_end' };
         return;
@@ -426,13 +428,13 @@ export async function* streamChatReplyDeepseek(
         yield { type: 'segment_end', text: remaining };
         emittedSegments.push(remaining);
       }
-      yield* maybeCorrectFakeAction();
+      yield* maybeCorrectFakeAction(stateFactsText);
       logTurn();
       yield { type: 'stream_end' };
       return;
     }
 
-    yield* maybeCorrectFakeAction();
+    yield* maybeCorrectFakeAction(stateFactsText);
     logTurn();
     yield { type: 'stream_end' };
   } catch (err) {
