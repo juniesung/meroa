@@ -159,9 +159,38 @@ Target the **current stable Expo SDK**, built fresh — not the reference zip's 
 ```
 
 The **AI action layer** is the spine of the product loop: the model proposes structured
-actions (`create_task`, `complete_task`, `log_tool_entry`, `edit_tool`, …) against a
+actions (`create_task`, `complete_task`, `log_goal_entry`, `edit_goal`, …) against a
 constrained schema; the server validates them, gates low-confidence writes behind a
 confirmation, applies them to the single record, and lets every view reflect the change.
+
+**A chat turn runs two model passes, and only two** — see **`docs/chat-architecture.md`**,
+which is required reading before touching `server/src/lib/ai/`:
+
+```
+  user message
+      │
+      ├─ ACT pass    — has tools, thinking on, decides and acts
+      │                 (or calls no_action with a reason + intent)
+      │
+      ├─ every call succeeded?  ──YES──►  emit the cards. SAY NOTHING.
+      │                                    (the card IS the confirmation)
+      │                          ──NO───►  NARRATE pass — no tools, streams the reply
+      │                                    (a question, a failure, or conversation)
+      │
+      └─ guards: false claim · concealment · fabricated figure · tool-call leak
+                 (at most one correction per turn, all grounded in server state)
+```
+
+Three principles carry the whole design, and all three were learned the hard way:
+
+- **A prompt is a suggestion; a guarantee lives in code.** Every prompt rule added to fix
+  a correctness bug caused a new failure elsewhere. Every structural fix held. Prefer:
+  delete the thing that spoke → fix the context that's lying → make the server refuse.
+- **The card is the confirmation.** A successful action turn writes no prose at all. That
+  deletes the lie surface rather than policing it — false claims, concealment and invented
+  totals all lived in the sentence *about* an action that had already succeeded.
+- **Never invent a number.** Every figure is computed in SQL and *quoted* by the model.
+  Anything else is a bug, and there is an output-boundary guard that catches it.
 
 ---
 
