@@ -532,14 +532,40 @@ export async function editTask(
     const [updated] = await tx.update(tasks).set(updates).where(eq(tasks.id, task.id)).returning();
     if (!updated) throw new Error('task_update_failed');
 
-    // A template's reminder setting only otherwise reaches instances
-    // materialized *after* the edit (resetConfigForNewInstance reads it off
-    // the template at generation time) — without this, turning reminders on
-    // for a daily task wouldn't notify for today's already-materialized
-    // instance until tomorrow. Matches removeTask's cascade in spirit; like
-    // that one, this cascade isn't separately undoable — only the
-    // template's own edit is (its reminder value is restored via prior.config).
-    if (patch.reminder !== undefined && task.recurrence) {
+    // A template's config only otherwise reaches instances materialized *after*
+    // the edit (resetConfigForNewInstance reads it off the template at generation
+    // time) — so without this, editing a recurring task leaves TODAY's already-
+    // materialized instance on the old values until tomorrow.
+    //
+    // Seen live: "add a task to drink 8 glasses of water a day" then "make it 10
+    // instead" left the template at target 10 while today's instance stayed at 8,
+    // so the Tasks tab showed "3 / 8" for a target the user had just changed. Same
+    // task, two different targets. `reminder` and the goal link were already
+    // cascaded for exactly this reason; the fields that define WHAT THE TASK IS
+    // simply never got added to the list.
+    //
+    // Scope is deliberate — only what a user would call "the same task, edited":
+    //   · title / icon        — identity
+    //   · target / unit       — a counter's goal
+    //   · targetMinutes       — a duration's goal
+    // NOT the schedule (recurrence/dueAt): an instance owns its own due date by
+    // construction. NOT progress (count, loggedMinutes, checked items): that is
+    // the user's real work and an edit must never silently reset it. And NOT
+    // checklist `items`, whose per-instance done-state makes a merge a genuine
+    // design question rather than a cascade — left as-is until it comes up.
+    //
+    // Only OPEN instances, and like the cascades below it this isn't separately
+    // undoable — undoing the edit restores the template (prior.config), which is
+    // what the next materialization reads anyway.
+    const CASCADING_CONFIG_KEYS = ['target', 'unit', 'targetMinutes', 'reminder'] as const;
+    const cascadedConfig: Record<string, unknown> = {};
+    for (const key of CASCADING_CONFIG_KEYS) {
+      if (config[key] !== undefined && config[key] !== (task.config as Record<string, unknown>)[key]) {
+        cascadedConfig[key] = config[key];
+      }
+    }
+    const cascadesIdentity = updates.title !== undefined || updates.icon !== undefined;
+    if (task.recurrence && (Object.keys(cascadedConfig).length > 0 || cascadesIdentity)) {
       const instances = await tx
         .select({ id: tasks.id, config: tasks.config })
         .from(tasks)
@@ -549,7 +575,13 @@ export async function editTask(
       for (const inst of instances) {
         await tx
           .update(tasks)
-          .set({ config: { ...(inst.config as Record<string, unknown>), reminder: patch.reminder } })
+          .set({
+            ...(updates.title !== undefined ? { title: updates.title } : {}),
+            ...(updates.icon !== undefined ? { icon: updates.icon } : {}),
+            ...(Object.keys(cascadedConfig).length > 0
+              ? { config: { ...(inst.config as Record<string, unknown>), ...cascadedConfig } }
+              : {}),
+          })
           .where(eq(tasks.id, inst.id));
       }
     }
