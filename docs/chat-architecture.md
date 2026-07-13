@@ -201,6 +201,46 @@ a contradiction and then blaming its judgment is not reasonable. It duly retract
 two perfectly honest replies. **A guard can only be as good as the facts you give
 it.**
 
+### A block that omits a row makes the model lie — and the guard takes the blame
+
+The blocks above are only as true as the queries behind them. `task-context.ts`
+**folds** a recurring instance into its parent template, so a daily task renders as
+one row and not a pile of dated copies. That fold assumes the template is *there to
+be folded into*.
+
+It wasn't. The removal cascade used to spare **completed** instances (`status ===
+'open'`), which orphaned them: the template was deleted, the done instance survived.
+The fold then hid each orphan behind a stand-in that no longer existed, and the block
+came back:
+
+> *They have no tasks yet.*
+
+…while the Tasks tab showed **three**. The user said *"delete all tasks"*, tapped
+Confirm, and three remained. Chat, reading its context faithfully, said everything
+was gone. `didClaimAction` — which reads real server state and could see the rows —
+caught the contradiction and retracted:
+
+> *"Hold on — I don't think that actually went through."*
+
+**Every component behaved correctly and the user got a lie followed by a retraction.**
+The model didn't hallucinate; it was told there were no tasks. The guard didn't
+misfire; it was right. The bug was one `WHERE` clause in a cascade and one fold with
+an unchecked premise.
+
+Two things were fixed, deliberately at both layers:
+
+- **Policy:** every cascade (`removeTask`, `removeTasks`, the goal-archive cascade)
+  now takes the whole series, done instances included. The app stops **making**
+  orphans.
+- **Guarantee:** the fold is now conditional on the template actually being present.
+  A row with nothing to fold into **represents itself**. An orphan can no longer go
+  **unseen**, whatever creates one next.
+
+The policy is the fix; the guarantee is the one that will still be true in a year.
+This is §0 again from a new angle: *fix the context that's lying*. **When a guard
+fires, suspect the context before you suspect the model** — a guard firing is
+evidence the reply disagreed with reality, not evidence about *which one* was wrong.
+
 ---
 
 ## 5. History — what the model sees, and what it must never see
@@ -449,13 +489,19 @@ See `docs/phase-5-completion-plan.md` and Phase 7.
    delete, what context is lying, or what the server can refuse.
 2. **Never put a constant string into model-visible history.** §5. It will be copied.
 3. **Never hand a guard a context that contradicts its own premise.** §4.
-4. **Anything with a number in it is server-computed.** §9. No exceptions.
-5. **Two keys for anything that relaxes safety.** §8. Model judgment is one key,
+4. **When a guard fires, suspect the context before the model.** §4. A firing guard
+   proves the reply disagreed with server state — it says nothing about *which* of
+   them was wrong. The "delete all tasks" bug looked exactly like a hallucination and
+   was a `WHERE` clause. If a context block can omit a row the UI still renders, the
+   model will state it as fact and the guard will retract it, and you will spend the
+   day debugging the wrong layer.
+5. **Anything with a number in it is server-computed.** §9. No exceptions.
+6. **Two keys for anything that relaxes safety.** §8. Model judgment is one key,
    never both.
-6. **The battery is a floor, not a ceiling.** It runs on *fresh accounts*. Three of
+7. **The battery is a floor, not a ceiling.** It runs on *fresh accounts*. Three of
    today's bugs — the leak, the correction spam, the "what's up" recap — were
    invisible to it and surfaced within minutes of a human using a **long-lived
    account**. Before you trust a change, drive it on an account with real history.
-7. **Every change goes through the battery** (`docs/phase-5-completion-plan.md` §3)
+8. **Every change goes through the battery** (`docs/phase-5-completion-plan.md` §3)
    *and* an as-a-user pass. `tsc` and unit tests have never once caught one of these
    bugs.

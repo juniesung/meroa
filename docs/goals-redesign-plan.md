@@ -580,6 +580,13 @@ User-specified rules, all verified live end to end:
 2. **Deleting a repeating task** (REPEATING section) removes it from the daily
    list too (open instances cascade — pre-existing) and nothing materializes
    after; done instances stay as history.
+   > **SUPERSEDED 2026-07-13** — "done instances stay as history" was wrong and
+   > shipped a bug. A done instance whose template is gone is unreachable, still
+   > renders on the Tasks tab, and is *invisible* to the model (task-context folds
+   > it into a template that no longer exists) — so "delete all tasks" left three
+   > tasks on screen while chat said everything was gone. **All cascades now take
+   > the whole series, done instances included.** See the 2026-07-13 session at the
+   > end of this file and `docs/chat-architecture.md` §4.
 3. **Goal-linked recurring deletes are never a silent swipe.** The Tasks tab
    now confirms first (`confirmDelete` in tasks.tsx): a goal-linked *template*
    gets "…is the repeating task behind ‹goal›. Deleting it removes the goal
@@ -895,3 +902,88 @@ in bug 3 it flatly contradicted a correct tool result. Data integrity is sound; 
 quality is the open question — and that is precisely the input to the **provider decision**,
 now the sole gate before Phase 6. Run this same protocol against an Anthropic model and
 pick on measured false-claim rate, not vibes.
+
+---
+
+## Session: Tasks-tab polish + the "delete all tasks" divergence (2026-07-13)
+
+Three things shipped. The last one is the only interesting one.
+
+**A TOMORROW section on the Tasks tab.** Anything due after today was sitting in the
+middle of the day list, so "what do I have to do today" had Friday's tasks mixed into
+it. They now drop into their own section (soonest first) above REPEATING. The header
+count and the ring follow, so both are now genuinely today-only — which is what they
+always claimed to be.
+
+**The day ring celebrates hitting 100%** — a one-shot glow plus a Success haptic (not
+Light: the tap that completed the task already fired its own Light impact, so an
+identical second buzz just reads as a double-tap). It fires on the **crossing** into
+100, never on *being* at 100 — throbbing every time you open the tab on a day you'd
+already finished is nagging, not rewarding.
+
+The subtlety, and the reason it's worth writing down: a crossing is only meaningful
+once **both ends of it are real**. An unloaded task list reads as 0%, so first paint on
+an already-finished day goes 0 → 100 and is indistinguishable from earning it. So
+celebration is opt-in (`celebrate`), the caller holds it false until the data lands,
+and **the render that flips it true cannot be the render that fires** — only the one
+after. It's also false while the tab is off-view, or completing a task from Chat would
+buzz an invisible ring on a tab kept mounted behind it. Same shape as every context bug
+in `docs/chat-architecture.md`: the state was *technically* accurate and still lied,
+because it was read before it meant anything.
+
+**"Delete all tasks" left three tasks on the Tasks tab — and chat insisted they were
+gone, then retracted itself.** Reported from live use. Full write-up in
+`docs/chat-architecture.md` §4; the short version, because it is a genuinely new
+failure class:
+
+- The removal cascade spared **completed** instances (`status === 'open'`), on the
+  theory that a done instance is history worth keeping. It isn't, once its template is
+  deleted — it survives as a row nobody can reach that still renders on the Tasks tab.
+  The three survivors were exactly the tasks that had been ticked off.
+- Those orphans then went **invisible to the model**: `task-context.ts` folds an
+  instance into its parent template (so a daily task isn't rendered twice), and it
+  folded these into a template that no longer existed. The context block came back
+  **"They have no tasks yet."**
+- So the model said everything was gone **in good faith**, and `didClaimAction` —
+  which reads real server state and *could* see the rows — caught the contradiction and
+  retracted with *"I don't think that actually went through."*
+
+**Every component behaved correctly and the user still got a lie followed by a
+retraction.** No hallucination, no misfiring guard: one `WHERE` clause in a cascade and
+one fold with an unchecked premise. Fixed at **both** layers on purpose — all three
+cascade sites (`removeTask`, `removeTasks`, `archiveGoalCascadeInTx`) now take the whole
+series, so the app stops *making* orphans (policy); and the fold is now conditional on
+the template actually being present, so a row with nothing to fold into represents
+itself and an orphan can't go *unseen* whatever creates one next (guarantee). New rule
+4 in `chat-architecture.md` §11: **when a guard fires, suspect the context before the
+model** — a firing guard proves the reply disagreed with reality, not which of the two
+was wrong.
+
+Undo needed no change: it restores by *recorded id* rather than re-querying by status,
+so it already restores the completed instances, still marked done. Verified live.
+
+**What "delete everything" costs, and why it's inherent.** Goal *totals* are safe —
+they live in `goal_entries → records` and never read the `tasks` table, so no cascade
+can touch a savings balance. But **streaks and the Consistency calendar are computed
+from live task rows**, so deleting a task does drop its days from them. That is not a
+choice the cascade made: a "perfect day" means *every task due that day was done*, and
+the denominator **is** the task rows. Preserving that history across a delete would mean
+making completions first-class records the calendar reads, instead of a view over live
+tasks — a real design change, deliberately not done here. User's call, made explicitly:
+*"delete all tasks should delete everything."*
+
+**Verification.** Reproduced the exact shape live (daily task + today's instance
+completed): 3 tasks → **0** after the delete, chat answers "No tasks left — zero" with
+no retraction, undo restores all 3 with the completed one still done. Ran
+`buildTaskContext` directly against the long-lived account that still held the two
+orphans from before the fix — it used to return "They have no tasks yet" and now lists
+both. **Server suite 153/153**, both packages typecheck clean, client lint clean.
+
+**Also fixed: the app couldn't reach the dev server from a physical phone.**
+`EXPO_PUBLIC_API_URL` was a hard `localhost`, which on a phone is the *phone*. The
+client now borrows the host Metro already knows the device reached it on (`hostUri`) and
+keeps its own port — loopback URLs only, so a real staging/prod URL passes through
+untouched and the simulator is unaffected. Every dependency is an Expo SDK or core RN
+library, so **Expo Go runs the whole app today** — no Xcode, no signing, no Apple
+Developer account. That stops being true at Phase 7 (billing), which needs a real dev
+build.

@@ -44,7 +44,8 @@ Definition of Done so you have clean checkpoints.
 **Two things not to conflate**
 
 - **Two "Claude"s.** _Claude Code_ is the tool that builds the app (uses your Pro/Max plan). The _model API that powers Meroa's in-app chat_ is separate — set up server-side in Phase 2 with its own key, never shipped in the app bundle (§3).
-- **Builds.** You don't need EAS _cloud_ builds early: `npx expo run:ios` is already a dev build, and Expo Go runs everything Phase 0 needs. iOS works locally now with Xcode; Android needs Android Studio or EAS — add it when you reach cross-platform testing. EAS cloud builds matter later for Android and TestFlight/store distribution.
+- **Builds.** You don't need EAS _cloud_ builds early: `npx expo run:ios` is already a dev build. iOS works locally now with Xcode; Android needs Android Studio or EAS — add it when you reach cross-platform testing. EAS cloud builds matter later for Android and TestFlight/store distribution.
+- **Testing on a real phone (as of Phase 5).** Every dependency is an Expo SDK or core RN library, so **Expo Go runs the whole app** — no Xcode, no code signing, no Apple Developer account. Start the server, `npx expo start`, scan the QR. The API base URL resolves itself: `EXPO_PUBLIC_API_URL` is `localhost`, which on a phone means the *phone*, so `lib/api/client.ts` swaps in the host Metro already reached the device on (loopback URLs only — a real staging/prod URL passes through). This stops working at **Phase 7 (billing)**, which needs a real dev build. Some things only exist on device: haptics do nothing in the simulator.
 
 ---
 
