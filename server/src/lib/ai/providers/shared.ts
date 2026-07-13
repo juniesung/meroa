@@ -3,7 +3,7 @@ import type OpenAI from 'openai';
 import { logger } from '../../../logger.ts';
 import type { TaskRow } from '../../tasks/executor.ts';
 import type { GoalRow } from '../../goals/executor.ts';
-import type { GoalPreview } from '../../goals/schema.ts';
+import type { AdvanceStageProposal, GoalPreview } from '../../goals/schema.ts';
 import { didClaimAction } from '../claim-check.ts';
 import type { TurnRefs } from '../task-context.ts';
 
@@ -42,8 +42,18 @@ export type ChatStreamEvent =
   | { type: 'action'; toolName: string; task: TaskRow; summary: string; recordKind: string }
   | { type: 'action_bulk'; toolName: string; tasks: TaskRow[]; summary: string; recordKind: string }
   // A goal action — edit_goal/log_goal_entry, or an
-  // undo_last_action that reverted a goal_% record.
-  | { type: 'action_goal'; toolName: string; goal: GoalRow; summary: string; recordKind: string }
+  // undo_last_action that reverted a goal_% record. `proposal` is set only
+  // for advance_goal_stage's pending-confirmation result (recordKind:
+  // 'goal_advance_pending') — routes/messages.ts persists it on the confirm
+  // card message's meta so POST /goals/:id/advance can re-validate it.
+  | {
+      type: 'action_goal';
+      toolName: string;
+      goal: GoalRow;
+      summary: string;
+      recordKind: string;
+      proposal?: AdvanceStageProposal;
+    }
   // create_goal — a preview only, nothing saved yet (docs/goals-redesign-
   // plan.md §2.1). routes/messages.ts persists this as a goal_preview
   // message; POST /goals {previewMessageId} is the actual save.
@@ -168,7 +178,12 @@ export function isToolCallMarkupLeak(text: string): boolean {
   return RAW_TOOL_CALL_MARKUP_PATTERN.test(text);
 }
 
-export type ToolCallLogEntry = { name: string; ok: boolean; taskId?: string; error?: string };
+// `pending` marks a successful call whose recordKind is a tap-to-confirm
+// card (task_removal_pending, task_bulk_removal_pending, goal_preview,
+// goal_advance_pending) — nothing was actually mutated, only shown. Distinct
+// from `ok` (which is about whether the call itself succeeded): a pending
+// call is `ok: true` but still leaves the turn with zero real mutations.
+export type ToolCallLogEntry = { name: string; ok: boolean; taskId?: string; error?: string; pending?: boolean };
 
 /**
  * Per-turn state shared by every provider: the tool-call log (the ground
@@ -195,7 +210,16 @@ export function createTurnState(actionCtx: ChatActionContext) {
   // matched) so item 8's per-model false-claim rate has real numbers behind
   // it, not just the regex's narrower catch rate.
   async function* maybeCorrectFakeAction(): AsyncGenerator<ChatStreamEvent> {
-    if (toolCallLog.length > 0) return;
+    // A turn whose only successful calls were pending-confirmation cards
+    // (recordKind task_removal_pending / task_bulk_removal_pending /
+    // goal_preview / goal_advance_pending) mutated NOTHING — skipping self-
+    // correction just because toolCallLog is non-empty let the narrate pass
+    // claim a card's action was actually done (observed live: "yes do it"
+    // on an advance_goal_stage card that had already fired once this
+    // conversation re-triggered the pending card, and the reply said "moved
+    // to Applying now — done" while the DB stayed on stage 1). Only a
+    // genuinely mutating success should suppress this check entirely.
+    if (toolCallLog.some((t) => t.ok && !t.pending)) return;
     const text = emittedSegments.join(' ');
     if (!text.trim()) return;
     // Markdown bold/italic markers can sit right inside a phrase a pattern
@@ -205,13 +229,24 @@ export function createTurnState(actionCtx: ChatActionContext) {
     // acceptance protocol's hallucination probe).
     const stripped = text.replace(/[*_]{1,3}/g, '');
 
-    const matchedPreviewClaim = PREVIEW_CLAIM_PATTERN.test(stripped);
+    // PREVIEW_CLAIM_PATTERN and the classifier are both built on the
+    // premise "no card/preview exists at all this turn" (claim-check.ts's
+    // system prompt says so explicitly) — true when there were zero
+    // successful calls, but FALSE when a pending card genuinely was just
+    // shown. Applying either in that case flags truthful narration ("tap it
+    // to confirm moving to X") as a fake claim. Only FAKE_ACTION_PATTERN
+    // (a completion VERB next to a quote, e.g. "you're moved to \"X\"") and
+    // the markup/leak patterns stay meaningful either way — a pending
+    // success can still falsely claim the underlying change is done, just
+    // never falsely claim a card exists (one genuinely does).
+    const hadPendingSuccess = toolCallLog.some((t) => t.ok && t.pending);
+    const matchedPreviewClaim = !hadPendingSuccess && PREVIEW_CLAIM_PATTERN.test(stripped);
     const matchedRegex =
       matchedPreviewClaim ||
       FAKE_ACTION_PATTERN.test(stripped) ||
       TOOL_NAME_LEAK_PATTERN.test(stripped) ||
       RAW_TOOL_CALL_MARKUP_PATTERN.test(text);
-    const claimed = await didClaimAction(emittedSegments);
+    const claimed = hadPendingSuccess ? false : await didClaimAction(emittedSegments);
 
     logger.info(
       {
@@ -220,6 +255,7 @@ export function createTurnState(actionCtx: ChatActionContext) {
         claim_check: claimed ? 'yes' : 'no',
         matched_regex: matchedRegex,
         matched_preview_claim: matchedPreviewClaim,
+        had_pending_success: hadPendingSuccess,
       },
       'claim-check verdict',
     );

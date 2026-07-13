@@ -1214,6 +1214,45 @@ async function undoGoalRecord(
       updated = goal;
       break;
     }
+    case 'goal_stage_advanced': {
+      // Own cast, not the shared `payload.prior` type above — that shape
+      // carries goal_edited's {name, icon, definition, version}, but an
+      // advance's prior snapshot is just {definition, version} (name/icon
+      // never change on an advance).
+      const advancePrior = (record.payload as { prior?: { definition: unknown; version: number } }).prior;
+      if (!advancePrior) throw new Error('goal_stage_advanced record missing prior snapshot');
+      const [g] = await tx
+        .update(goals)
+        .set({ definition: advancePrior.definition, version: advancePrior.version })
+        .where(eq(goals.id, goal.id))
+        .returning();
+      if (!g) throw new Error('goal_update_failed');
+      updated = g;
+      // Same goal_created-undo cascade shape: bring back what the advance
+      // retired, take back what it created — as a unit, matching the single
+      // record the advance itself wrote.
+      const advancePayload = record.payload as { retiredTaskIds?: string[]; createdTaskIds?: string[] };
+      if (advancePayload.retiredTaskIds?.length) {
+        await tx.update(tasks).set({ deletedAt: null }).where(inArray(tasks.id, advancePayload.retiredTaskIds));
+      }
+      if (advancePayload.createdTaskIds?.length) {
+        await tx
+          .update(tasks)
+          .set({ deletedAt: new Date() })
+          .where(and(inArray(tasks.id, advancePayload.createdTaskIds), isNull(tasks.deletedAt)));
+        await tx
+          .update(tasks)
+          .set({ deletedAt: new Date() })
+          .where(
+            and(
+              inArray(tasks.templateId, advancePayload.createdTaskIds),
+              eq(tasks.status, 'open'),
+              isNull(tasks.deletedAt),
+            ),
+          );
+      }
+      break;
+    }
     default:
       throw new TaskActionError('nothing_to_undo', `cannot undo record kind ${record.kind}`);
   }

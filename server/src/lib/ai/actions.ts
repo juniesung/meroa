@@ -23,12 +23,14 @@ import {
   createGoal,
   editGoal,
   getGoal as getGoalRow,
+  listGoalRetireCandidates,
   logGoalEntry,
   GoalActionError,
   type GoalRow,
 } from '../goals/executor.ts';
 import {
   goalDefinitionSchema,
+  type AdvanceStageProposal,
   type EditGoalPatch,
   type GoalDefinition,
   type GoalEntryData,
@@ -38,6 +40,8 @@ import {
 import { buildGoalScopedStreaks } from '../goals/consistency.ts';
 import { buildGoalCardSummaries, formatMoney } from '../goals/summary.ts';
 import { checkStarterPace } from '../goals/starter-pace.ts';
+import { buildTaskCompletionHistory, describeCompletionHistory } from './history.ts';
+import { describeGoalPreviewForSummary } from './pending-preview.ts';
 import type { TurnRef, TurnRefs } from './task-context.ts';
 import { isAiToolName, validateToolInput, type AiToolName } from './tools.ts';
 
@@ -90,7 +94,17 @@ export type TaskActionResult =
   | { ok: true; toolName: AiToolName; tasks: TaskRow[]; summary: string; recordKind: string }
   // A goal action that actually mutated a saved row — edit_goal,
   // log_goal_entry, or an undo_last_action that reverted a goal_% record.
-  | { ok: true; toolName: AiToolName; goal: GoalRow; summary: string; recordKind: string }
+  // `proposal` is set only for advance_goal_stage's pending-confirmation
+  // result (recordKind: 'goal_advance_pending') — nothing mutated yet, the
+  // card carries this so POST /goals/:id/advance can re-validate it.
+  | {
+      ok: true;
+      toolName: AiToolName;
+      goal: GoalRow;
+      summary: string;
+      recordKind: string;
+      proposal?: AdvanceStageProposal;
+    }
   // create_goal — a preview only, nothing saved yet
   // (docs/goals-redesign-plan.md §2.1/§2.2).
   | { ok: true; toolName: AiToolName; preview: GoalPreview; summary: string; recordKind: string }
@@ -184,6 +198,19 @@ async function goalImpactSuffix(
       : '';
   }
 
+  if (definition.type === 'milestone') {
+    // A completed task is supporting activity only — never itself a stage
+    // declaration (locked decision, docs/milestone-goal-plan.md §2.3). Only
+    // stated on becameDone; there's nothing to say on becameOpen since a
+    // reopen doesn't retract a stage that was never advanced by this.
+    if (!becameDone) return '';
+    const stageLabel =
+      definition.activeStageIndex < definition.stages.length
+        ? `stage ${definition.activeStageIndex + 1} of ${definition.stages.length}, "${definition.stages[definition.activeStageIndex]}"`
+        : `all ${definition.stages.length} stages done`;
+    return ` That supports "${goal.name}" (${stageLabel}) — say the word when the stage itself is done; it never advances on its own.`;
+  }
+
   const contribution = (after.config as { goalContribution?: unknown }).goalContribution;
   if (typeof contribution !== 'number') return '';
   const currency = definition.currency;
@@ -192,6 +219,26 @@ async function goalImpactSuffix(
   return becameDone
     ? ` Auto-logged ${currency}${amount} to "${goal.name}" — now ${fact}.`
     : ` Removed today's ${currency}${amount} auto-entry from "${goal.name}" — back to ${fact}.`;
+}
+
+// Phase 5's history-aware reply ("that's your 4th time this week"), stated as
+// a server-computed fact on the completion summary — the model quotes it and
+// never counts anything itself (lesson 6/16, the same rule goalImpactSuffix
+// follows). Gated on becameDone exactly like goalImpactSuffix: "that's your
+// 3rd this week" after *un*-completing something is nonsense. Empty for a
+// one-off task (no series to count) and for a first completion of the week
+// (a count of 1 is noise, not a fact worth saying).
+async function taskHistorySuffix(
+  userId: string,
+  timezone: string | null,
+  priorStatus: string | undefined,
+  after: TaskRow,
+): Promise<string> {
+  if (after.status !== 'done' || priorStatus === 'done') return '';
+  const history = await buildTaskCompletionHistory(userId, timezone, after);
+  if (!history) return '';
+  const clause = describeCompletionHistory(history);
+  return clause ? ` ${clause}` : '';
 }
 
 async function summarizeGoalUndo(
@@ -213,6 +260,8 @@ async function summarizeGoalUndo(
       const logged = entryData ? describeEntryData(definition, entryData as GoalEntryData) : '';
       return `Removed that${logged ? ` ${logged}` : ''} entry from "${goal.name}"${headline ? ` — ${headline} now` : ''}.`;
     }
+    case 'goal_stage_advanced':
+      return `Moved "${goal.name}" back a stage${headline ? ` — ${headline}` : ''}.`;
     default:
       return `Undid the last change to "${goal.name}"${headline ? ` — ${headline}` : ''}.`;
   }
@@ -749,11 +798,14 @@ async function executeAiToolCallInner(
           source,
         );
         const impact = await goalImpactSuffix(userId, timezone, priorTask.status, task);
+        // Goal fact first (it's the connected-loop payload), history clause
+        // last (it's color).
+        const history = await taskHistorySuffix(userId, timezone, priorTask.status, task);
         return {
           ok: true,
           toolName,
           task,
-          summary: `${summarizeComplete(task)}${impact}`,
+          summary: `${summarizeComplete(task)}${impact}${history}`,
           recordKind: 'task_completion',
         };
       }
@@ -780,13 +832,20 @@ async function executeAiToolCallInner(
         // can reopen) — the goal side effect gets stated as a fact here the
         // same way complete_task's does.
         const impact = await goalImpactSuffix(userId, timezone, priorTask?.status, task);
+        const history = await taskHistorySuffix(userId, timezone, priorTask?.status, task);
         const summary =
           action === 'start_timer'
             ? `Started the timer for "${task.title}".`
             : action === 'stop_timer'
               ? `Paused "${task.title}".`
               : `Updated "${task.title}".`;
-        return { ok: true, toolName, task, summary: `${summary}${impact}`, recordKind: 'task_progress' };
+        return {
+          ok: true,
+          toolName,
+          task,
+          summary: `${summary}${impact}${history}`,
+          recordKind: 'task_progress',
+        };
       }
       case 'postpone_task': {
         const validated = validateToolInput('postpone_task', rawInput);
@@ -933,12 +992,21 @@ async function executeAiToolCallInner(
                   targetValue: validated.data.targetValue,
                   deadline: validated.data.deadline,
                 }
-              : {
-                  type: 'savings',
-                  currency: validated.data.currency ?? '$',
-                  targetValue: validated.data.targetValue,
-                  deadline: validated.data.deadline,
-                },
+              : validated.data.type === 'milestone'
+                ? {
+                    // activeStageIndex is never a model input — every fresh
+                    // milestone starts at its first stage
+                    // (docs/milestone-goal-plan.md §1).
+                    type: 'milestone',
+                    stages: validated.data.stages,
+                    activeStageIndex: 0,
+                  }
+                : {
+                    type: 'savings',
+                    currency: validated.data.currency ?? '$',
+                    targetValue: validated.data.targetValue,
+                    deadline: validated.data.deadline,
+                  },
         );
         const preview: GoalPreview = {
           template: validated.data.type,
@@ -972,7 +1040,7 @@ async function executeAiToolCallInner(
           ok: true,
           toolName,
           preview,
-          summary: `Preview card shown — nothing is saved yet; the user taps Create on the card to save it. Do not ask them to confirm in chat text.${paceNote}`,
+          summary: `Preview card shown — nothing is saved yet; the user taps Create on the card to save it. Do not ask them to confirm in chat text. ${describeGoalPreviewForSummary(preview)} Describe only what's listed here — never add, invent, or assume a starter task that isn't in that list, even if it seems like an obvious next step for this kind of goal.${paceNote}`,
           recordKind: 'goal_preview',
         };
       }
@@ -1038,6 +1106,66 @@ async function executeAiToolCallInner(
           goal,
           summary: `Removed the "${goal.name}" goal${taskNote}. "Undo" brings it all back.`,
           recordKind: 'goal_archived',
+        };
+      }
+      case 'advance_goal_stage': {
+        const validated = validateToolInput('advance_goal_stage', rawInput);
+        if (!validated.ok) return { ok: false, error: validated.error };
+        const resolved = resolveGoalRef(refs, validated.data.goalRef);
+        if (!resolved.ok) return { ok: false, error: resolved.error };
+        const goalId = resolved.ref.goalId;
+        const hintCheck = await verifyNameHint(userId, goalId, validated.data.nameHint);
+        if (hintCheck) return { ok: false, error: hintCheck.error };
+
+        const goal = await getGoalRow(userId, goalId);
+        if (!goal) {
+          return { ok: false, error: "that goal ref doesn't match any current goal — check the goals list." };
+        }
+        const definition = goal.definition as GoalDefinition;
+        if (definition.type !== 'milestone') {
+          return {
+            ok: false,
+            error: `"${goal.name}" isn't a milestone goal — advance_goal_stage only applies to milestone goals.`,
+          };
+        }
+        if (definition.activeStageIndex >= definition.stages.length) {
+          return {
+            ok: false,
+            error: `"${goal.name}" is already complete — every stage is done, nothing left to advance.`,
+          };
+        }
+
+        // Never trust the model's idea of which stage is current or which
+        // tasks are open — built server-side from LIVE state
+        // (docs/milestone-goal-plan.md §2.1). Doesn't mutate anything: this
+        // is a pending-confirmation card, mirroring remove_task; the actual
+        // advance happens in POST /goals/:id/advance once the user taps it.
+        const fromStageIndex = definition.activeStageIndex;
+        const fromStage = definition.stages[fromStageIndex]!;
+        const toStage = definition.stages[fromStageIndex + 1] ?? null;
+        const retireCandidates = await listGoalRetireCandidates(userId, goalId);
+        const retire = retireCandidates.map((t) => ({ taskId: t.id, title: t.title }));
+        // A next-stage task proposal only makes sense when there IS a next
+        // stage — this advance completing the goal means nothing to create.
+        const nextStageTasks = toStage ? validated.data.nextStageTasks : undefined;
+
+        const proposal: AdvanceStageProposal = { goalId, fromStageIndex, fromStage, toStage, retire, nextStageTasks };
+
+        const retireNote = retire.length ? ` — retires ${retire.map((t) => `"${t.title}"`).join(', ')}` : '';
+        const addNote = nextStageTasks?.length
+          ? `, adds ${nextStageTasks.map((t) => `"${t.title}"`).join(', ')}`
+          : '';
+        const summary = toStage
+          ? `Tap to confirm: finish "${fromStage}" and move "${goal.name}" to "${toStage}"${retireNote}${addNote}.`
+          : `Tap to confirm: finish "${fromStage}" and complete "${goal.name}" — that's the last stage${retireNote}.`;
+
+        return {
+          ok: true,
+          toolName,
+          goal,
+          proposal,
+          summary,
+          recordKind: 'goal_advance_pending',
         };
       }
       case 'log_goal_entry': {

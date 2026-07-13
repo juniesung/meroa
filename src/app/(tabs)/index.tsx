@@ -34,9 +34,9 @@ import {
   useProgressTask,
   useTasks,
 } from '@/features/tasks/queries';
-import { useCreateGoalFromPreview, useGoalConsistency, useGoals } from '@/features/goals/queries';
+import { useAdvanceGoalStage, useCreateGoalFromPreview, useGoalConsistency, useGoals } from '@/features/goals/queries';
 import { useTabBarHeight } from '@/hooks/use-tab-bar-inset';
-import type { ApiTask, GoalPreview, StarterTask } from '@/lib/api/types';
+import type { AdvanceStageProposal, ApiTask, GoalPreview, StarterTask } from '@/lib/api/types';
 import { formatMoney } from '@/lib/format';
 import { toIconName } from '@/lib/icon';
 import { requestNotificationPermission } from '@/lib/notifications';
@@ -265,16 +265,21 @@ function GoalPreviewCard({ message }: { message: ChatMessage }) {
   // A habit has no target amount or deadline — the check-in task + streak is
   // the whole mechanic, and the card says so instead of faking numbers. An
   // indirect goal has no target either unless the user actually stated one —
-  // "just track it" is a complete goal on its own.
+  // "just track it" is a complete goal on its own. A milestone goal has no
+  // number at all — its stage list renders separately below instead of a
+  // single Target line.
   const isSavings = definition.type === 'savings';
   const isIndirect = definition.type === 'indirect';
+  const isMilestone = definition.type === 'milestone';
   const targetLine = isSavings
     ? `Target: ${definition.currency}${formatMoney(definition.targetValue)}`
     : isIndirect
       ? definition.targetValue !== undefined
         ? `Target: ${definition.targetValue}${definition.unit}`
         : `Tracking ${definition.unit} — no target set`
-      : 'Habit — daily check-ins build the streak';
+      : isMilestone
+        ? null
+        : 'Habit — daily check-ins build the streak';
   const deadlineLine = (isSavings || isIndirect) && definition.deadline ? `By ${definition.deadline}` : null;
   const starterTasks = preview.starterTasks ?? [];
 
@@ -300,7 +305,13 @@ function GoalPreviewCard({ message }: { message: ChatMessage }) {
         </View>
       </View>
       <View style={styles.previewBody}>
-        <Text style={styles.previewFields}>{targetLine}</Text>
+        {targetLine ? <Text style={styles.previewFields}>{targetLine}</Text> : null}
+        {isMilestone &&
+          definition.stages.map((stage, idx) => (
+            <Text key={idx} style={styles.previewFields}>
+              {idx + 1}. {stage}
+            </Text>
+          ))}
         {deadlineLine ? <Text style={styles.previewFields}>{deadlineLine}</Text> : null}
         {starterTasks.map((task, idx) => (
           <Text key={idx} style={styles.previewFields}>
@@ -364,6 +375,92 @@ function GoalActionCard({ message }: { message: ChatMessage }) {
   );
 }
 
+// advance_goal_stage never mutates anything by itself — this card's Advance
+// tap is the only confirmation (docs/milestone-goal-plan.md §2.1), same
+// skeleton as TaskRemovalConfirmCard: shows the real proposal (from -> to
+// stage, what retires, what's proposed next), and only a tap actually moves
+// the goal (via POST /goals/:id/advance).
+function GoalAdvanceConfirmCard({ message }: { message: ChatMessage }) {
+  const advanceGoalStage = useAdvanceGoalStage();
+  const { data: liveGoals } = useGoals();
+  const [dismissed, setDismissed] = useState(false);
+
+  const proposal = message.meta.proposal as AdvanceStageProposal | undefined;
+  const snapshot = message.meta.goal as { name: string; icon: string | null } | undefined;
+  if (!proposal || !snapshot) return null;
+
+  const liveGoal = liveGoals?.find((g) => g.id === proposal.goalId);
+  const liveDefinition = liveGoal?.definition;
+  const liveActiveStageIndex =
+    liveDefinition?.type === 'milestone' ? liveDefinition.activeStageIndex : undefined;
+
+  const advancedRecordId =
+    advanceGoalStage.data?.goal.id ?? (message.meta.advancedRecordId as string | undefined);
+  const consumed = !!advancedRecordId;
+  // Stale once the live goal has moved off the stage this card showed —
+  // another advance, or an undo, since the card was rendered.
+  const stale = !consumed && liveActiveStageIndex !== undefined && liveActiveStageIndex !== proposal.fromStageIndex;
+
+  const statusText = consumed
+    ? 'Advanced ✓'
+    : stale
+      ? 'Stale — ask again'
+      : dismissed
+        ? 'Not yet'
+        : proposal.toStage
+          ? `Move to "${proposal.toStage}"?`
+          : 'Complete this goal?';
+
+  return (
+    <View style={styles.actionCard}>
+      <View style={styles.removalRow}>
+        <View style={styles.removalIconChip}>
+          <Icon name={toIconName(snapshot.icon)} size={18} color={theme.blue} stroke={1.9} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.removalTitle} numberOfLines={1}>
+            {snapshot.name}
+          </Text>
+          <Text style={styles.removalStatus}>{statusText}</Text>
+        </View>
+      </View>
+      <View style={styles.previewBody}>
+        <Text style={styles.previewFields}>
+          {proposal.fromStage} → {proposal.toStage ?? 'Complete'}
+        </Text>
+        {proposal.retire.map((t) => (
+          <Text key={t.taskId} style={styles.previewFields}>
+            − {t.title}
+          </Text>
+        ))}
+        {proposal.nextStageTasks?.map((t, idx) => (
+          <Text key={idx} style={styles.previewFields}>
+            + {t.title}
+          </Text>
+        ))}
+      </View>
+      {!consumed && !stale && !dismissed && (
+        <View style={styles.removalButtons}>
+          <Pressable onPress={() => setDismissed(true)} style={styles.removalCancelButton} hitSlop={4}>
+            <Text style={styles.removalCancelText}>Not yet</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => {
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+              advanceGoalStage.mutate({ id: proposal.goalId, proposalMessageId: message.id });
+            }}
+            style={styles.previewConfirmButton}
+            hitSlop={4}
+          >
+            <Icon name="check" size={14} color="#fff" stroke={2.2} />
+            <Text style={styles.removalConfirmText}>Advance</Text>
+          </Pressable>
+        </View>
+      )}
+    </View>
+  );
+}
+
 function MessageRow({
   message,
   onRetry,
@@ -389,6 +486,9 @@ function MessageRow({
   }
   if (message.role === 'assistant' && message.meta?.kind === 'goal_action') {
     return <GoalActionCard message={message} />;
+  }
+  if (message.role === 'assistant' && message.meta?.kind === 'goal_advance_pending') {
+    return <GoalAdvanceConfirmCard message={message} />;
   }
 
   return (

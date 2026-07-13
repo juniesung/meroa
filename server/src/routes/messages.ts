@@ -66,7 +66,8 @@ function historyContentFor(m: { content: string; meta: unknown }): string {
     meta?.kind === 'task_removal_pending' ||
     meta?.kind === 'task_bulk_removal_pending' ||
     meta?.kind === 'goal_action' ||
-    meta?.kind === 'goal_preview'
+    meta?.kind === 'goal_preview' ||
+    meta?.kind === 'goal_advance_pending'
   )
     return '';
   return m.content;
@@ -248,6 +249,13 @@ messageRoutes.post('/', zValidator('json', sendSchema), async (c) => {
             data: JSON.stringify({ message: assistantMessage, preview: event.preview }),
           });
         } else if (event.type === 'action_goal') {
+          // advance_goal_stage doesn't mutate anything — it comes back with
+          // recordKind: 'goal_advance_pending' so the client renders a
+          // Confirm/Cancel card (same `task_removal_pending` trick as the
+          // `action` branch above) instead of a read-only one, and the
+          // proposal is stamped onto meta so POST /goals/:id/advance can
+          // re-validate exactly what the card showed.
+          const kind = event.recordKind === 'goal_advance_pending' ? 'goal_advance_pending' : 'goal_action';
           const [assistantMessage] = await db
             .insert(messages)
             .values({
@@ -255,10 +263,11 @@ messageRoutes.post('/', zValidator('json', sendSchema), async (c) => {
               role: 'assistant',
               content: event.summary,
               meta: {
-                kind: 'goal_action',
+                kind,
                 action: event.toolName,
                 goalId: event.goal.id,
                 goal: event.goal,
+                ...(event.proposal ? { proposal: event.proposal } : {}),
               },
             })
             .returning();

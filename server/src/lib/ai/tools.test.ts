@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { AI_TOOL_SCHEMAS, validateToolInput } from './tools.ts';
+import {
+  AI_TOOL_SCHEMAS,
+  NO_ACTION_TOOL_NAME,
+  OPENAI_ACTION_PASS_TOOLS,
+  validateToolInput,
+} from './tools.ts';
 
 // Regression: intersecting createTaskInputSchema with a .strict() wrapper
 // object rejected every ordinary field (title/type/icon/...) because
@@ -66,5 +71,103 @@ describe('AI_TOOL_SCHEMAS — every tool has a working schema', () => {
     ).toBe(true);
     expect(AI_TOOL_SCHEMAS.remove_goal.safeParse({ goalRef: 'G1', nameHint: 'x' }).success).toBe(true);
     expect(AI_TOOL_SCHEMAS.undo_last_action.safeParse({}).success).toBe(true);
+  });
+});
+
+// The .strict()-intersection regression class applies to any tool whose
+// schema is built by extending/merging — new cases added up front per the
+// milestone plan's lesson, not discovered live after a launch.
+describe('AI_TOOL_SCHEMAS.create_goal — milestone', () => {
+  it('accepts a milestone with 2-8 stages', () => {
+    const result = validateToolInput('create_goal', {
+      type: 'milestone',
+      name: 'Land internship',
+      stages: ['Applying', 'Interviewing', 'Offer negotiation'],
+    });
+    expect(result.ok).toBe(true);
+  });
+
+  it('accepts a milestone with starter tasks for the first stage', () => {
+    const result = validateToolInput('create_goal', {
+      type: 'milestone',
+      name: 'Land internship',
+      stages: ['Applying', 'Interviewing'],
+      starterTasks: [{ title: 'Update resume' }, { title: 'Apply to 5 companies' }],
+    });
+    expect(result.ok).toBe(true);
+  });
+
+  it('rejects a milestone with fewer than 2 stages', () => {
+    const result = validateToolInput('create_goal', {
+      type: 'milestone',
+      name: 'Land internship',
+      stages: ['Applying'],
+    });
+    expect(result.ok).toBe(false);
+  });
+
+  it('rejects a milestone starter task with a contribution', () => {
+    const result = validateToolInput('create_goal', {
+      type: 'milestone',
+      name: 'Land internship',
+      stages: ['Applying', 'Interviewing'],
+      starterTasks: [{ title: 'Update resume', contribution: 5 }],
+    });
+    expect(result.ok).toBe(false);
+  });
+});
+
+describe('AI_TOOL_SCHEMAS.advance_goal_stage', () => {
+  it('accepts a goal ref with no nextStageTasks (advance to the last stage)', () => {
+    const result = validateToolInput('advance_goal_stage', { goalRef: 'G1', nameHint: 'Land internship' });
+    expect(result.ok).toBe(true);
+  });
+
+  it('accepts nextStageTasks with a recurrence, no contribution field exists to set', () => {
+    const result = validateToolInput('advance_goal_stage', {
+      goalRef: 'G1',
+      nameHint: 'Land internship',
+      nextStageTasks: [{ title: 'Prep for interviews', recurrence: { freq: 'daily' } }],
+    });
+    expect(result.ok).toBe(true);
+  });
+
+  it('rejects a nextStageTasks item carrying an (unsupported) contribution key', () => {
+    const result = validateToolInput('advance_goal_stage', {
+      goalRef: 'G1',
+      nameHint: 'Land internship',
+      nextStageTasks: [{ title: 'Prep for interviews', contribution: 5 }],
+    });
+    expect(result.ok).toBe(false);
+  });
+
+  it('rejects a missing goalRef', () => {
+    const result = validateToolInput('advance_goal_stage', { nameHint: 'Land internship' });
+    expect(result.ok).toBe(false);
+  });
+});
+
+describe('no_action carries a reason', () => {
+  // The only channel between the act pass and the narrate pass on a turn
+  // where nothing was called. Without a REQUIRED reason, the reply pass
+  // knows only "nothing happened" and not why — and an ambiguous "mark
+  // water done" (two matching tasks) came back as a confident, false
+  // "marked it done" in 3 of 3 live runs instead of "which one?".
+  // providers/act-narrate.ts reads exactly this field.
+  const noAction = OPENAI_ACTION_PASS_TOOLS.find(
+    (t) => t.type === 'function' && t.function.name === NO_ACTION_TOOL_NAME,
+  );
+
+  it('is present in the action pass tools', () => {
+    expect(noAction).toBeDefined();
+  });
+
+  it('requires a reason the narrate pass can ask from', () => {
+    const params = (noAction as { function: { parameters: unknown } }).function.parameters as {
+      properties?: Record<string, unknown>;
+      required?: string[];
+    };
+    expect(params.properties).toHaveProperty('reason');
+    expect(params.required).toContain('reason');
   });
 });

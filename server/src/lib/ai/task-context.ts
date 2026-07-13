@@ -284,6 +284,12 @@ export async function buildTaskContext(userId: string, timezone: string | null):
         // (locked decision). Stated explicitly so the model doesn't assume
         // it works like a savings link just because a goal is linked.
         goalLabel = ` · supporting activity for indirect goal "${displayRow.goalName}" (completing it never logs a number — use log_goal_entry for that)`;
+      } else if (linkedDefinition?.type === 'milestone') {
+        // Same "supporting activity only" shape as indirect — a completed
+        // task is never itself a stage declaration (docs/milestone-goal-
+        // plan.md §2.3), so this states it explicitly rather than letting
+        // the model infer advance_goal_stage from a completion.
+        goalLabel = ` · supports milestone goal "${displayRow.goalName}" (never advances a stage by itself)`;
       }
     }
 

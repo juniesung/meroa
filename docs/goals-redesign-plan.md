@@ -720,3 +720,178 @@ covered by `titleMatches`'s lenient matching — none newly regressed this
 session, but no dedicated end-to-end protocol pass has been run against them
 specifically). Provider decision (deepseek-v4-flash is still the test
 provider) remains the gate before Phase 6.
+
+## Milestone goal type (2026-07-13) — built, tested, shipped
+
+Fourth and last locked goal type (`docs/milestone-goal-plan.md`), implemented
+work-item-by-work-item per that plan: schema → executor → summary → AI tools
+→ AI actions → prompt/context → the `action_goal` proposal event → the advance
+REST endpoint → undo/recent-changes → server tests → client. Server typecheck
++ `npm test` (93 → 123 passing) + client typecheck + `expo lint` + `expo
+export` (1832 modules) all clean after every item, then a full live-as-a-user
+pass on a fresh dev-token account (deepseek-v4-flash, act/narrate on, real DB
+checked between steps) end to end: one preview with sensible AI-proposed
+stages and no invented numbers; Create tap idempotent; a completed linked
+task states the "supports … never advances on its own" impact suffix without
+touching the goal; a stage declaration produces an `advance_goal_stage`
+confirm card whose retire list is server-recomputed from live state (only
+open/recurring tasks, done ones survive as history) — a chat-text "yes do it"
+correctly does NOT advance, only the tap does; the tap moves
+`activeStageIndex`, retires/creates tasks, and a second tap on the same
+proposal message is idempotent; `undo_last_action` fully restores the prior
+definition + retired/created tasks as a unit, and re-tapping the
+now-stale/consumed card doesn't double-advance; advancing through all stages
+reaches the "Complete — all N stages" state on the card/detail/context line;
+`log_goal_entry`, target/deadline/unit edits, and a stage-rename request are
+all honestly rejected; `remove_goal` cascades the goal's open linked tasks
+and `undo_last_action` restores it. Savings/habit/indirect create→act→undo
+and a plain task-core create all regression-passed clean.
+
+**Found and fixed one real bug via the live pass, not unit tests:** the
+narrate pass's self-correction backstop (`maybeCorrectFakeAction`,
+`providers/shared.ts`) skipped entirely whenever *any* tool call succeeded
+this turn — including a **pending-confirmation-only** success
+(`task_removal_pending`, `task_bulk_removal_pending`, `goal_preview`, and now
+`goal_advance_pending`), which mutates nothing. Live-caught: a second "yes
+advance it" re-triggered `advance_goal_stage`'s pending card (a real,
+successful call), and with self-correction suppressed, the narrate pass
+freely fabricated "You're moved to 'Applying' now — done" while the DB
+stayed on the prior stage the whole time. Fixed by tagging each
+`toolCallLog` entry with `pending` (true for the four card-only recordKinds)
+and gating the backstop on "a genuinely mutating success happened," not
+merely "a call happened" — restores exactly the same protection the
+zero-tool-call path already had, extended to every provider (`anthropic.ts`,
+`openai.ts`, `deepseek.ts`, `act-narrate.ts`) and every pending recordKind,
+not just this session's new one. A second-order false positive followed
+immediately: once the backstop ran on pending-success turns too, it still
+applied `PREVIEW_CLAIM_PATTERN` and the `claim-check.ts` classifier — both
+built on the premise "no card exists at all this turn" (the classifier's
+system prompt says so outright) — so a *truthful* "sending the card now, tap
+to confirm" got flagged as fake. Fixed by only applying those two checks when
+there was no pending success this turn; `FAKE_ACTION_PATTERN` (a completion
+verb next to a quote) still applies either way, since a pending success can
+still falsely claim the underlying *mutation* happened even when the card
+itself is real. Both fixes are structural, not milestone-specific — they
+correct a latent gap that already existed for `remove_task`/`remove_tasks`/
+`create_goal`'s pending flows, just harder to trigger by chance before this
+session's live pass happened to hit it via re-issued `advance_goal_stage`
+calls.
+
+**Server test suite: 123/123 passing** (up from 93 — milestone
+`createGoalParamsSchema`/`milestoneGoalDefinitionSchema` matrix,
+`computeMilestoneCardSummary`, pure `filterRetireCandidates`/
+`isAdvanceProposalStale` decision coverage, and `create_goal`/
+`advance_goal_stage` tool-schema regression cases are new). Both packages
+typecheck clean; client `expo lint` clean; `expo export` clean (1832
+modules).
+
+The goal type system is now complete — savings, habit, indirect, milestone,
+all shipped. *Still open from Phase 5:* the rest of history-aware replies
+beyond indirect's delta narration (a same-week "4th workout this week" style
+count); the formal §4-style DoD protocol run and CLAUDE.md §9 tick for Phase
+5. Provider decision (deepseek-v4-flash is still the test provider) remains
+the gate before Phase 6.
+
+---
+
+## Session ledger — Phase 5 completion (2026-07-13)
+
+Worked `docs/phase-5-completion-plan.md` end to end: history-aware replies (the one
+genuinely unbuilt feature), the reconcile-edge-case audit, and the formal DoD protocol
+run. **Phase 5 is now ☑** (`docs/phases/phase-5-connected-loop.md`, CLAUDE.md §9).
+
+**Shipped: history-aware replies.** New pure module `lib/ai/history.ts` — `weekStartYmd`
+(Monday-start, computed in the account's timezone like every other date boundary),
+`describeCompletionHistory`, and the I/O half `buildTaskCompletionHistory`, which counts
+**done instances of a recurring series by `occurrenceDate`** (the due *day*, not
+`records.occurredAt` — "4th workout this week" means four workout days, not four taps; the
+partial unique index on `(template_id, occurrence_date)` guarantees one row per day). Wired
+into `lib/ai/actions.ts` as `taskHistorySuffix`, sitting beside `goalImpactSuffix` and
+gated identically on `becameDone` (a count after *un*-completing something is nonsense),
+appended to `complete_task` and `progress_task`: goal fact first (the connected-loop
+payload), history clause last (color). A one-off task returns null — it has no history to
+count — and a count of **1 says nothing at all**: silence is the default, not a filler
+sentence. The count is server-computed and quoted, never derived by the model (lesson
+6/16), enforced by one line in `SYSTEM_PROMPT`.
+
+**The DoD protocol run found three real bugs.** All were invisible to `tsc` and the unit
+suite, and only surfaced by driving real turns — the same lesson as the `.strict()`
+intersection bug and the pending-success gap before them. Each is fixed:
+
+1. **The action pass stalled into `no_action` when a question was left dangling.** Given a
+   complete goal spec ("target is $900 for the laptop"), the act pass made *zero* tool
+   calls when an earlier clarifying question of its own ("how much toward the bike?") was
+   still unanswered — it deferred the whole turn instead of acting on the intent the user
+   had actually completed, and the narrate pass then claimed a preview card that did not
+   exist (the claim-check caught it and retracted). Reproduced 2/3 on fresh accounts; a
+   clean slot-fill, and the same interleave *without* a real dangling question, both
+   passed 3/3 — so the dangling question was the variable, not multi-turn slot-filling.
+   Root cause: `ACTION_SYSTEM_PROMPT` said "if something required is missing, call
+   no_action" and "when in doubt, choose no_action", with **no rule to act on the parts
+   it *can* act on**. Fixed with an explicit multi-intent rule: judge each intent
+   separately, make every call you have complete information for, leave only the
+   genuinely-missing parts to the reply pass (which can ask but cannot act). Now 5/5.
+
+2. **An ambiguous task reference was silently written.** "mark water done", with both
+   "Water the plants" and "Water filter change" open, made the act pass **pick one and
+   complete it** while the narrate pass — correctly seeing the ambiguity — asked *which
+   one they meant*. The user got a card saying it was done **and** a question, with a
+   possibly-wrong task marked done: a direct violation of CLAUDE.md's "low-confidence
+   extractions must ask for confirmation before writing." The believed coverage
+   (`titleMatches`' lenient matching) cannot catch this by construction — it is a backstop
+   against an *invented* ref, and "water" legitimately matches both; the server never sees
+   that the *user* said only "water", so the only lever is the act pass declining to
+   guess. Fixed with an ambiguity rule in `ACTION_SYSTEM_PROMPT` (act only when exactly
+   one listed item fits; a reference that clearly names one — "mark the plants done" — is
+   not ambiguous). Now 0/3 write, 3/3 ask, and unambiguous references still act 3/3.
+
+   That fix exposed a **structural gap underneath it**: `no_action` took *no parameters*,
+   so the act pass could not tell the narrate pass **why** it declined. Told only "nothing
+   happened", the reply pass confidently claimed the task was completed anyway (3/3),
+   leaving the claim-check to retract it — when the obviously right reply was "which one?".
+   `no_action` now takes a **required `reason`**, which `act-narrate.ts` threads into the
+   narrate pass's no-action block ("if that reason says something is ambiguous or missing,
+   ASK for exactly that"). This is the only channel between the two passes on a no-action
+   turn, and it makes every decline — ambiguity, a missing amount, a "maybe" — into a
+   question the reply can actually ask. Locked by a contract test in `tools.test.ts`.
+
+3. **"Undo that" reached past a pending card and silently reverted an older change.** With
+   two *pending* tap-to-confirm removal cards showing (which mutate nothing), "undo that"
+   called `undo_last_action`, which reverted the last real record — an unrelated
+   **completed task** — while the reply told the user "just canceled the removal cards —
+   nothing got deleted." DB-verified: the completion really was reverted, and the
+   narration concealed it. An untapped card is not a change; it is undone by ignoring it.
+   Fixed by teaching the act pass that pending cards and previews are not changes, so
+   "undo"/"cancel"/"never mind" against one is `no_action` (with a reason), never
+   `undo_last_action`. Now 3/3 leave the older completion alone, and a genuine undo still
+   works 3/3.
+
+**Protocol run — all 9 steps pass.** Fresh dev-token account, deepseek-v4-flash,
+act/narrate on, DB inspected between steps. Single-write-many-views verified at the row
+level (**one** `records` row; the `goal_entries` row references *that same record id*, not
+a copy; undo marks `records.reverted_at` and every summary filters on it). Free text →
+`complete_task` (never a second `log_goal_entry` for the same money). Re-reporting an
+already-done task writes nothing. Missing numbers always ask. Two similarly-named savings
+goals → "which savings goal — laptop or bike?", then the answer logs to the right one.
+History: a 4th real completion across 4 real days replied "that's your 4th time this week"
+(server-computed, and correctly excluding a still-open day). Hallucination probe: **7/7
+claim-check verdicts "no", zero self-corrections**. Regression: all four goal types
+create→act→undo (including the milestone confirm-tap and its undo restoring the stage *and*
+its tasks), plus the task core (create/edit/postpone/complete/remove/bulk-remove/undo,
+with the goal-cascade disclosure on the bulk card).
+
+**Server test suite: 142/142 passing** (up from 123 — `history.test.ts` covers the
+Sunday→Monday boundary, month/year rollover, the 11th/12th/13th/21st ordinal trap, silence
+at a count of 1, and the one-off-task null; plus the `no_action` reason contract). Both
+packages typecheck clean; client `expo lint` clean; `expo export --platform ios` clean.
+
+**What's left.** Nothing in Phase 5. All three fixes are prompt/contract-level, which is
+the right layer — the server could not have caught any of them deterministically, because
+in each case the *tool result was already correct* and the failure was in what the model
+chose to call, or chose to say. The recurring residue across all three is
+**deepseek-v4-flash's narration fidelity**: on no-action turns it still sometimes claims an
+action it never took (backstopped by the claim-check, which retracted it every time), and
+in bug 3 it flatly contradicted a correct tool result. Data integrity is sound; narration
+quality is the open question — and that is precisely the input to the **provider decision**,
+now the sole gate before Phase 6. Run this same protocol against an Anthropic model and
+pick on measured false-claim rate, not vibes.

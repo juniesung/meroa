@@ -303,15 +303,15 @@ export const AI_TOOLS: Anthropic.Tool[] = [
   {
     name: 'create_goal',
     description:
-      'Show the user a preview of a new goal before saving it — this does NOT save anything by itself. Three types: "savings" (a target amount to save toward, e.g. "$200 for a trip" — needs targetValue), "habit" (a repeating practice with a streak, e.g. "meditate daily" — NO target amount, NO deadline; instead it REQUIRES its recurring check-in task in starterTasks, because completing that task is the check-in and the streak counts it), and "indirect" (a real measurement tracked over time, e.g. "track my weight" or "get my bench to 225" — needs unit; targetValue is OPTIONAL, someone can just track a number with no goal). Call it as soon as you have enough; don\'t ask "should I set this up?" in chat text first — the Create button on the preview card is the only confirmation. Only ask a real question when something required is genuinely missing (a savings amount, an indirect unit). Never invent a number the user did not say. If the user asks for a change before tapping Create, call this again with the revision for a fresh preview.',
+      'Show the user a preview of a new goal before saving it — this does NOT save anything by itself. Four types: "savings" (a target amount to save toward, e.g. "$200 for a trip" — needs targetValue), "habit" (a repeating practice with a streak, e.g. "meditate daily" — NO target amount, NO deadline; instead it REQUIRES its recurring check-in task in starterTasks, because completing that task is the check-in and the streak counts it), "indirect" (a real measurement tracked over time, e.g. "track my weight" or "get my bench to 225" — needs unit; targetValue is OPTIONAL, someone can just track a number with no goal), and "milestone" (an ordered sequence of stages toward one outcome, e.g. "land a summer internship" -> Applying, Interviewing, Offer negotiation — needs stages, 2-8 of them, propose sensible ones from what the user said; NO target amount, NO deadline, NO unit — progress is which stage they\'re on, never a number). Call it as soon as you have enough; don\'t ask "should I set this up?" in chat text first — the Create button on the preview card is the only confirmation. Only ask a real question when something required is genuinely missing (a savings amount, an indirect unit). Never invent a number the user did not say. If the user asks for a change before tapping Create, call this again with the revision for a fresh preview.',
     input_schema: {
       type: 'object',
       properties: {
         type: {
           type: 'string',
-          enum: ['savings', 'habit', 'indirect'],
+          enum: ['savings', 'habit', 'indirect', 'milestone'],
           description:
-            'savings: a money target ("save $500"). habit: a repeating practice tracked by streak ("meditate every day", "no-sugar habit") — anything the user wants to do consistently rather than accumulate. indirect: a real measurement logged over time ("track my weight", "get my bench to 225 lb") — the number always comes from an explicit log, never from a task.',
+            'savings: a money target ("save $500"). habit: a repeating practice tracked by streak ("meditate every day", "no-sugar habit") — anything the user wants to do consistently rather than accumulate. indirect: a real measurement logged over time ("track my weight", "get my bench to 225 lb") — the number always comes from an explicit log, never from a task. milestone: a multi-stage outcome with no number at all ("land an internship", "buy a house", "launch the app") — progress is which ordered stage is active, advanced only when the user says a stage is done.',
         },
         name: { type: 'string', description: 'Short name for the goal, e.g. "Rave savings" or "Daily meditation".' },
         icon: { type: 'string', enum: ICON_ENUM, description: 'Pick whichever best matches what this is for.' },
@@ -325,12 +325,18 @@ export const AI_TOOLS: Anthropic.Tool[] = [
         },
         targetValue: {
           type: 'number',
-          description: 'savings: required — the target amount, e.g. "$200" -> 200. indirect: optional — only if the user stated a target (e.g. "get to 165 lb"); "just track my weight" with no target is a complete, valid goal — omit it. NEVER set for a habit.',
+          description: 'savings: required — the target amount, e.g. "$200" -> 200. indirect: optional — only if the user stated a target (e.g. "get to 165 lb"); "just track my weight" with no target is a complete, valid goal — omit it. NEVER set for a habit or a milestone.',
         },
         deadline: {
           type: 'string',
           description:
             'savings and indirect only, and only alongside a targetValue. A concrete ISO date (YYYY-MM-DD) the user wants to hit the target by — only if they gave a timeframe (e.g. "in 30 days", "by December"). Convert relative language to an absolute date using today\'s date from context; never invent a deadline the user didn\'t imply. Omit entirely if no timeframe was mentioned.',
+        },
+        stages: {
+          type: 'array',
+          items: { type: 'string' },
+          description:
+            'milestone only, required there: 2-8 ordered stage titles, e.g. ["Applying", "Interviewing", "Offer negotiation"] for "land a summer internship". Propose a sensible sequence from what the user said — they can edit it in the preview before tapping Create. Never for any other goal type.',
         },
         starterTasks: {
           type: 'array',
@@ -355,13 +361,13 @@ export const AI_TOOLS: Anthropic.Tool[] = [
               contribution: {
                 type: 'number',
                 description:
-                  'savings goals only: the amount completing this task once logs to the goal, e.g. 5 for "save $5 daily". OMIT for a habit or indirect goal — a habit check-in has no amount (completing the task is the check-in itself), and an indirect goal never logs a number from a task.',
+                  'savings goals only: the amount completing this task once logs to the goal, e.g. 5 for "save $5 daily". OMIT for a habit, indirect, or milestone goal — a habit check-in has no amount (completing the task is the check-in itself), and indirect/milestone goals never log a number from a task.',
               },
             },
             required: ['title'],
           },
           description:
-            'Proposed starter tasks (up to 5). For a savings goal: optional, e.g. a daily "Save $5" — only when a natural next action is obvious from what the user said; each completion auto-logs its contribution, never a separate log_goal_entry for the same amount. For a HABIT goal: required, exactly the recurring check-in task ("Meditate 10 min", daily) — the streak counts that task and completing it IS the check-in. For an INDIRECT goal: optional, supporting activity only ("go for a run") — never carries a contribution, and completing it never logs a measurement (only log_goal_entry does that). Never invent a schedule, amount, or time the user didn\'t give (a plain "daily" gets no time field).',
+            'Proposed starter tasks (up to 5). For a savings goal: optional, e.g. a daily "Save $5" — only when a natural next action is obvious from what the user said; each completion auto-logs its contribution, never a separate log_goal_entry for the same amount. For a HABIT goal: required, exactly the recurring check-in task ("Meditate 10 min", daily) — the streak counts that task and completing it IS the check-in. For an INDIRECT goal: optional, supporting activity only ("go for a run") — never carries a contribution, and completing it never logs a measurement (only log_goal_entry does that). For a MILESTONE goal: the FIRST stage\'s to-dos — propose 2-4 concrete ones whenever the first stage name implies obvious next actions (almost always true, e.g. "Research & Prep" -> "Update resume", "Research target companies"; "Applying" -> "Submit applications", "Tailor cover letters"), so the stage isn\'t empty the moment the goal is created. Only skip entirely if genuinely nothing concrete comes to mind. Never carries a contribution; the next stage\'s tasks are proposed later via advance_goal_stage, not here. Never invent a schedule, amount, or time the user didn\'t give (a plain "daily" gets no time field).',
         },
       },
       required: ['type', 'name'],
@@ -370,7 +376,7 @@ export const AI_TOOLS: Anthropic.Tool[] = [
   {
     name: 'edit_goal',
     description:
-      "Edit an existing goal's name or icon (any type), a savings or indirect goal's target amount or deadline, or an indirect goal's unit — use the goal's ref from the goals list in context, never guess one. A habit goal has no target, deadline, or unit to edit. An indirect goal's unit can only be changed before it has any logged entries — changing it afterward would relabel real history instead of converting it, so the call fails once entries exist; tell the user to start a new goal instead if that happens. Only include what the user actually asked to change; never resend the whole thing. Applies immediately (it's undoable, unlike create_goal's preview) — state the concrete before/after value when you confirm it.",
+      "Edit an existing goal's name or icon (any type), a savings or indirect goal's target amount or deadline, or an indirect goal's unit — use the goal's ref from the goals list in context, never guess one. A habit goal has no target, deadline, or unit to edit. A milestone goal is also name/icon only — its stage list is set at creation for now; if the user asks to rename or insert a stage, say honestly that isn't supported yet rather than trying edit_goal. An indirect goal's unit can only be changed before it has any logged entries — changing it afterward would relabel real history instead of converting it, so the call fails once entries exist; tell the user to start a new goal instead if that happens. Only include what the user actually asked to change; never resend the whole thing. Applies immediately (it's undoable, unlike create_goal's preview) — state the concrete before/after value when you confirm it.",
     input_schema: {
       type: 'object',
       properties: {
@@ -391,7 +397,7 @@ export const AI_TOOLS: Anthropic.Tool[] = [
   {
     name: 'log_goal_entry',
     description:
-      'SAVINGS and INDIRECT goals only: log an explicit value the user just told you about — for savings, an amount ("log $150 to savings", "put in $40 birthday money"); for indirect, the current measurement ("175 this morning", "hit 185 on bench"). Never for a habit goal (its check-ins happen by completing its task — use complete_task). Only for a value the user actually stated; never invent one — ask instead. Use the goal\'s ref exactly as shown in the goals list in context.',
+      'SAVINGS and INDIRECT goals only: log an explicit value the user just told you about — for savings, an amount ("log $150 to savings", "put in $40 birthday money"); for indirect, the current measurement ("175 this morning", "hit 185 on bench"). Never for a habit or milestone goal — a habit\'s check-ins happen by completing its task (use complete_task); a milestone goal has no numbers at all (use advance_goal_stage when the user says a stage is done). Only for a value the user actually stated; never invent one — ask instead. Use the goal\'s ref exactly as shown in the goals list in context.',
     input_schema: {
       type: 'object',
       properties: {
@@ -420,6 +426,44 @@ export const AI_TOOLS: Anthropic.Tool[] = [
       properties: {
         goalRef: GOAL_REF_PROPERTY,
         nameHint: GOAL_NAME_HINT_PROPERTY,
+      },
+      required: ['goalRef', 'nameHint'],
+    },
+  },
+  {
+    name: 'advance_goal_stage',
+    description:
+      'MILESTONE goals only: request moving a milestone goal to its next stage — this does NOT move it immediately. It shows the user a card that lists the current stage\'s open tasks getting retired and the next stage\'s proposed tasks, so they can confirm or cancel themselves; nothing changes until they tap Advance. Call this as soon as the user has clearly declared the current stage done ("I got the interview!", "we closed on the house") — don\'t ask "should I move you to the next stage?" in chat text first; the tap on the card IS the confirmation. Completing a linked task is NEVER by itself a reason to call this — a task finishing is not the same as the user declaring the stage done; only call this on the user\'s own clear statement. If this is the LAST stage, calling it proposes completing the goal (no next stage, no new tasks). Use the goal\'s ref from the goals list in context, never a guess.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        goalRef: GOAL_REF_PROPERTY,
+        nameHint: GOAL_NAME_HINT_PROPERTY,
+        nextStageTasks: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              title: { type: 'string', description: 'e.g. "Update resume".' },
+              recurrence: {
+                type: 'object',
+                description: 'Same shape as create_task\'s recurrence — only if this should repeat on a schedule.',
+                properties: {
+                  freq: { type: 'string', enum: ['daily', 'weekly', 'every_n_days'] },
+                  byWeekday: { type: 'array', items: { type: 'string', enum: ['mo', 'tu', 'we', 'th', 'fr', 'sa', 'su'] } },
+                  n: { type: 'number' },
+                  time: {
+                    type: 'string',
+                    description: 'Local "HH:mm" — ONLY if the user actually said a time of day. Never invent one.',
+                  },
+                },
+              },
+            },
+            required: ['title'],
+          },
+          description:
+            'Proposed to-dos for the NEXT stage (up to 5) — never a contribution amount, a milestone goal never logs a number from a task. Propose sensible ones from what the next stage is about; omit entirely (or leave empty) if this advance completes the goal (no next stage) or nothing obvious comes to mind.',
+        },
       },
       required: ['goalRef', 'nameHint'],
     },
@@ -458,7 +502,17 @@ export const OPENAI_ACTION_PASS_TOOLS: OpenAI.Chat.Completions.ChatCompletionToo
       name: NO_ACTION_TOOL_NAME,
       description:
         "The user's newest message requires no task/goal action this turn — it's conversation, a question, a status check, feelings, or something a reply alone should handle (including asking for a missing required detail). Call this instead of guessing at an action.",
-      parameters: { type: 'object', properties: {} },
+      parameters: {
+        type: 'object',
+        properties: {
+          reason: {
+            type: 'string',
+            description:
+              'Why nothing was called — and, when the reply needs to ask the user something, exactly what it must ask. The reply pass sees only this string, never your reasoning, so name the real candidates or the missing value outright. Examples: "ambiguous — \'water\' matches both \'Water the plants\' and \'Water filter change\'; ask which one they mean", "savings goal has no target amount; ask for it", "just conversation, nothing to do".',
+          },
+        },
+        required: ['reason'],
+      },
     },
   },
 ];
@@ -526,6 +580,22 @@ const logGoalEntryToolSchema = goalRefSchema.extend({
   entryAt: z.string().optional(),
 });
 
+// Deliberately its own shape, not goals/schema.ts's starterTaskSchema — that
+// one carries an optional `contribution`, which advance_goal_stage's wire
+// schema never exposes to the model at all (a milestone goal never logs a
+// number from a task), so there's nothing for a stray contribution to slip
+// through even if the model somehow sent one.
+const advanceStageTaskSchema = z
+  .object({
+    title: z.string().trim().min(1).max(80),
+    recurrence: recurrenceSchema.optional(),
+  })
+  .strict();
+
+const advanceGoalStageToolSchema = goalRefSchema.extend({
+  nextStageTasks: z.array(advanceStageTaskSchema).max(5).optional(),
+});
+
 export const AI_TOOL_SCHEMAS = {
   // NOT .strict() on the intersected object — z.intersection validates the
   // raw input against both operands independently, so a strict() second
@@ -550,6 +620,7 @@ export const AI_TOOL_SCHEMAS = {
   edit_goal: editGoalToolSchema,
   log_goal_entry: logGoalEntryToolSchema,
   remove_goal: goalRefSchema,
+  advance_goal_stage: advanceGoalStageToolSchema,
   undo_last_action: z.object({}),
 } as const;
 

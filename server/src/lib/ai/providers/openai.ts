@@ -209,6 +209,9 @@ export async function* streamChatReplyOpenai(
               name: call.name,
               ok: true,
               taskId: result.tasks.map((t) => t.id).join(','),
+              // Always task_bulk_removal_pending — remove_tasks never
+              // mutates by itself, only its own confirm card does.
+              pending: true,
             });
             yield {
               type: 'action_bulk',
@@ -219,7 +222,8 @@ export async function* streamChatReplyOpenai(
             };
             toolResultMessages.push({ role: 'tool', tool_call_id: call.id, content: result.summary });
           } else if (result.ok && 'preview' in result) {
-            toolCallLog.push({ name: call.name, ok: true });
+            // Always goal_preview — create_goal never saves by itself.
+            toolCallLog.push({ name: call.name, ok: true, pending: true });
             yield {
               type: 'action_preview',
               toolName: result.toolName,
@@ -229,17 +233,28 @@ export async function* streamChatReplyOpenai(
             };
             toolResultMessages.push({ role: 'tool', tool_call_id: call.id, content: result.summary });
           } else if (result.ok && 'goal' in result) {
-            toolCallLog.push({ name: call.name, ok: true, taskId: result.goal.id });
+            toolCallLog.push({
+              name: call.name,
+              ok: true,
+              taskId: result.goal.id,
+              pending: result.recordKind === 'goal_advance_pending',
+            });
             yield {
               type: 'action_goal',
               toolName: result.toolName,
               goal: result.goal,
               summary: result.summary,
               recordKind: result.recordKind,
+              proposal: result.proposal,
             };
             toolResultMessages.push({ role: 'tool', tool_call_id: call.id, content: result.summary });
           } else if (result.ok) {
-            toolCallLog.push({ name: call.name, ok: true, taskId: result.task.id });
+            toolCallLog.push({
+              name: call.name,
+              ok: true,
+              taskId: result.task.id,
+              pending: result.recordKind === 'task_removal_pending',
+            });
             yield {
               type: 'action',
               toolName: result.toolName,

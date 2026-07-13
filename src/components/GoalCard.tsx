@@ -104,6 +104,19 @@ export function GoalCard({
     );
   }
 
+  if (type === 'milestone') {
+    // subtitle is the active stage's title (or "Complete — all N stages"
+    // once done) — the headline server-computed by computeMilestoneCardSummary.
+    // The bar is a real, user-declared fraction (activeStageIndex /
+    // stages.length) — no ring, and never a paceLine (milestone goals have
+    // no numbers or deadlines to pace against).
+    return (
+      <CardShell icon={icon} title={title} subtitle={subtitle} accent={accent}>
+        {progress != null && <Progress value={progress} />}
+      </CardShell>
+    );
+  }
+
   // savings
   const pct = progress ?? 0;
   return (

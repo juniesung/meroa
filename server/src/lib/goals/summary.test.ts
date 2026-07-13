@@ -5,9 +5,10 @@ import {
   computeIndirectCardSummary,
   computeIndirectPace,
   computeIndirectProgress,
+  computeMilestoneCardSummary,
   formatMoney,
 } from './summary.ts';
-import type { IndirectGoalDefinition } from './schema.ts';
+import type { IndirectGoalDefinition, MilestoneGoalDefinition } from './schema.ts';
 
 // The "$0.5" bug: a fractional amount must always show two decimals, an
 // integer amount never a forced ".00".
@@ -56,6 +57,48 @@ describe('computeHabitCardSummary', () => {
     const card = computeHabitCardSummary({ current: 1, longest: 1, doneCount: 1 });
     expect(card.headline).toBe('1-day streak');
     expect(card.sub).toBe('longest 1 · 1 check-in');
+  });
+});
+
+// Pure card copy for milestone goals — no numbers anywhere, the headline IS
+// the active stage's title, and progress is purely activeStageIndex /
+// stages.length (docs/milestone-goal-plan.md §0).
+
+function milestoneDef(stages: string[], activeStageIndex: number): MilestoneGoalDefinition {
+  return { type: 'milestone', stages, activeStageIndex };
+}
+
+describe('computeMilestoneCardSummary', () => {
+  const stages = ['Applying', 'Interviewing', 'Offer negotiation', 'Accepted', 'Onboarding'];
+
+  it('fresh milestone: stage 1 of N, 0 progress', () => {
+    const card = computeMilestoneCardSummary(milestoneDef(stages, 0));
+    expect(card.headline).toBe('Applying');
+    expect(card.sub).toBe('stage 1 of 5');
+    expect(card.progress).toBe(0);
+    expect(card.paceLine).toBeNull();
+    expect(card.streak).toBeNull();
+  });
+
+  it('mid milestone: headline is stages[activeStageIndex], not an off-by-one', () => {
+    const card = computeMilestoneCardSummary(milestoneDef(stages, 2));
+    expect(card.headline).toBe('Offer negotiation');
+    expect(card.sub).toBe('stage 3 of 5');
+    expect(card.progress).toBeCloseTo(2 / 5);
+  });
+
+  it('complete milestone: activeStageIndex === stages.length', () => {
+    const card = computeMilestoneCardSummary(milestoneDef(stages, 5));
+    expect(card.headline).toBe('Complete — all 5 stages');
+    expect(card.sub).toBe('5 stages done');
+    expect(card.progress).toBe(1);
+  });
+
+  it('progress fractions are exact at every stage boundary', () => {
+    for (let i = 0; i <= stages.length; i++) {
+      const card = computeMilestoneCardSummary(milestoneDef(stages, i));
+      expect(card.progress).toBeCloseTo(i / stages.length);
+    }
   });
 });
 

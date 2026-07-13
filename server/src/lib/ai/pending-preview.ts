@@ -56,9 +56,19 @@ function describeStarter(starter: StarterTask, currency: string | null): string 
   return `"${starter.title}"${cadence}${amount}`;
 }
 
-/** One compact state line for the model's context, '' when nothing is pending. */
-export function renderPendingPreview(preview: GoalPreview | null): string {
-  if (!preview) return '';
+// Used by BOTH renderPendingPreview below (the tail-block context line) AND
+// lib/ai/actions.ts's create_goal tool-result summary — the same concrete
+// facts feed both, so a card's real contents (or the real absence of
+// starter tasks) is what the model quotes, never what it assumes. Without
+// this grounding in the tool result specifically, the narrate pass has
+// nothing but its own guess to describe a just-shown preview with — observed
+// live: a milestone preview with genuinely ZERO starterTasks got narrated as
+// "first stage has starter tasks like updating your resume, researching
+// companies, and submitting apps," inventing three tasks that were never in
+// the preview at all (docs/ai-reliability-hardening.md's lesson 6/16 class,
+// surfaced here because create_goal's summary previously said nothing about
+// contents at all).
+function describeGoalFacts(preview: GoalPreview): string {
   const d = preview.definition;
   const currency = d.type === 'savings' ? d.currency : null;
   const facts =
@@ -66,9 +76,29 @@ export function renderPendingPreview(preview: GoalPreview | null): string {
       ? ` · ${d.currency}${formatMoney(d.targetValue)}${d.deadline ? ` · by ${d.deadline}` : ''}`
       : d.type === 'indirect'
         ? ` · indirect (${d.unit}${d.targetValue !== undefined ? `, target ${d.targetValue}${d.unit}` : ', no target'}${d.deadline ? ` · by ${d.deadline}` : ''})`
-        : ' · habit (daily check-in streak, no target amount)';
+        : d.type === 'milestone'
+          ? ` · milestone (${d.stages.length} stages, starting at "${d.stages[0]}")`
+          : ' · habit (daily check-in streak, no target amount)';
   const starters = preview.starterTasks?.length
     ? ` · starter tasks: ${preview.starterTasks.map((s) => describeStarter(s, currency)).join('; ')}`
-    : '';
-  return `A create_goal preview is showing but NOT saved yet (the user hasn't tapped Create): "${preview.name}"${facts}${starters}. If the user asks to change it, call create_goal again with the full revised version; if they ask about it, it's this one.`;
+    : ' · no starter tasks proposed (the card has nothing to check off yet — only say it does if the user actually sees some)';
+  return `${facts}${starters}`;
+}
+
+/** One compact state line for the model's context, '' when nothing is pending. */
+export function renderPendingPreview(preview: GoalPreview | null): string {
+  if (!preview) return '';
+  return `A create_goal preview is showing but NOT saved yet (the user hasn't tapped Create): "${preview.name}"${describeGoalFacts(preview)}. If the user asks to change it, call create_goal again with the full revised version; if they ask about it, it's this one.`;
+}
+
+/**
+ * What actually got shown on the just-rendered preview card, for the
+ * create_goal tool-result summary (lib/ai/actions.ts) — the narrate pass
+ * only ever sees this summary string, never the raw preview object, so
+ * without a concrete fact here it has nothing to describe the card with but
+ * its own guess. Same underlying facts as renderPendingPreview's context
+ * line, phrased for a sentence rather than a compact state line.
+ */
+export function describeGoalPreviewForSummary(preview: GoalPreview): string {
+  return `What's actually on the card: "${preview.name}"${describeGoalFacts(preview)}.`;
 }

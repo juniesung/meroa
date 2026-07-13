@@ -95,6 +95,43 @@ function TrendView({ detail, entries }: { detail: ApiGoalDetail; entries: ApiGoa
   );
 }
 
+// Milestone goals never have numbers or entries (docs/milestone-goal-plan.md
+// §0) — the hero is the ordered stage list itself: done stages check + strike,
+// the active one gets the accent highlight, pending ones stay dim. Advancing
+// only happens through the chat confirm card, so there's no in-screen action
+// here — same "nothing to log" shape as habit's StreakView.
+function StagesView({ detail }: { detail: ApiGoalDetail }) {
+  const stages = detail.stages ?? [];
+  const activeIndex = detail.activeStageIndex ?? 0;
+  return (
+    <View style={styles.viewCard}>
+      <View style={{ gap: 10 }}>
+        {stages.map((stage, i) => {
+          const done = i < activeIndex;
+          const active = i === activeIndex;
+          return (
+            <View key={i} style={styles.stageRow}>
+              <View style={[styles.stageMarker, done && styles.stageMarkerDone, active && styles.stageMarkerActive]}>
+                {done ? (
+                  <Icon name="check" size={12} color="#fff" stroke={2.4} />
+                ) : (
+                  <Text style={[styles.stageMarkerText, active && styles.stageMarkerTextActive]}>{i + 1}</Text>
+                )}
+              </View>
+              <Text style={[styles.stageLabel, done && styles.stageLabelDone, active && styles.stageLabelActive]}>
+                {stage}
+              </Text>
+            </View>
+          );
+        })}
+      </View>
+      <Text style={styles.habitNote}>
+        A stage only advances when you tell Meroa it&apos;s done — nothing to log here.
+      </Text>
+    </View>
+  );
+}
+
 export default function GoalDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { data, isLoading } = useGoal(id);
@@ -116,6 +153,8 @@ export default function GoalDetailScreen() {
   const { goal, detail, entries } = data;
   const isHabit = detail.type === 'habit';
   const isIndirect = detail.type === 'indirect';
+  const isMilestone = detail.type === 'milestone';
+  const hidesEntries = isHabit || isMilestone;
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
@@ -141,9 +180,17 @@ export default function GoalDetailScreen() {
       <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 120, gap: 12 }}>
         <Text style={styles.headline}>{detail.card.headline}</Text>
 
-        {isHabit ? <StreakView detail={detail} /> : isIndirect ? <TrendView detail={detail} entries={entries} /> : <TotalView detail={detail} />}
+        {isHabit ? (
+          <StreakView detail={detail} />
+        ) : isMilestone ? (
+          <StagesView detail={detail} />
+        ) : isIndirect ? (
+          <TrendView detail={detail} entries={entries} />
+        ) : (
+          <TotalView detail={detail} />
+        )}
 
-        {!isHabit && (
+        {!hidesEntries && (
           <>
             <Text style={styles.sectionTitle}>History</Text>
             {entries.length === 0 ? (
@@ -188,7 +235,7 @@ export default function GoalDetailScreen() {
         </View>
       </ScrollView>
 
-      {!isHabit && (
+      {!hidesEntries && (
         <>
           <Pressable
             onPress={() => {
@@ -258,6 +305,23 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   habitNote: { color: theme.faint, fontSize: 12 },
+  stageRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  stageMarker: {
+    width: 24,
+    height: 24,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: theme.borderStrong,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stageMarkerDone: { backgroundColor: theme.blue, borderColor: theme.blue },
+  stageMarkerActive: { borderColor: theme.blue, backgroundColor: 'rgba(10,132,255,0.14)' },
+  stageMarkerText: { color: theme.dim, fontSize: 11, fontWeight: '700' },
+  stageMarkerTextActive: { color: theme.blue },
+  stageLabel: { color: theme.dim, fontSize: 14, flex: 1 },
+  stageLabelDone: { color: theme.faint, textDecorationLine: 'line-through' },
+  stageLabelActive: { color: theme.text, fontWeight: '700' },
   sectionTitle: { color: theme.text, fontSize: 15, fontWeight: '700', marginTop: 10 },
   emptyText: { color: theme.dim, fontSize: 13 },
   entryRow: {

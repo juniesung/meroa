@@ -91,7 +91,16 @@ export async function* streamChatReplyActNarrate(
     // the wrapFailure text, so the reply can only describe what actually
     // happened.
     const actionFacts: string[] = [];
-    let calledNoAction = false;
+    // Why the action pass declined, in its own words — the ONLY channel
+    // between the two passes on a no-action turn. Without it the reply pass
+    // knows only "nothing happened" and not *why*, so it can't ask the
+    // question the act pass wanted asked: observed live on an ambiguous
+    // "mark water done" (two matching tasks) — the act pass correctly
+    // refused to guess, and the reply pass, told nothing, confidently
+    // claimed the task was completed anyway (3 of 3 runs), leaving the
+    // claim-check to retract it. The right reply was "which one?", and only
+    // the act pass knew that.
+    let noActionReason = '';
 
     for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
       // Forced on the first round — the whole point of the pass. Later
@@ -136,7 +145,15 @@ export async function* streamChatReplyActNarrate(
         assistantToolCalls.push(call);
 
         if (call.function.name === NO_ACTION_TOOL_NAME) {
-          calledNoAction = true;
+          try {
+            const args = call.function.arguments.trim() ? JSON.parse(call.function.arguments) : {};
+            const reason = (args as { reason?: unknown }).reason;
+            if (typeof reason === 'string' && reason.trim()) noActionReason = reason.trim();
+          } catch {
+            // A malformed no_action argument is not worth failing a turn
+            // over — the reply pass just falls back to the generic
+            // no-action block, exactly as it behaved before reasons existed.
+          }
           toolResultMessages.push({ role: 'tool', tool_call_id: call.id, content: 'No action taken.' });
           continue;
         }
@@ -165,22 +182,25 @@ export async function* streamChatReplyActNarrate(
         );
 
         if (result.ok && 'tasks' in result) {
-          toolCallLog.push({ name: call.function.name, ok: true, taskId: result.tasks.map((t) => t.id).join(',') });
+          // Always task_bulk_removal_pending — remove_tasks never mutates
+          // by itself, only its own confirm card does.
+          toolCallLog.push({ name: call.function.name, ok: true, taskId: result.tasks.map((t) => t.id).join(','), pending: true });
           yield { type: 'action_bulk', toolName: result.toolName, tasks: result.tasks, summary: result.summary, recordKind: result.recordKind };
           actionFacts.push(result.summary);
           toolResultMessages.push({ role: 'tool', tool_call_id: call.id, content: result.summary });
         } else if (result.ok && 'preview' in result) {
-          toolCallLog.push({ name: call.function.name, ok: true });
+          // Always goal_preview — create_goal never saves by itself.
+          toolCallLog.push({ name: call.function.name, ok: true, pending: true });
           yield { type: 'action_preview', toolName: result.toolName, preview: result.preview, summary: result.summary, recordKind: result.recordKind };
           actionFacts.push(result.summary);
           toolResultMessages.push({ role: 'tool', tool_call_id: call.id, content: result.summary });
         } else if (result.ok && 'goal' in result) {
-          toolCallLog.push({ name: call.function.name, ok: true, taskId: result.goal.id });
-          yield { type: 'action_goal', toolName: result.toolName, goal: result.goal, summary: result.summary, recordKind: result.recordKind };
+          toolCallLog.push({ name: call.function.name, ok: true, taskId: result.goal.id, pending: result.recordKind === 'goal_advance_pending' });
+          yield { type: 'action_goal', toolName: result.toolName, goal: result.goal, summary: result.summary, recordKind: result.recordKind, proposal: result.proposal };
           actionFacts.push(result.summary);
           toolResultMessages.push({ role: 'tool', tool_call_id: call.id, content: result.summary });
         } else if (result.ok) {
-          toolCallLog.push({ name: call.function.name, ok: true, taskId: result.task.id });
+          toolCallLog.push({ name: call.function.name, ok: true, taskId: result.task.id, pending: result.recordKind === 'task_removal_pending' });
           yield { type: 'action', toolName: result.toolName, task: result.task, summary: result.summary, recordKind: result.recordKind };
           actionFacts.push(result.modelSummary ?? result.summary);
           toolResultMessages.push({ role: 'tool', tool_call_id: call.id, content: result.modelSummary ?? result.summary });
@@ -204,7 +224,7 @@ export async function* streamChatReplyActNarrate(
     const resultsBlock =
       actionFacts.length > 0
         ? `# Actions already taken this turn (by you, just now — the user can see their cards above your reply)\n${actionFacts.map((f) => `- ${f}`).join('\n')}\n\nThese facts are freshly computed from the real database state — they override anything you remember from earlier in this conversation, including a number, streak, or status you stated in a previous reply. If a fact here conflicts with your own memory of the conversation, the fact here is correct and your memory is stale; restate it exactly, never "correct" it back toward what you recalled. Describe what actually happened in your own words, short and casual. State only these facts — no other action, preview, or change happened this turn, and you cannot take further actions in this reply.`
-        : `# No action was taken this turn\nReply conversationally. If the user asked for something that needs a missing required detail, ask for it. Do not claim or imply that anything was created, changed, logged, removed, or previewed — nothing was.`;
+        : `# No action was taken this turn${noActionReason ? `\nThe action layer declined, and this is why: ${noActionReason}\nIf that reason says something is ambiguous or missing, ASK for exactly that — one short, specific question naming the real options or the missing value. Do not answer it yourself, and do not act as though it were already resolved.` : ''}\nReply conversationally. If the user asked for something that needs a missing required detail, ask for it. Do not claim or imply that anything was created, changed, logged, removed, or previewed — nothing was. The user is looking at an unchanged list: a reply that says you completed, created, or logged something is simply false, and they will see that it is.`;
     narrateMessages.push({ role: 'system', content: resultsBlock });
 
     const stream = await client.chat.completions.create({
@@ -289,12 +309,15 @@ export async function* streamChatReplyActNarrate(
       emittedSegments.push(remaining);
     }
 
-    // Backstop for no-action turns (toolCallLog is empty exactly then) —
-    // the narrate pass has no tools, so a claimed action there is always
-    // false. no_action deliberately doesn't count as a call here.
-    if (calledNoAction || toolCallLog.length === 0) {
-      yield* maybeCorrectFakeAction();
-    }
+    // Backstop for turns with no real mutation — the narrate pass has no
+    // tools, so a claimed action there is always false. Always call this;
+    // maybeCorrectFakeAction's own gate (toolCallLog has a non-pending
+    // success) is what actually decides whether a real mutation happened —
+    // gating on toolCallLog.length here too would wrongly skip a turn whose
+    // only successful calls were pending-confirmation cards (see its
+    // comment). no_action deliberately doesn't count as a real call either
+    // way.
+    yield* maybeCorrectFakeAction();
     logTurn();
     yield { type: 'stream_end' };
   } catch (err) {

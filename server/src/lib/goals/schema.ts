@@ -3,10 +3,11 @@ import { z } from 'zod';
 import { recurrenceSchema } from '../tasks/schema.ts';
 
 // Goal types ship one at a time (docs/goals-redesign-plan.md §1): savings
-// first, habit second, indirect third (this one) — milestone stays
-// deferred. goals.template (the DB column) is the discriminator tag,
-// mirrored inside the definition's own `type` field.
-export const GOAL_TEMPLATES = ['savings', 'habit', 'indirect'] as const;
+// first, habit second, indirect third, milestone fourth and last (this
+// one) — the type system is complete after this. goals.template (the DB
+// column) is the discriminator tag, mirrored inside the definition's own
+// `type` field.
+export const GOAL_TEMPLATES = ['savings', 'habit', 'indirect', 'milestone'] as const;
 export type GoalTemplateKey = (typeof GOAL_TEMPLATES)[number];
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -78,10 +79,32 @@ export const indirectGoalDefinitionSchema = z
   .strict();
 export type IndirectGoalDefinition = z.infer<typeof indirectGoalDefinitionSchema>;
 
+// Milestone = ordered stages, one active at a time, advanced only on the
+// user's explicit say-so — never automatically, never because a linked
+// task completed (docs/milestone-goal-plan.md §1.4, locked). No numbers
+// anywhere: progress is stagesDone / stagesTotal, derived from
+// activeStageIndex, legitimate because every advance was user-declared.
+// `stages` is a fixed literal string array — no per-stage ids in v1,
+// nothing references a stage by identity yet. `activeStageIndex ===
+// stages.length` means every stage is done (the goal is complete); the
+// upper bound (<= stages.length) is enforced in createGoalParamsSchema and
+// applyEditOps wherever the definition is rebuilt, same reason the
+// deadline-needs-a-target rule for indirect lives outside this schema.
+export const milestoneGoalDefinitionSchema = z
+  .object({
+    type: z.literal('milestone'),
+    stages: z.array(z.string().trim().min(1).max(60)).min(2).max(8),
+    activeStageIndex: z.number().int().min(0),
+    checkInCadence: z.enum(['weekly', 'off']).optional(),
+  })
+  .strict();
+export type MilestoneGoalDefinition = z.infer<typeof milestoneGoalDefinitionSchema>;
+
 export const goalDefinitionSchema = z.discriminatedUnion('type', [
   savingsGoalDefinitionSchema,
   habitGoalDefinitionSchema,
   indirectGoalDefinitionSchema,
+  milestoneGoalDefinitionSchema,
 ]);
 export type GoalDefinition = z.infer<typeof goalDefinitionSchema>;
 
@@ -120,7 +143,7 @@ export type GoalPreview = {
 // goal without one could never progress).
 export const createGoalParamsSchema = z
   .object({
-    type: z.enum(['savings', 'habit', 'indirect']).default('savings'),
+    type: z.enum(['savings', 'habit', 'indirect', 'milestone']).default('savings'),
     name: z.string().trim().min(1).max(60),
     icon: z.string().trim().max(40).optional(),
     currency: z.string().trim().min(1).max(6).optional(),
@@ -128,6 +151,11 @@ export const createGoalParamsSchema = z
     deadline: z.string().regex(ISO_DATE, 'deadline must be an ISO date (YYYY-MM-DD)').optional(),
     // indirect only.
     unit: z.string().trim().min(1).max(20).optional(),
+    // milestone only — ordered stage titles the model proposes, editable in
+    // the preview before Create. activeStageIndex is never a model input —
+    // create_goal always starts a fresh milestone at stage 0
+    // (docs/milestone-goal-plan.md §1).
+    stages: z.array(z.string().trim().min(1).max(60)).min(2).max(8).optional(),
     starterTasks: z.array(starterTaskSchema).max(5).optional(),
   })
   .strict()
@@ -147,6 +175,13 @@ export const createGoalParamsSchema = z
           message: 'a savings goal has no unit field — it always uses currency',
         });
       }
+      if (params.stages !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['stages'],
+          message: 'a savings goal has no stages — that field is milestone-only',
+        });
+      }
       return;
     }
     if (params.type === 'habit') {
@@ -155,6 +190,13 @@ export const createGoalParamsSchema = z
           code: z.ZodIssueCode.custom,
           path: ['type'],
           message: 'a habit goal has no target amount, currency, deadline, or unit — the daily task + streak is the whole mechanic; omit those fields',
+        });
+      }
+      if (params.stages !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['stages'],
+          message: 'a habit goal has no stages — that field is milestone-only',
         });
       }
       if (!params.starterTasks?.length) {
@@ -181,35 +223,75 @@ export const createGoalParamsSchema = z
       }
       return;
     }
-    // indirect — real measurements only; a linked task is supporting
-    // activity, never a source of the number itself (locked decision:
-    // "no progress bar derived from tasks, ever").
-    if (params.unit === undefined) {
+    if (params.type === 'indirect') {
+      // real measurements only; a linked task is supporting activity, never
+      // a source of the number itself (locked decision: "no progress bar
+      // derived from tasks, ever").
+      if (params.unit === undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['unit'],
+          message: 'an indirect goal needs a unit (e.g. "lb", "pages") — ask the user rather than guessing one',
+        });
+      }
+      if (params.currency !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['currency'],
+          message: 'an indirect goal has no currency — it tracks a measurement, not money',
+        });
+      }
+      if (params.deadline !== undefined && params.targetValue === undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['deadline'],
+          message: 'a deadline only makes sense with a target value — include one or drop the deadline',
+        });
+      }
+      if (params.stages !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['stages'],
+          message: 'an indirect goal has no stages — that field is milestone-only',
+        });
+      }
+      if (params.starterTasks?.some((s) => s.contribution !== undefined)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['starterTasks'],
+          message: 'an indirect goal never logs a number from a task — omit contribution; a starter task here is supporting activity only',
+        });
+      }
+      return;
+    }
+    // milestone — ordered stages, no numbers anywhere (locked decision,
+    // docs/milestone-goal-plan.md §0). starterTasks, when given, are the
+    // FIRST stage's tasks only — activeStageIndex always starts at 0, never
+    // a model input.
+    if (!params.stages || params.stages.length < 2) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        path: ['unit'],
-        message: 'an indirect goal needs a unit (e.g. "lb", "pages") — ask the user rather than guessing one',
+        path: ['stages'],
+        message: 'a milestone goal needs at least 2 ordered stages — ask the user or propose sensible ones from what they said, rather than guessing a single stage',
       });
     }
-    if (params.currency !== undefined) {
+    if (
+      params.targetValue !== undefined ||
+      params.currency !== undefined ||
+      params.deadline !== undefined ||
+      params.unit !== undefined
+    ) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        path: ['currency'],
-        message: 'an indirect goal has no currency — it tracks a measurement, not money',
-      });
-    }
-    if (params.deadline !== undefined && params.targetValue === undefined) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['deadline'],
-        message: 'a deadline only makes sense with a target value — include one or drop the deadline',
+        path: ['type'],
+        message: 'a milestone goal has no target amount, currency, deadline, or unit — progress is stage N of M, not a number; omit those fields',
       });
     }
     if (params.starterTasks?.some((s) => s.contribution !== undefined)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['starterTasks'],
-        message: 'an indirect goal never logs a number from a task — omit contribution; a starter task here is supporting activity only',
+        message: 'a milestone goal never logs a number from a task — omit contribution; starter tasks here are the current stage\'s to-dos, not a source of progress',
       });
     }
   });
@@ -252,3 +334,18 @@ export const goalEntryDataSchema = z.object({
   note: z.string().trim().max(200).optional(),
 });
 export type GoalEntryData = z.infer<typeof goalEntryDataSchema>;
+
+// --- milestone advance (pending-confirmation only, mirrors GoalPreview) ---
+// Built server-side from LIVE state (lib/ai/actions.ts's advance_goal_stage
+// case), never trusted from the model — stored on the confirm card
+// message's meta and re-validated by POST /goals/:id/advance against
+// current state before anything mutates (docs/milestone-goal-plan.md §2.1).
+export type AdvanceStageProposal = {
+  goalId: string;
+  fromStageIndex: number;
+  fromStage: string;
+  // null = this advance completes the goal (there is no next stage).
+  toStage: string | null;
+  retire: { taskId: string; title: string }[];
+  nextStageTasks?: StarterTask[];
+};

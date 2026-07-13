@@ -79,6 +79,26 @@ export function useEditGoal() {
   });
 }
 
+// advance_goal_stage retires the current stage's tasks and creates the next
+// stage's (docs/milestone-goal-plan.md §2.2) — same three-invalidation shape
+// as useCreateGoalFromPreview's onSettled, since it also mutates tasks.
+export function useAdvanceGoalStage() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, proposalMessageId }: { id: string; proposalMessageId: string }) =>
+      api.advanceGoalStage(id, proposalMessageId),
+    onSuccess: (data) => {
+      queryClient.setQueryData<{ goals: ApiGoal[] }>(goalsQueryKey, (prev) => ({
+        goals: upsertGoal(prev?.goals ?? [], data.goal),
+      }));
+    },
+    onSettled: (_data, _err, vars) => {
+      invalidateGoal(queryClient, vars.id);
+      queryClient.invalidateQueries({ queryKey: tasksQueryKey });
+    },
+  });
+}
+
 export function useLogGoalEntry() {
   const queryClient = useQueryClient();
   return useMutation({

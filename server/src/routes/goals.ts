@@ -6,10 +6,12 @@ import { z } from 'zod';
 import { db } from '../db/client.ts';
 import { conversations, messages, goals, users } from '../db/schema.ts';
 import {
+  advanceGoalStage,
   archiveGoal,
   createGoal,
   editGoal,
   getGoal,
+  isAdvanceProposalStale,
   listGoalEntries,
   logGoalEntry,
   GoalActionError,
@@ -20,6 +22,8 @@ import {
   goalDefinitionSchema,
   starterTaskSchema,
   GOAL_TEMPLATES,
+  type AdvanceStageProposal,
+  type GoalDefinition,
   type GoalTemplateKey,
 } from '../lib/goals/schema.ts';
 import { buildGoalCardSummaries, buildGoalDetail } from '../lib/goals/summary.ts';
@@ -190,6 +194,94 @@ goalRoutes.post('/', zValidator('json', createFromPreviewSchema), async (c) => {
       .set({ meta: { ...meta, createdGoalId: goal.id } })
       .where(eq(messages.id, previewMessageId));
     return c.json({ goal, tasks }, 201);
+  } catch (err) {
+    const { status, body } = actionErrorResponse(err);
+    return c.json(body, status);
+  }
+});
+
+const advanceSchema = z.object({ proposalMessageId: z.string().uuid() });
+
+// Confirm-tap target for the AI's advance_goal_stage proposal card —
+// advance_goal_stage itself never mutates the goal (docs/milestone-goal-
+// plan.md §2.1); this is the actual advance, re-validating the exact
+// proposal that was shown against LIVE state before executing it. Mirrors
+// POST / (create-from-preview) line by line, including the two-layer
+// idempotency (the stamped meta.advancedRecordId here, and advanceGoalStage's
+// own (sourceMessageId, kind) check) so a retried or double-tapped confirm
+// never double-advances.
+goalRoutes.post('/:id/advance', zValidator('json', advanceSchema), async (c) => {
+  const userId = c.get('userId');
+  const id = c.req.param('id');
+  const { proposalMessageId } = c.req.valid('json');
+  const timezone = await getUserTimezone(userId);
+
+  const [row] = await db
+    .select({ message: messages, conversationUserId: conversations.userId })
+    .from(messages)
+    .innerJoin(conversations, eq(messages.conversationId, conversations.id))
+    .where(eq(messages.id, proposalMessageId))
+    .limit(1);
+  if (!row || row.conversationUserId !== userId) {
+    return c.json({ error: 'not_found', message: 'that advance card no longer exists' }, 404);
+  }
+
+  const meta = row.message.meta as {
+    kind?: string;
+    proposal?: AdvanceStageProposal;
+    advancedRecordId?: string;
+  };
+  if (meta.advancedRecordId) {
+    // Deliberately NOT filtered to non-archived (unlike getGoal) — one
+    // proposal advances at most once, ever, same reasoning as create-from-
+    // preview's createdGoalId check.
+    const [existing] = await db
+      .select()
+      .from(goals)
+      .where(and(eq(goals.id, id), eq(goals.userId, userId)))
+      .limit(1);
+    if (existing) return c.json({ goal: existing, tasks: [] }, 200);
+  }
+  if (meta.kind !== 'goal_advance_pending' || !meta.proposal) {
+    return c.json({ error: 'invalid_input', message: 'that message is not an advance proposal' }, 400);
+  }
+  if (meta.proposal.goalId !== id) {
+    return c.json({ error: 'invalid_input', message: 'that proposal is for a different goal' }, 400);
+  }
+
+  const goal = await getGoal(userId, id);
+  if (!goal) return c.json({ error: 'not_found', message: 'goal not found' }, 404);
+  const definition = goal.definition as GoalDefinition;
+  if (definition.type !== 'milestone') {
+    return c.json({ error: 'invalid_input', message: "that goal isn't a milestone goal" }, 400);
+  }
+  if (isAdvanceProposalStale(definition.activeStageIndex, meta.proposal.fromStageIndex)) {
+    return c.json(
+      {
+        error: 'invalid_input',
+        message: 'that advance card is stale — the goal has moved on since; ask Meroa again.',
+      },
+      400,
+    );
+  }
+
+  try {
+    const { goal: updated, tasks } = await advanceGoalStage(
+      userId,
+      id,
+      {
+        fromStageIndex: meta.proposal.fromStageIndex,
+        retire: meta.proposal.retire,
+        nextStageTasks: meta.proposal.nextStageTasks,
+      },
+      timezone,
+      { source: 'goal_ui', sourceMessageId: proposalMessageId },
+    );
+    await db
+      .update(messages)
+      .set({ meta: { ...meta, advancedRecordId: updated.id } })
+      .where(eq(messages.id, proposalMessageId));
+    return c.json({ goal: updated, tasks }, 201);
   } catch (err) {
     const { status, body } = actionErrorResponse(err);
     return c.json(body, status);

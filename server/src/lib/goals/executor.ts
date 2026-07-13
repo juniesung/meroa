@@ -5,12 +5,14 @@ import { records, goalEntries, goals, tasks } from '../../db/schema.ts';
 import { archiveGoalCascadeInTx, createTaskInTx, type ActionSource, type TaskRow } from '../tasks/executor.ts';
 import {
   goalDefinitionSchema,
+  type AdvanceStageProposal,
   type EditGoalPatch,
   type IndirectGoalDefinition,
   type LogGoalEntryPatch,
   type GoalDefinition,
   type GoalEntryData,
   type GoalTemplateKey,
+  type MilestoneGoalDefinition,
   type SavingsGoalDefinition,
   type StarterTask,
 } from './schema.ts';
@@ -105,6 +107,39 @@ export async function getGoal(userId: string, goalId: string): Promise<GoalRow |
     .where(and(eq(goals.id, goalId), eq(goals.userId, userId), isNull(goals.archivedAt)))
     .limit(1);
   return goal ?? null;
+}
+
+// Pure — extracted so the "which linked tasks retire" decision is directly
+// unit-testable without a DB. A recurring template retires regardless of
+// status (it's never 'done' itself); an instance or standalone task only
+// while still open — a done one is history and keeps its record. Same rule
+// as tasks/executor.ts's archiveGoalCascadeInTx cascade filter.
+export function filterRetireCandidates<T extends { recurrence: unknown; status: string }>(rows: T[]): T[] {
+  return rows.filter((t) => t.recurrence !== null || t.status === 'open');
+}
+
+// Pure — whether an advance_goal_stage proposal is stale against the goal's
+// LIVE activeStageIndex. The confirm card freezes fromStageIndex at the
+// moment it was shown; if the goal has moved on since (another advance, an
+// undo), re-tapping it must fail rather than silently advancing from the
+// wrong stage.
+export function isAdvanceProposalStale(liveActiveStageIndex: number, proposalFromStageIndex: number): boolean {
+  return liveActiveStageIndex !== proposalFromStageIndex;
+}
+
+// Live, still-linked tasks eligible for the "retire" side of an
+// advance_goal_stage proposal. Read-only; lib/ai/actions.ts uses this to
+// build the proposal from LIVE state rather than trusting the model's
+// belief about which tasks are currently open.
+export async function listGoalRetireCandidates(
+  userId: string,
+  goalId: string,
+): Promise<{ id: string; title: string }[]> {
+  const rows = await db
+    .select({ id: tasks.id, title: tasks.title, recurrence: tasks.recurrence, status: tasks.status })
+    .from(tasks)
+    .where(and(eq(tasks.goalId, goalId), eq(tasks.userId, userId), isNull(tasks.deletedAt)));
+  return filterRetireCandidates(rows).map((t) => ({ id: t.id, title: t.title }));
 }
 
 // --- create ----------------------------------------------------------
@@ -267,6 +302,19 @@ function applyEditOps(
     return { definition };
   }
 
+  if (definition.type === 'milestone') {
+    // Post-creation stage-list editing is deferred (docs/milestone-goal-
+    // plan.md §0) — only name/icon (which live on the goal row, not the
+    // definition) are editable here.
+    if (patch.targetValue !== undefined || patch.deadline !== undefined || patch.unit !== undefined) {
+      return {
+        error:
+          'a milestone goal has no target amount, deadline, or unit — only its name or icon can be edited here. Stage names are set at creation for now; a stage rename/insert isn\'t supported yet.',
+      };
+    }
+    return { definition };
+  }
+
   if (definition.type === 'savings') {
     if (patch.unit !== undefined) {
       return { error: 'a savings goal has no unit field — it always uses currency' };
@@ -390,6 +438,15 @@ export async function logGoalEntry(
         `"${goal.name}" is a habit goal — it tracks check-ins through its daily task, not logged amounts. Completing the task is the check-in.`,
       );
     }
+    // Milestone goals have no numbers at all (docs/milestone-goal-plan.md
+    // §0) — a stage advance is declared in chat via advance_goal_stage's
+    // confirm card, never logged as an amount.
+    if ((goal.definition as GoalDefinition).type === 'milestone') {
+      throw new GoalActionError(
+        'invalid_input',
+        `"${goal.name}" is a milestone goal — it advances through stages, not logged amounts. Say when a stage is done and I'll propose moving to the next one.`,
+      );
+    }
 
     // patch.entryAt, when set, has already been normalized to a real UTC
     // instant by the caller (lib/ai/actions.ts, via localDatetimeToUtcIso) —
@@ -479,5 +536,146 @@ export async function archiveGoal(
     // tasks/executor's archiveGoalCascadeInTx.
     const { goal: updated, cascadedTaskTitles } = await archiveGoalCascadeInTx(tx, userId, goal, opts);
     return { goal: updated, cascadedTaskTitles };
+  });
+}
+
+// --- milestone advance -------------------------------------------------
+
+/**
+ * Consumes an advance_goal_stage confirm-card proposal (docs/milestone-
+ * goal-plan.md §2.2) — the ONLY way a milestone goal's activeStageIndex
+ * moves. Called by POST /goals/:id/advance once the user taps the card;
+ * that route re-validates ownership/message-kind before this runs, and this
+ * function itself re-validates the goal's LIVE state (type, not archived,
+ * not already complete, current stage matches what the card showed) rather
+ * than trusting the stored proposal blindly — the same "never trust what
+ * the model/card said, recheck the DB" discipline as createGoal.
+ * Idempotent the same way createGoal is: keyed on (sourceMessageId, kind)
+ * via findIdempotentGoalRecord, so a retried or double-tapped confirm
+ * returns the original outcome instead of double-advancing.
+ */
+export async function advanceGoalStage(
+  userId: string,
+  goalId: string,
+  proposal: Pick<AdvanceStageProposal, 'fromStageIndex' | 'retire' | 'nextStageTasks'>,
+  timezone: string | null,
+  opts: ActionSource,
+): Promise<{ goal: GoalRow; tasks: TaskRow[] }> {
+  return db.transaction(async (tx) => {
+    const idempotent = await findIdempotentGoalRecord(tx, userId, opts, 'goal_stage_advanced', goalId);
+    if (idempotent) {
+      const payload = idempotent.payload as { createdTaskIds?: string[] };
+      const goal = await loadGoal(tx, userId, goalId);
+      const createdTasks = payload.createdTaskIds?.length
+        ? await tx.select().from(tasks).where(inArray(tasks.id, payload.createdTaskIds))
+        : [];
+      return { goal, tasks: createdTasks };
+    }
+
+    const goal = await loadGoalForUpdate(tx, userId, goalId);
+    const definition = goal.definition as GoalDefinition;
+    if (definition.type !== 'milestone') {
+      throw new GoalActionError('invalid_input', `"${goal.name}" isn't a milestone goal — there's nothing to advance.`);
+    }
+    if (definition.activeStageIndex >= definition.stages.length) {
+      throw new GoalActionError('invalid_input', `"${goal.name}" is already complete — every stage is done.`);
+    }
+    if (isAdvanceProposalStale(definition.activeStageIndex, proposal.fromStageIndex)) {
+      throw new GoalActionError(
+        'invalid_input',
+        `"${goal.name}" has already moved on since that card was shown — ask again for a fresh one.`,
+      );
+    }
+
+    const prior = { definition: goal.definition, version: goal.version };
+    const nextDefinition: MilestoneGoalDefinition = {
+      ...definition,
+      activeStageIndex: definition.activeStageIndex + 1,
+    };
+    const parsedDefinition = goalDefinitionSchema.parse(nextDefinition);
+
+    const [updated] = await tx
+      .update(goals)
+      .set({ definition: parsedDefinition, version: goal.version + 1 })
+      .where(eq(goals.id, goal.id))
+      .returning();
+    if (!updated) throw new Error('goal_update_failed');
+
+    // Retire the proposal's tasks — re-checked against LIVE state (still
+    // linked to this goal, not already deleted), not just what the card
+    // showed when it was rendered. Same filter as archiveGoalCascadeInTx:
+    // a recurring template goes regardless of status; an instance or
+    // standalone task only while still open — a done one is history and
+    // keeps its record.
+    const proposalIds = proposal.retire.map((r) => r.taskId);
+    let retiredTaskIds: string[] = [];
+    if (proposalIds.length) {
+      const liveLinked = await tx
+        .select({ id: tasks.id, recurrence: tasks.recurrence, status: tasks.status })
+        .from(tasks)
+        .where(and(inArray(tasks.id, proposalIds), eq(tasks.goalId, goal.id), isNull(tasks.deletedAt)));
+      const toRetire = filterRetireCandidates(liveLinked);
+      retiredTaskIds = toRetire.map((t) => t.id);
+      if (retiredTaskIds.length) {
+        await tx.update(tasks).set({ deletedAt: new Date() }).where(inArray(tasks.id, retiredTaskIds));
+      }
+    }
+
+    // Create the next stage's tasks — same shape as createGoal's starter-
+    // task loop (skipRecord: true, one record for the whole advance, a
+    // distinct toolCallId per starter so createTaskInTx's own idempotency
+    // can't collapse starter #2 into starter #1's result). Never a
+    // contribution — a milestone goal never logs a number from a task
+    // (schema-enforced upstream, but nothing here would stamp one anyway).
+    const createdTaskIds: string[] = [];
+    const createdTasks: TaskRow[] = [];
+    for (const [index, starter] of (proposal.nextStageTasks ?? []).entries()) {
+      const { task: created } = await createTaskInTx(
+        tx,
+        userId,
+        { type: 'completion', title: starter.title, recurrence: starter.recurrence, reminder: false },
+        timezone,
+        { ...opts, toolCallId: `advance-starter:${index}` },
+        { skipRecord: true },
+      );
+      const templateId = created.templateId ?? created.id;
+      const [templateRow] = await tx.select().from(tasks).where(eq(tasks.id, templateId)).limit(1);
+      if (!templateRow) throw new Error('task_insert_failed');
+      const [updatedTemplate] = await tx
+        .update(tasks)
+        .set({ goalId: goal.id })
+        .where(eq(tasks.id, templateId))
+        .returning();
+      if (!updatedTemplate) throw new Error('task_update_failed');
+      createdTaskIds.push(templateId);
+
+      const instances = await tx.select().from(tasks).where(eq(tasks.templateId, templateId));
+      let returnedInstance: TaskRow | null = null;
+      for (const instance of instances) {
+        const [updatedInstance] = await tx
+          .update(tasks)
+          .set({ goalId: goal.id })
+          .where(eq(tasks.id, instance.id))
+          .returning();
+        if (!updatedInstance) throw new Error('task_update_failed');
+        if (created.id === instance.id) returnedInstance = updatedInstance;
+      }
+      createdTasks.push(returnedInstance ?? updatedTemplate);
+    }
+
+    // ONE record for the whole advance — undo (undoGoalRecord's
+    // 'goal_stage_advanced' case) restores prior.definition/version,
+    // un-deletes retiredTaskIds, and soft-deletes createdTaskIds as a unit,
+    // the same goal_created-undo cascade shape.
+    await tx.insert(records).values({
+      userId,
+      kind: 'goal_stage_advanced',
+      payload: { goalId: goal.id, name: updated.name, prior, retiredTaskIds, createdTaskIds },
+      source: opts.source,
+      sourceMessageId: opts.sourceMessageId ?? null,
+      toolCallId: opts.toolCallId ?? null,
+    });
+
+    return { goal: updated, tasks: createdTasks };
   });
 }

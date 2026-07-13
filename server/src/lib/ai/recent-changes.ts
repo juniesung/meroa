@@ -27,6 +27,8 @@ function describeChange(kind: string, title: string): string {
       return `an entry was logged to "${title}"`;
     case 'goal_archived':
       return `the "${title}" goal was removed`;
+    case 'goal_stage_advanced':
+      return `the "${title}" goal advanced to its next stage`;
     default:
       return `"${title}" changed`;
   }
@@ -57,6 +59,8 @@ function describeUndo(undidKind: string, title: string): string {
       return `the "${title}" goal was reverted to its previous version (you undid the edit)`;
     case 'goal_entry':
       return `that entry on "${title}" was removed (you undid logging it)`;
+    case 'goal_stage_advanced':
+      return `the "${title}" goal moved back a stage (you undid advancing it)`;
     default:
       return `"${title}" was reverted (you undid the last change)`;
   }
@@ -87,6 +91,8 @@ function describeUndoable(kind: string, title: string): string {
       return `the last entry logged to "${title}"`;
     case 'goal_archived':
       return `removing goal "${title}" (restores the goal AND its linked tasks)`;
+    case 'goal_stage_advanced':
+      return `advancing goal "${title}" to its next stage`;
     default:
       return `the last change to "${title}"`;
   }

@@ -5,7 +5,13 @@ import { records, goalEntries } from '../../db/schema.ts';
 import { daysBetweenYmd, formatYmdShort, ymdInTz } from '../tasks/recurrence.ts';
 import { buildGoalScopedStreaks, type GoalStreak } from './consistency.ts';
 import type { GoalRow } from './executor.ts';
-import type { GoalDefinition, GoalEntryData, IndirectGoalDefinition, SavingsGoalDefinition } from './schema.ts';
+import type {
+  GoalDefinition,
+  GoalEntryData,
+  IndirectGoalDefinition,
+  MilestoneGoalDefinition,
+  SavingsGoalDefinition,
+} from './schema.ts';
 
 // All total/pace math lives here, computed once server-side in the
 // account's own timezone — the model and the client both only ever render
@@ -159,6 +165,23 @@ export function computeHabitCardSummary(streak: GoalStreak): GoalCardSummary {
 }
 
 /**
+ * The milestone card: no numbers anywhere (docs/milestone-goal-plan.md §0)
+ * — the headline IS the active stage's title, progress is
+ * activeStageIndex / stages.length, legitimate because every advance was a
+ * user-declared tap on the advance_goal_stage confirm card, never inferred
+ * from a task completion. Pure — no I/O, unlike computeCardSummary/
+ * computeIndirectCardSummary, since a milestone goal has no entries to fetch.
+ */
+export function computeMilestoneCardSummary(definition: MilestoneGoalDefinition): GoalCardSummary {
+  const total = definition.stages.length;
+  const done = definition.activeStageIndex >= total;
+  const headline = done ? `Complete — all ${total} stages` : (definition.stages[definition.activeStageIndex] ?? '');
+  const sub = done ? `${total} stage${total === 1 ? '' : 's'} done` : `stage ${definition.activeStageIndex + 1} of ${total}`;
+  const progress = total > 0 ? Math.min(1, definition.activeStageIndex / total) : 0;
+  return { headline, sub, progress, paceLine: null, streak: null };
+}
+
+/**
  * Progress fraction for an indirect goal, generalized to both directions
  * (rising toward a target, like a bench PR, or falling toward one, like a
  * weight-loss goal) — `start` is the first-ever logged value, never a
@@ -274,6 +297,9 @@ export type GoalDetail = {
   unit: string | null;
   currentValue: number | null;
   startValue: number | null;
+  // Milestone only — null on every other type.
+  stages: string[] | null;
+  activeStageIndex: number | null;
 };
 
 export async function buildGoalDetail(goal: GoalRow, timezone: string | null): Promise<GoalDetail> {
@@ -297,6 +323,27 @@ export async function buildGoalDetail(goal: GoalRow, timezone: string | null): P
       unit: null,
       currentValue: null,
       startValue: null,
+      stages: null,
+      activeStageIndex: null,
+    };
+  }
+
+  if (definition.type === 'milestone') {
+    return {
+      type: 'milestone',
+      card: computeMilestoneCardSummary(definition),
+      total: null,
+      targetValue: null,
+      currency: null,
+      deadline: null,
+      streak: null,
+      entryCount: 0,
+      lastEntryAt: null,
+      unit: null,
+      currentValue: null,
+      startValue: null,
+      stages: definition.stages,
+      activeStageIndex: definition.activeStageIndex,
     };
   }
 
@@ -318,6 +365,8 @@ export async function buildGoalDetail(goal: GoalRow, timezone: string | null): P
       unit: definition.unit,
       currentValue,
       startValue,
+      stages: null,
+      activeStageIndex: null,
     };
   }
 
@@ -337,6 +386,8 @@ export async function buildGoalDetail(goal: GoalRow, timezone: string | null): P
     unit: null,
     currentValue: null,
     startValue: null,
+    stages: null,
+    activeStageIndex: null,
   };
 }
 
@@ -350,6 +401,7 @@ export async function buildGoalCardSummaries(
   const savingsGoals = goalRows.filter((g) => (g.definition as GoalDefinition).type === 'savings');
   const habitGoals = goalRows.filter((g) => (g.definition as GoalDefinition).type === 'habit');
   const indirectGoals = goalRows.filter((g) => (g.definition as GoalDefinition).type === 'indirect');
+  const milestoneGoals = goalRows.filter((g) => (g.definition as GoalDefinition).type === 'milestone');
 
   const [entriesByGoal, streaksByGoal] = await Promise.all([
     fetchLiveEntriesForGoals([...savingsGoals, ...indirectGoals].map((g) => g.id)),
@@ -371,6 +423,10 @@ export async function buildGoalCardSummaries(
     const entries = entriesByGoal.get(goal.id) ?? [];
     const card = computeIndirectCardSummary(goal.definition as IndirectGoalDefinition, entries, tz, now);
     result.set(goal.id, { ...card, entryCount: entries.length, lastEntryAt: entries[0]?.entryAt ?? null });
+  }
+  for (const goal of milestoneGoals) {
+    const card = computeMilestoneCardSummary(goal.definition as MilestoneGoalDefinition);
+    result.set(goal.id, { ...card, entryCount: 0, lastEntryAt: null });
   }
   return result;
 }

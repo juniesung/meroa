@@ -89,6 +89,12 @@ export async function buildGoalContext(
       const contribution = contributions.get(goal.id);
       const viaLabel = contribution ? ` · check-in via "${contribution.title}" (complete_task IS the check-in)` : '';
       line = `[${alias}] "${goal.name}" · habit · ${summary.headline} (${summary.sub})${viaLabel}`;
+    } else if (definition.type === 'milestone') {
+      const done = definition.activeStageIndex >= definition.stages.length;
+      const stageLabel = done
+        ? `complete — all ${definition.stages.length} stages`
+        : `stage ${definition.activeStageIndex + 1}/${definition.stages.length} "${definition.stages[definition.activeStageIndex]}"`;
+      line = `[${alias}] "${goal.name}" · milestone · ${stageLabel} · advance ONLY on the user's say-so (advance_goal_stage) — a completed linked task is never a reason to advance`;
     } else if (definition.type === 'indirect') {
       const deadlineLabel = definition.deadline ? `, due ${formatYmdShort(definition.deadline)}` : '';
       const lastLabel = summary.lastEntryAt ? `, last ${formatYmdShort(ymdInTz(summary.lastEntryAt, tz))}` : '';

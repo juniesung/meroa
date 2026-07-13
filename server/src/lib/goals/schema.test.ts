@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { createGoalParamsSchema } from './schema.ts';
+import { createGoalParamsSchema, milestoneGoalDefinitionSchema } from './schema.ts';
 
 // The cross-field rules the model is most likely to get wrong — enforced in
 // the schema so a bad call fails loud with a corrective message instead of
@@ -127,6 +127,84 @@ describe('createGoalParamsSchema — indirect', () => {
       name: 'Weight',
       unit: 'lb',
       starterTasks: [{ title: 'Gym session' }],
+    });
+    expect(result.success).toBe(true);
+  });
+});
+
+describe('milestoneGoalDefinitionSchema — stage-count matrix', () => {
+  const base = { type: 'milestone' as const, activeStageIndex: 0 };
+
+  it('accepts 2..8 stages', () => {
+    for (let n = 2; n <= 8; n++) {
+      const stages = Array.from({ length: n }, (_, i) => `Stage ${i + 1}`);
+      expect(milestoneGoalDefinitionSchema.safeParse({ ...base, stages }).success).toBe(true);
+    }
+  });
+
+  it('rejects 1 stage', () => {
+    expect(milestoneGoalDefinitionSchema.safeParse({ ...base, stages: ['Only one'] }).success).toBe(false);
+  });
+
+  it('rejects 9 stages', () => {
+    const stages = Array.from({ length: 9 }, (_, i) => `Stage ${i + 1}`);
+    expect(milestoneGoalDefinitionSchema.safeParse({ ...base, stages }).success).toBe(false);
+  });
+
+  it('rejects an empty-string stage title', () => {
+    expect(
+      milestoneGoalDefinitionSchema.safeParse({ ...base, stages: ['Applying', ''] }).success,
+    ).toBe(false);
+  });
+});
+
+describe('createGoalParamsSchema — milestone', () => {
+  const validMilestone = {
+    type: 'milestone' as const,
+    name: 'Land internship',
+    stages: ['Applying', 'Interviewing', 'Offer negotiation'],
+  };
+
+  it('accepts a valid milestone with 2-8 stages', () => {
+    expect(createGoalParamsSchema.safeParse(validMilestone).success).toBe(true);
+  });
+
+  it('rejects a milestone with fewer than 2 stages', () => {
+    const result = createGoalParamsSchema.safeParse({ ...validMilestone, stages: ['Applying'] });
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.error.issues[0]?.path).toEqual(['stages']);
+  });
+
+  it('rejects a milestone missing stages entirely', () => {
+    const result = createGoalParamsSchema.safeParse({ type: 'milestone', name: 'Land internship' });
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.error.issues[0]?.path).toEqual(['stages']);
+  });
+
+  it('rejects a milestone carrying targetValue / currency / deadline / unit', () => {
+    for (const extra of [
+      { targetValue: 30 },
+      { currency: '$' },
+      { deadline: '2026-12-25' },
+      { unit: 'lb' },
+    ]) {
+      const result = createGoalParamsSchema.safeParse({ ...validMilestone, ...extra });
+      expect(result.success).toBe(false);
+    }
+  });
+
+  it('rejects a milestone starter task carrying a contribution', () => {
+    const result = createGoalParamsSchema.safeParse({
+      ...validMilestone,
+      starterTasks: [{ title: 'Update resume', contribution: 5 }],
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('accepts milestone starter tasks with no contribution — the first stage\'s to-dos', () => {
+    const result = createGoalParamsSchema.safeParse({
+      ...validMilestone,
+      starterTasks: [{ title: 'Update resume' }, { title: 'Apply to 5 companies' }],
     });
     expect(result.success).toBe(true);
   });

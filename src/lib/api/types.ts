@@ -152,7 +152,7 @@ export type PostponeTaskInput = {
 // is optional; a linked task is supporting activity only, never a source of
 // the number). No field builder.
 
-export type GoalTemplateKey = 'savings' | 'habit' | 'indirect';
+export type GoalTemplateKey = 'savings' | 'habit' | 'indirect' | 'milestone';
 
 export type GoalDefinition =
   | {
@@ -171,6 +171,15 @@ export type GoalDefinition =
       unit: string;
       targetValue?: number;
       deadline?: string;
+      checkInCadence?: 'weekly' | 'off';
+    }
+  | {
+      type: 'milestone';
+      // Ordered stage titles, 2-8 — fixed at creation (docs/milestone-goal-
+      // plan.md §0, post-creation stage editing deferred).
+      stages: string[];
+      // 0-based; === stages.length means every stage is done.
+      activeStageIndex: number;
       checkInCadence?: 'weekly' | 'off';
     };
 
@@ -193,6 +202,20 @@ export type GoalPreview = {
   icon: string | null;
   definition: GoalDefinition;
   starterTasks?: StarterTask[];
+};
+
+// What advance_goal_stage returns for display before anything is saved —
+// stored on a goal_advance_pending message's meta.proposal, and what
+// POST /goals/:id/advance re-validates and consumes once the user taps
+// Advance (docs/milestone-goal-plan.md §2.1).
+export type AdvanceStageProposal = {
+  goalId: string;
+  fromStageIndex: number;
+  fromStage: string;
+  // null = this advance completes the goal (there is no next stage).
+  toStage: string | null;
+  retire: { taskId: string; title: string }[];
+  nextStageTasks?: StarterTask[];
 };
 
 export type ApiGoal = {
@@ -229,7 +252,7 @@ export type ApiGoalEntry = {
 };
 
 export type ApiGoalDetail = {
-  type: 'savings' | 'habit' | 'indirect';
+  type: 'savings' | 'habit' | 'indirect' | 'milestone';
   card: { headline: string; sub: string; progress: number | null; paceLine: string | null };
   // Savings fields — null on a habit/indirect detail. targetValue and
   // deadline are shared with indirect.
@@ -245,6 +268,9 @@ export type ApiGoalDetail = {
   unit: string | null;
   currentValue: number | null;
   startValue: number | null;
+  // Milestone only — null on every other type.
+  stages: string[] | null;
+  activeStageIndex: number | null;
 };
 
 // Mirrors server/src/lib/goals/consistency.ts — client renders, never
@@ -266,13 +292,15 @@ export type ApiGoalConsistency = {
 };
 
 export type CreateGoalParams = {
-  type?: 'savings' | 'habit' | 'indirect';
+  type?: 'savings' | 'habit' | 'indirect' | 'milestone';
   name: string;
   icon?: string;
   currency?: string;
   unit?: string;
   targetValue?: number;
   deadline?: string;
+  // Milestone only — 2-8 ordered stage titles.
+  stages?: string[];
 };
 
 export type EditGoalPatch = {

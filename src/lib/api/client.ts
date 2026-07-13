@@ -237,6 +237,15 @@ export const api = {
   editGoal: (id: string, patch: EditGoalPatch) =>
     request<{ goal: ApiGoal }>(`/goals/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
 
+  // Confirm-tap for a chat advance_goal_stage proposal card — advance_goal_
+  // stage itself never mutates anything (docs/milestone-goal-plan.md §2.1);
+  // this is the actual advance, using the exact proposal the card showed.
+  advanceGoalStage: (id: string, proposalMessageId: string) =>
+    request<{ goal: ApiGoal; tasks: ApiTask[] }>(`/goals/${id}/advance`, {
+      method: 'POST',
+      body: JSON.stringify({ proposalMessageId }),
+    }),
+
   logGoalEntry: (id: string, patch: LogGoalEntryPatch) =>
     request<{ goal: ApiGoal; entry: ApiGoalEntry }>(`/goals/${id}/entries`, {
       method: 'POST',
