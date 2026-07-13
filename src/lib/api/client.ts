@@ -1,3 +1,5 @@
+import Constants from 'expo-constants';
+
 import {
   clearTokens,
   getCachedAccessToken,
@@ -27,10 +29,32 @@ import type {
   VerifyOtpResponse,
 } from './types';
 
-const BASE_URL = process.env.EXPO_PUBLIC_API_URL;
-if (!BASE_URL) {
+const CONFIGURED_URL = process.env.EXPO_PUBLIC_API_URL;
+if (!CONFIGURED_URL) {
   throw new Error('EXPO_PUBLIC_API_URL is not set — check your .env file.');
 }
+
+// On a phone, `localhost` is the PHONE — the dev server is on the Mac, so a
+// literal localhost URL just fails to connect. Metro already knows the address
+// the device reached it on (`hostUri`, e.g. "10.0.0.95:8081"), so borrow its
+// host and keep our own port. This is deliberately scoped to loopback URLs: a
+// real staging/prod URL in .env is passed through untouched, and the simulator
+// keeps working because there localhost is genuinely the Mac.
+// String surgery rather than `new URL()` + .hostname — React Native's URL is a
+// partial implementation and its setters have historically been unreliable, and
+// a silent miss here would surface as "the app can't reach the server".
+const LOOPBACK = /^(https?:\/\/)(?:localhost|127\.0\.0\.1)(?=[:/]|$)/;
+
+function resolveBaseUrl(configured: string): string {
+  if (!LOOPBACK.test(configured)) return configured;
+
+  const devHost = Constants.expoConfig?.hostUri?.split(':')[0];
+  if (!devHost || devHost === 'localhost' || devHost === '127.0.0.1') return configured;
+
+  return configured.replace(LOOPBACK, `$1${devHost}`);
+}
+
+const BASE_URL = resolveBaseUrl(CONFIGURED_URL);
 
 export class ApiError extends Error {
   status: number;
