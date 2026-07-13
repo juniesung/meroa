@@ -56,12 +56,40 @@ function actionResultsBlock(actionFacts: string[]): string {
   return `# Actions already taken this turn (by you, just now — the user can see their cards above your reply)\n${actionFacts.map((f) => `- ${f}`).join('\n')}\n\nThese facts are freshly computed from the real database state — they override anything you remember from earlier in this conversation, including a number, streak, or status you stated in a previous reply. If a fact here conflicts with your own memory of the conversation, the fact here is correct and your memory is stale; restate it exactly, never "correct" it back toward what you recalled. Describe what actually happened in your own words, short and casual. State only these facts — no other action, preview, or change happened this turn, and you cannot take further actions in this reply.`;
 }
 
+/**
+ * A FAILED call is not an action taken, and filing it under a header that says
+ * so is how "Undone — the card is gone" got written on a turn where the undo was
+ * refused and nothing changed. The model was not hallucinating; it was reading
+ * the heading we gave it. Failures get their own frame.
+ */
+function failureResultsBlock(failures: string[]): string {
+  return `# NOTHING was done this turn — every action failed
+${failures.map((f) => `- ${f}`).join('\n')}
+
+The user's tasks and goals are EXACTLY as they were before they spoke. Nothing was created, completed, logged, removed, undone or previewed. Tell them plainly what could not be done and why, in one short sentence, and ask for whatever would let them proceed. Never describe any part of it as done.`;
+}
+
 // `reason` is empty for the speculative call — the action pass hasn't spoken
 // yet. That costs nothing, because a speculation is only ever SHOWN on an
 // intent: 'conversation' turn, where the reason is "nothing to do" and there is
 // no question for the reply to ask.
-function noActionResultsBlock(reason: string): string {
-  return `# No action was taken this turn${reason ? `\nThe action layer declined, and this is why: ${reason}\nIf that reason says something is ambiguous or missing, ASK for exactly that — one short, specific question naming the real options or the missing value. Do not answer it yourself, and do not act as though it were already resolved.` : ''}\nReply conversationally. If the user asked for something that needs a missing required detail, ask for it. Do not claim or imply that anything was created, changed, logged, removed, or previewed — nothing was. The user is looking at an unchanged list: a reply that says you completed, created, or logged something is simply false, and they will see that it is.`;
+function noActionResultsBlock(reason: string, pendingConfirmCard?: string | null): string {
+  // SERVER-AUTHORED, and that is the whole point. The model's own `reason` is
+  // the only untrusted string in this prompt (it gets dropped outright when it
+  // names a tool — see the capture site), and dropping it left the reply pass
+  // with nothing to explain itself with: on "undo that" against a pending card
+  // it fell straight back to pattern-matching the request and wrote "Undone —
+  // Buy eggs is back", on a turn where nothing ran. This states the same fact,
+  // computed from the database rather than written by a model, so it is always
+  // there and always true.
+  const pendingNote = pendingConfirmCard
+    ? `\n\n# A confirmation card is on screen and they have NOT tapped it\nIt reads: "${pendingConfirmCard}"\nA card that has not been tapped has changed NOTHING. If they asked you to undo, cancel, or take that back: there is nothing to undo, because nothing has happened yet. Say exactly that — plainly, in one sentence — and tell them they can simply ignore the card or tap Cancel. Never say you undid, reversed, restored or brought anything back: you did not, and their list is untouched.`
+    : '';
+  return `# No action was taken this turn${reason ? `\nThe action layer declined, and this is why: ${reason}\nIf that reason says something is ambiguous or missing, ASK for exactly that — one short, specific question naming the real options or the missing value. Do not answer it yourself, and do not act as though it were already resolved.` : ''}${pendingNote}
+
+Say the ONE thing this turn needs and stop. If a detail is missing, ask for it — just the question, nothing around it ("How much are you saving toward?"). Do not recap what they already have, do not list their existing tasks or goals, do not describe any card, do not offer a menu of next steps, and do not add a closing flourish. Extra sentences are not friendliness here; they are noise, and every one of them is a chance to say something untrue.
+
+Do not claim or imply that anything was created, changed, logged, removed, or previewed — nothing was. The user is looking at an unchanged list: a reply that says you completed, created, or logged something is simply false, and they will see that it is.`;
 }
 
 /**
@@ -94,10 +122,25 @@ export async function* streamChatReplyActNarrate(
   // See providers/deepseek.ts: that is the one narrate turn where reasoning
   // buys nothing, because there is no request in flight to falsely confirm.
   narrateConversationExtra: Record<string, unknown> = {},
+  // The reply pass's state block. Same as `tailText` minus the recent-changes
+  // feed and the undo target: those are GROUNDING for the action pass, and the
+  // reply pass read them as news and announced them unprompted (a plain "What's
+  // up dawg" came back as "Already got you — just tapped that confirm, so
+  // they're all gone now"). A pass cannot announce what it cannot see.
+  narrateTailText: string = tailText,
+  // The state block for a PURE-CONVERSATION reply: just the clock. No task list,
+  // no goals, no recent-changes feed. See the speculation below for why.
+  conversationTailText: string = narrateTailText,
 ): AsyncGenerator<ChatStreamEvent> {
   const windowed = windowHistory(history).filter((m) => m.content.trim().length > 0);
-  const { toolCallLog, emittedSegments, logTurn, maybeCorrectFakeAction, maybeCorrectConcealedAction } =
-    createTurnState(actionCtx);
+  const {
+    toolCallLog,
+    emittedSegments,
+    logTurn,
+    maybeCorrectFakeAction,
+    maybeCorrectConcealedAction,
+    maybeCorrectFabricatedFigure,
+  } = createTurnState(actionCtx);
 
   const maxTokens = (n: number) =>
     maxTokensParam === 'max_tokens' ? { max_tokens: n } : { max_completion_tokens: n };
@@ -120,6 +163,8 @@ export async function* streamChatReplyActNarrate(
     // the wrapFailure text, so the reply can only describe what actually
     // happened.
     const actionFacts: string[] = [];
+    // Kept apart from actionFacts on purpose — see failureResultsBlock.
+    const failureFacts: string[] = [];
     // Why the action pass declined, in its own words — the ONLY channel
     // between the two passes on a no-action turn. Without it the reply pass
     // knows only "nothing happened" and not *why*, so it can't ask the
@@ -158,6 +203,22 @@ export async function* streamChatReplyActNarrate(
      */
     const newestUserMessage = windowed[windowed.length - 1]?.content ?? '';
     const mayBeConversational = looksPurelyConversational(newestUserMessage);
+    // When the user is just talking, the reply pass has no business seeing their
+    // task state — and the surest way to stop it narrating a task is not to show
+    // it one. Both the CARD turns and the whole state block come out:
+    //
+    //   - Cards out of history. They are real history and must exist for the
+    //     action pass (dropping them left a hole the model tried to fill), but on
+    //     "What's up dawg" they are precisely what it should not be reporting on.
+    //   - State block down to the clock. With the task list, the goals and the
+    //     recent-changes feed in front of it, a greeting reliably came back as a
+    //     status report: "Already got you — just tapped that confirm, so they're
+    //     all gone now. Tasks are cleared out."
+    //
+    // A pass cannot announce what it cannot see. That is a guarantee; "please
+    // don't mention their tasks" would only have been a request — and this
+    // session's whole lesson is that the difference matters.
+    const conversationHistory = windowed.filter((m) => !m.isCard);
     const speculation = mayBeConversational
       ? client.chat.completions
           .create({
@@ -165,7 +226,7 @@ export async function* streamChatReplyActNarrate(
             stream: true,
             ...maxTokens(NARRATE_MAX_OUTPUT_TOKENS),
             messages: [
-              ...buildTailedMessages(buildSystemPrompt(user), tailText, windowed),
+              ...buildTailedMessages(buildSystemPrompt(user), conversationTailText, conversationHistory),
               { role: 'system', content: noActionResultsBlock('') },
             ],
             ...narrateConversationExtra,
@@ -237,7 +298,24 @@ export async function* streamChatReplyActNarrate(
           try {
             const args = call.function.arguments.trim() ? JSON.parse(call.function.arguments) : {};
             const reason = (args as { reason?: unknown }).reason;
-            if (typeof reason === 'string' && reason.trim()) noActionReason = reason.trim();
+            // THE contamination channel, and the only one. Every other string
+            // crossing into the reply pass's prompt is server-computed; this one
+            // the model wrote itself, and we hand it straight back to a model.
+            // When it names its own mechanics ("nothing to undo — the pending
+            // remove_task card hasn't been tapped"), the reply pass reads a tool
+            // name in its own instructions and echoes it to the user — observed
+            // live on "undo that", leaking `[I called remove` into the chat.
+            // A reason that talks about tools is worthless to the reply anyway:
+            // it exists to say what to ASK the user. Drop it and fall back to the
+            // generic block rather than launder tool-speak into the prompt.
+            if (typeof reason === 'string' && reason.trim() && !isToolCallMarkupLeak(reason)) {
+              noActionReason = reason.trim();
+            } else if (typeof reason === 'string' && isToolCallMarkupLeak(reason)) {
+              logger.warn(
+                { userId: actionCtx.userId, sourceMessageId: actionCtx.sourceMessageId, reason },
+                'no_action reason named a tool — dropped rather than injected into the reply prompt',
+              );
+            }
             const intent = (args as { intent?: unknown }).intent;
             if (intent === 'conversation' || intent === 'unfulfilled') noActionIntent = intent;
           } catch {
@@ -271,6 +349,7 @@ export async function* streamChatReplyActNarrate(
           parsedInput,
           actionCtx.refs,
           { source: 'chat', sourceMessageId: actionCtx.sourceMessageId, toolCallId: call.id },
+          actionCtx.pendingConfirmCard,
         );
 
         if (result.ok && 'tasks' in result) {
@@ -293,7 +372,7 @@ export async function* streamChatReplyActNarrate(
           toolResultMessages.push({ role: 'tool', tool_call_id: call.id, content: result.summary });
         } else if (result.ok) {
           toolCallLog.push({ name: call.function.name, ok: true, taskId: result.task.id, pending: result.recordKind === 'task_removal_pending' });
-          yield { type: 'action', toolName: result.toolName, task: result.task, summary: result.summary, recordKind: result.recordKind };
+          yield { type: 'action', toolName: result.toolName, task: result.task, summary: result.summary, detail: result.detail, recordKind: result.recordKind };
           actionFacts.push(result.modelSummary ?? result.summary);
           toolResultMessages.push({ role: 'tool', tool_call_id: call.id, content: result.modelSummary ?? result.summary });
           // Only create_task hands back a ref that didn't exist at turn start
@@ -302,7 +381,7 @@ export async function* streamChatReplyActNarrate(
           if (result.toolName === 'create_task') needsAnotherRound = true;
         } else {
           toolCallLog.push({ name: call.function.name, ok: false, error: result.error });
-          actionFacts.push(result.error);
+          failureFacts.push(result.error);
           toolResultMessages.push({ role: 'tool', tool_call_id: call.id, content: result.error });
           needsAnotherRound = true; // corrective error — give it a chance to fix and retry
         }
@@ -318,12 +397,63 @@ export async function* streamChatReplyActNarrate(
       if (!sawRealCall || !needsAnotherRound) break;
     }
 
+    /**
+     * THE CARD IS THE CONFIRMATION — so when the turn did what it was asked,
+     * say nothing.
+     *
+     * Every prose failure in this file's history lives in the sentence the reply
+     * pass writes ABOUT an action that already succeeded: claiming an action it
+     * didn't take, hiding one it did, inventing a total, and then the corrective
+     * bubbles bolted on to catch those ("To be clear though — I just did that
+     * now") which fired on roughly one action turn in four and read as a
+     * malfunction. None of that prose carries information the user doesn't
+     * already have: the action card is rendered directly above it, live from the
+     * database, with the task's real title, schedule and state.
+     *
+     * So a turn whose tool calls all SUCCEEDED emits its cards and stops. No
+     * narrate call at all. That deletes the entire lie surface for action turns
+     * rather than policing it, and it removes a model round-trip (~1-2s) from
+     * every create/complete/log.
+     *
+     * Prose is kept exactly where it carries information the card cannot:
+     *  - a FAILED call — the card never renders, so silence would leave the user
+     *    thinking it worked. They must be told, in words.
+     *  - a no-action turn — the reply IS the product: the clarifying question,
+     *    the missing amount, "which one did you mean". Asking BEFORE acting is
+     *    the point; narrating after it is noise.
+     *  - ordinary conversation.
+     */
+    const anyFailed = failureFacts.length > 0;
+    if (actionFacts.length > 0 && !anyFailed) {
+      if (speculation) {
+        const settled = await speculation;
+        if (settled.ok) {
+          try {
+            settled.stream.controller.abort();
+          } catch {
+            // already settled
+          }
+        }
+      }
+      logger.info(
+        { userId: actionCtx.userId, sourceMessageId: actionCtx.sourceMessageId, cards: toolCallLog.length },
+        'action turn — cards speak for themselves, no narration',
+      );
+      logTurn();
+      yield { type: 'stream_end' };
+      return;
+    }
+
     // ---- pass 2: narrate ---------------------------------------------------
-    const narrateMessages = buildTailedMessages(buildSystemPrompt(user), tailText, windowed);
+    const narrateMessages = buildTailedMessages(buildSystemPrompt(user), narrateTailText, windowed);
     narrateMessages.push({
       role: 'system',
       content:
-        actionFacts.length > 0 ? actionResultsBlock(actionFacts) : noActionResultsBlock(noActionReason),
+        actionFacts.length > 0
+          ? actionResultsBlock(actionFacts)
+          : failureFacts.length > 0
+            ? failureResultsBlock(failureFacts)
+            : noActionResultsBlock(noActionReason, actionCtx.pendingConfirmCard),
     });
 
     /**
@@ -381,7 +511,14 @@ export async function* streamChatReplyActNarrate(
         model,
         stream: true,
         ...maxTokens(NARRATE_MAX_OUTPUT_TOKENS),
-        messages: narrateMessages,
+        // A fast-path turn that lost its speculation still gets the clean
+        // conversational context, not the state-laden one.
+        messages: fastPath
+          ? [
+              ...buildTailedMessages(buildSystemPrompt(user), conversationTailText, conversationHistory),
+              { role: 'system', content: noActionResultsBlock(noActionReason, actionCtx.pendingConfirmCard) },
+            ]
+          : narrateMessages,
         // No tools at all — this pass talks; it cannot act.
         ...(fastPath ? narrateConversationExtra : narrateExtra),
       } as OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming);
@@ -391,6 +528,7 @@ export async function* streamChatReplyActNarrate(
     let emittedLength = 0;
     let finishReason: string | null = null;
     let anySegmentEmitted = false;
+    let leaked = false;
 
     function* flushSafe(): Generator<ChatStreamEvent> {
       const trailingNewlines = buffer.match(/\n+$/);
@@ -408,14 +546,20 @@ export async function* streamChatReplyActNarrate(
       if (!choice.delta?.content) continue;
       buffer += choice.delta.content;
 
-      // No tools in this pass, so a raw-markup leak can't be a lost call —
-      // just junk the model shouldn't show; drop the segment.
+      // No tools in this pass, so a raw-markup leak can't be a lost call — just
+      // junk the model shouldn't show. Drop EVERYTHING, not merely the rest:
+      // truncating to what had already been emitted persisted the leak's own
+      // PREFIX as a reply ("[I called remove", seen live). A partial leak is not
+      // a partial reply, it is garbage with a cliff edge — and worse, it gets
+      // persisted and fed back as history, which is how this class of leak
+      // teaches itself (see the history filter in routes/messages.ts).
       if (isToolCallMarkupLeak(buffer)) {
         logger.warn(
           { userId: actionCtx.userId, sourceMessageId: actionCtx.sourceMessageId },
-          'narrate pass leaked raw tool-call markup — discarding rest of reply',
+          'narrate pass leaked raw tool-call markup — discarding the whole reply',
         );
-        buffer = buffer.slice(0, emittedLength);
+        buffer = '';
+        leaked = true;
         break;
       }
 
@@ -442,7 +586,12 @@ export async function* streamChatReplyActNarrate(
     }
 
     let remaining: string;
-    if (finishReason === 'length' && buffer.trim().length === 0) {
+    if (leaked) {
+      // Nothing salvageable. The claim-check below still runs and will speak if
+      // the (now-discarded) reply had claimed anything; otherwise an honest
+      // "say something" fallback covers the silence.
+      remaining = anySegmentEmitted ? '' : "Hm, that glitched on my end — mind asking again?";
+    } else if (finishReason === 'length' && buffer.trim().length === 0) {
       remaining = 'Sorry, that got cut off on my end — mind asking again?';
     } else {
       yield* flushSafe();
@@ -478,6 +627,13 @@ export async function* streamChatReplyActNarrate(
     // guards "said it happened when it didn't", this one guards "it happened
     // and the reply hid it".
     yield* maybeCorrectConcealedAction(actionFacts);
+    // The third guard. Everything the reply was entitled to state a number from:
+    // the live state block (task list, goal totals, streaks, the clock), whatever
+    // the server actually did this turn, and the user's own words. A figure that
+    // can't be justified from these was invented.
+    yield* maybeCorrectFabricatedFigure(
+      [tailText, ...actionFacts, newestUserMessage].filter(Boolean).join('\n'),
+    );
     logTurn();
     yield { type: 'stream_end' };
   } catch (err) {

@@ -90,7 +90,22 @@ export type TaskActionResult =
   // result instead of `summary` — for facts the model needs but the user
   // must never see persisted (a created task's turn-scoped ref). `summary`
   // remains the persisted message content / SSE payload.
-  | { ok: true; toolName: AiToolName; task: TaskRow; summary: string; modelSummary?: string; recordKind: string }
+  // `detail` is the slice of the summary the task CARD cannot show for itself —
+  // the goal impact ("Auto-logged $5 to \"New bike\" — now $5 / $300") and the
+  // history clause ("That's your 4th time this week"). The card already renders
+  // the task's real title, schedule and state live from the DB, so repeating
+  // that in text is noise; this is the part that would otherwise be lost now
+  // that a successful action turn emits no prose at all. Server-computed, so it
+  // cannot lie.
+  | {
+      ok: true;
+      toolName: AiToolName;
+      task: TaskRow;
+      summary: string;
+      modelSummary?: string;
+      detail?: string;
+      recordKind: string;
+    }
   | { ok: true; toolName: AiToolName; tasks: TaskRow[]; summary: string; recordKind: string }
   // A goal action that actually mutated a saved row — edit_goal,
   // log_goal_entry, or an undo_last_action that reverted a goal_% record.
@@ -576,8 +591,13 @@ export async function executeAiToolCall(
   rawInput: unknown,
   refs: TurnRefs,
   source: ActionSource,
+  // The newest thing on the user's screen is a tap-to-confirm card they haven't
+  // acted on — see the undo guard below.
+  pendingConfirmCard?: string | null,
 ): Promise<TaskActionResult> {
-  return wrapFailure(await executeAiToolCallInner(userId, timezone, toolName, rawInput, refs, source));
+  return wrapFailure(
+    await executeAiToolCallInner(userId, timezone, toolName, rawInput, refs, source, pendingConfirmCard),
+  );
 }
 
 async function executeAiToolCallInner(
@@ -587,6 +607,7 @@ async function executeAiToolCallInner(
   rawInput: unknown,
   refs: TurnRefs,
   source: ActionSource,
+  pendingConfirmCard?: string | null,
 ): Promise<TaskActionResult> {
   if (!isAiToolName(toolName)) {
     return { ok: false, error: `unknown tool "${toolName}"` };
@@ -664,6 +685,7 @@ async function executeAiToolCallInner(
           task,
           summary,
           modelSummary: `${summary} Its ref is ${alias} — use that (never a guessed ref) if you need to act on it later this same turn, e.g. to log initial progress.`,
+          detail: linkSummary.trim(),
           recordKind: 'task_created',
         };
       }
@@ -725,6 +747,7 @@ async function executeAiToolCallInner(
           toolName,
           task,
           summary: `Updated "${task.title}".${linkSummary}`,
+          detail: linkSummary.trim(),
           recordKind: 'task_edited',
         };
       }
@@ -780,6 +803,7 @@ async function executeAiToolCallInner(
             toolName,
             task,
             summary: `Un-marked "${task.title}" — it's open again.${impact}`,
+            detail: impact.trim(),
             recordKind: 'task_progress',
           };
         }
@@ -806,6 +830,7 @@ async function executeAiToolCallInner(
           toolName,
           task,
           summary: `${summarizeComplete(task)}${impact}${history}`,
+          detail: `${impact}${history}`.trim(),
           recordKind: 'task_completion',
         };
       }
@@ -844,6 +869,7 @@ async function executeAiToolCallInner(
           toolName,
           task,
           summary: `${summary}${impact}${history}`,
+          detail: `${impact}${history}`.trim(),
           recordKind: 'task_progress',
         };
       }
@@ -1206,6 +1232,34 @@ async function executeAiToolCallInner(
         };
       }
       case 'undo_last_action': {
+        /**
+         * THE GUARD. A tap-to-confirm card mutates nothing — it is a question,
+         * not a change. So when the newest thing on the user's screen is one of
+         * those and they say "undo that", there is by definition nothing to undo:
+         * "that" is the card, and the card did nothing.
+         *
+         * Without this, undo_last_action happily reached PAST the card and
+         * reverted the last real record — an unrelated task the user had actually
+         * completed — while the reply told them "nothing got deleted". It is the
+         * only way left for Meroa to change someone's data without saying so, and
+         * it fired in roughly 1 undo in 20.
+         *
+         * The rule already existed, in the prompt. It held ~95% of the time,
+         * which is exactly the problem: a prompt is a suggestion with a good
+         * success rate, and a data-integrity invariant needs a guarantee. So it
+         * moves here, where model judgment cannot defeat it — the same reasoning
+         * as resolveTaskRef and verifyTitleHint.
+         *
+         * Deliberately says nothing about tools: this string is fed back into the
+         * reply pass, and naming a tool there is how mechanics leak into chat.
+         */
+        if (pendingConfirmCard) {
+          return {
+            ok: false,
+            error:
+              "there's a confirmation card still showing, and it hasn't changed anything yet — so there is nothing to undo. Nothing was reverted. Ask them whether they want to cancel that card, or undo an earlier change instead.",
+          };
+        }
         const result = await undoLastAction(userId, source);
         if (result.goal) {
           return {

@@ -33,6 +33,11 @@ export async function* streamChatReplyOpenai(
   user: ChatUserContext,
   tailText: string,
   actionCtx: ChatActionContext,
+  // The reply pass's state block — same as tailText minus the recent-changes
+  // feed and undo target (routes/messages.ts). Falls back to tailText for the
+  // single-pass rollback path below, which has only one context to build.
+  narrateTailText: string = tailText,
+  conversationTailText: string = narrateTailText,
 ): AsyncGenerator<ChatStreamEvent> {
   // The act/narrate split is the default — the single-pass loop below is
   // the AI_ACT_NARRATE=off rollback path (see providers/act-narrate.ts).
@@ -45,6 +50,11 @@ export async function* streamChatReplyOpenai(
       user,
       tailText,
       actionCtx,
+      {},
+      {},
+      {},
+      narrateTailText,
+      conversationTailText,
     );
     return;
   }

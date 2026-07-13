@@ -91,6 +91,12 @@ function TaskActionCard({ message }: { message: ChatMessage }) {
   const taskId = message.meta.taskId as string | undefined;
   const snapshot = message.meta.task as ApiTask | undefined;
   const task = tasks?.find((t) => t.id === taskId) ?? snapshot;
+  // The one thing the card can't show about itself: the goal impact and the
+  // history fact ("Auto-logged $5 to \"New bike\" — now $5 / $300. That's your
+  // 4th time this week."). Server-computed, so it can't be wrong — and a
+  // successful action turn no longer writes any prose at all, so without this
+  // the fact would simply be lost.
+  const detail = message.meta.detail as string | undefined;
   if (!task) return null;
 
   return (
@@ -114,6 +120,7 @@ function TaskActionCard({ message }: { message: ChatMessage }) {
           progressTask.mutate({ id: task.id, input: { kind: 'checklist_toggle', itemId } })
         }
       />
+      {detail ? <Text style={styles.actionDetail}>{detail}</Text> : null}
     </View>
   );
 }
@@ -658,6 +665,13 @@ export default function ChatScreen() {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: theme.bg },
   actionCard: { marginVertical: 4, alignSelf: 'stretch' },
+  actionDetail: {
+    color: theme.dim,
+    fontSize: 12.5,
+    lineHeight: 17,
+    paddingHorizontal: 4,
+    paddingTop: 6,
+  },
   removalRow: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14 },
   removalIconChip: {
     width: 34,

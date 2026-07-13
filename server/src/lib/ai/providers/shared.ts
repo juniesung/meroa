@@ -4,7 +4,7 @@ import { logger } from '../../../logger.ts';
 import type { TaskRow } from '../../tasks/executor.ts';
 import type { GoalRow } from '../../goals/executor.ts';
 import type { AdvanceStageProposal, GoalPreview } from '../../goals/schema.ts';
-import { didClaimAction, didConcealAction } from '../claim-check.ts';
+import { didClaimAction, didConcealAction, didMisstateFigure } from '../claim-check.ts';
 import type { TurnRefs } from '../task-context.ts';
 
 // Streaming, non-thinking replies don't need much room — keep this modest so a
@@ -34,12 +34,16 @@ export const SEGMENT_PAUSE_MAX_MS = 1100;
 // requests are 1-2 calls at most. This also bounds a pathological loop.
 export const MAX_TOOL_ITERATIONS = 3;
 
-export type ChatHistoryMessage = { role: 'user' | 'assistant'; content: string };
+// `isCard` = this assistant turn was a CARD, not spoken words. Card turns are
+// real history (the assistant did reply, and dropping them left a hole the model
+// tried to fill — routes/messages.ts), but on a pure-conversation turn they are
+// exactly the thing it should not be commenting on.
+export type ChatHistoryMessage = { role: 'user' | 'assistant'; content: string; isCard?: boolean };
 
 export type ChatStreamEvent =
   | { type: 'delta'; text: string }
   | { type: 'segment_end'; text: string }
-  | { type: 'action'; toolName: string; task: TaskRow; summary: string; recordKind: string }
+  | { type: 'action'; toolName: string; task: TaskRow; summary: string; detail?: string; recordKind: string }
   | { type: 'action_bulk'; toolName: string; tasks: TaskRow[]; summary: string; recordKind: string }
   // A goal action — edit_goal/log_goal_entry, or an
   // undo_last_action that reverted a goal_% record. `proposal` is set only
@@ -65,6 +69,10 @@ export type ChatActionContext = {
   userId: string;
   timezone: string | null;
   sourceMessageId: string;
+  // Set when the NEWEST assistant message is a tap-to-confirm card the user
+  // hasn't acted on — i.e. the thing they are looking at right now changed
+  // nothing. "undo that" in that state must not reach past it (lib/ai/actions.ts).
+  pendingConfirmCard?: string | null;
   // This turn's alias -> real-id map (task-context.ts) — every taskRef/
   // itemRef a tool call sends is resolved against this before it executes.
   refs: TurnRefs;
@@ -199,7 +207,7 @@ const RAW_TOOL_CALL_MARKUP_PATTERN = /｜{1,2}\s*DSML\s*｜{1,2}/;
 // by one of our action verbs is never ordinary reply text; a real task titled
 // "Call the dentist" trips none of it (no "calling create").
 const TOOL_MECHANICS_LEAK_PATTERN =
-  /\b(create_task|edit_task|complete_task|progress_task|postpone_task|remove_task|remove_tasks|create_goal|edit_goal|remove_goal|log_goal_entry|advance_goal_stage|undo_last_action|no_action)\b|\b(calling|invoking|executing|running)\s+(the\s+)?(create|edit|complete|progress|postpone|remove|delete|log|undo|advance)\b/i;
+  /\b(create_task|edit_task|complete_task|progress_task|postpone_task|remove_task|remove_tasks|create_goal|edit_goal|remove_goal|log_goal_entry|advance_goal_stage|undo_last_action|no_action)\b|\b(call(s|ed|ing)?|invok(e|ed|ing)|execut(e|ed|ing)|run(s|ning)?|us(e|ed|ing))\s+(the\s+)?(create|edit|complete|progress|postpone|remove|delete|log|undo|advance)\b|\[\s*I\s+(call|invok|execut|us|run)/i;
 
 export function isToolCallMarkupLeak(text: string): boolean {
   return RAW_TOOL_CALL_MARKUP_PATTERN.test(text) || TOOL_MECHANICS_LEAK_PATTERN.test(text);
@@ -232,11 +240,40 @@ export function isToolCallMarkupLeak(text: string): boolean {
 // it. Costs a reasoning pass on a handful of turns; buys back the one place the
 // backstops don't reach.
 const TASK_INTENT_SIGNAL_PATTERN =
-  /\d|\$|£|€|\btask|\bgoal|\bhabit|\bstreak|\bsav(e|ed|ing)|\bspent|\blog(ged)?\b|\btrack|\bremind|\bdone\b|\bfinish|\bcomplet|\bundo\b|\bdelete|\bremove|\bcancel|\badd\b|\bcreate\b|\bmark\b|\bdid\b|\bworkout|\bgym\b|\brun\b|\bprogress|\bdue\b|\btoday\b|\btomorrow\b|\bweek\b|\bmonth\b|how (am|are|much|many|far)|where (am|are)\b|\bstatus\b|catch me up|\bso far\b|\bleft\b/i;
+  /\d|\$|£|€|\btask|\bgoal|\bhabit|\bstreak|\bsav(e|ed|ing)|\bspent|\blog(ged)?\b|\btrack|\bremind|\bdone\b|\bfinish|\bcomplet|\bundo\b|\bdelete|\bremove|\bcancel|\badd\b|\bcreate\b|\bmark\b|\bdid\b|\bworkout|\bgym\b|\brun\b|\bprogress|\bdue\b|\btoday\b|\btomorrow\b|\bweek\b|\bmonth\b|how am i|how'?s my|how are my|how much|how many|how far|where (am|are) (i|we|my)|\bstatus\b|catch me up|\bso far\b|\bleft\b|\blist\b|\bplan(s|ned)?\b|\bschedule\b/i;
 
 /** True when the user's own message shows no sign of touching their tasks/goals. */
 export function looksPurelyConversational(userMessage: string): boolean {
   return !TASK_INTENT_SIGNAL_PATTERN.test(userMessage);
+}
+
+const NUMBER_TOKEN = /\d+(?:[.,]\d+)*/g;
+
+function numbersIn(text: string): string[] {
+  // "1,200" and "1200" are the same figure, and so are "$5.00" and "$5" — but
+  // normalize by VALUE, not by stripping characters. The first cut of this
+  // stripped trailing zeros to fold "5.00" into "5", which also silently turned
+  // "10" into "1" and "300" into "3" — so a reply claiming "$10" matched the "1"
+  // in a ref like "G1" and the guard went blind to the exact fabrication it
+  // exists to catch. The unit test caught it; the arithmetic here is the point.
+  return (text.match(NUMBER_TOKEN) ?? []).map((raw) => {
+    const value = Number(raw.replace(/,/g, ''));
+    return Number.isFinite(value) ? String(value) : raw;
+  });
+}
+
+/**
+ * The free tier of the figure check: does the reply contain a number that does
+ * NOT appear anywhere in the facts the model was given? Cheap, and deliberately
+ * over-eager — a legitimately DERIVED figure ("$295 to go" from "$5 / $300")
+ * trips this too, and that is fine: this only decides whether a classifier call
+ * is worth making, and didMisstateFigure is what actually judges. What it buys
+ * is the opposite guarantee — if every number in the reply already appears in
+ * the facts, no fabrication is possible and no call is made.
+ */
+export function hasUngroundedFigure(reply: string, groundingFacts: string): boolean {
+  const grounded = new Set(numbersIn(groundingFacts));
+  return numbersIn(reply).some((n) => !grounded.has(n));
 }
 
 // `pending` marks a successful call whose recordKind is a tap-to-confirm
@@ -266,6 +303,10 @@ const CONCEALMENT_PATTERN =
 export function createTurnState(actionCtx: ChatActionContext) {
   const toolCallLog: ToolCallLogEntry[] = [];
   const emittedSegments: string[] = [];
+  // At most ONE correction per turn. The three guards are independent and can in
+  // principle all fire on the same reply; two walk-backs stacked on one message
+  // reads as a malfunction, not as honesty.
+  let corrected = false;
 
   function logTurn() {
     logger.info(
@@ -333,6 +374,7 @@ export function createTurnState(actionCtx: ChatActionContext) {
     );
 
     if (!matchedRegex && !claimed) return;
+    corrected = true;
 
     logger.warn(
       { userId: actionCtx.userId, sourceMessageId: actionCtx.sourceMessageId, segments: emittedSegments },
@@ -368,6 +410,7 @@ export function createTurnState(actionCtx: ChatActionContext) {
    * happened rather than against a guess.
    */
   async function* maybeCorrectConcealedAction(actionFacts: string[]): AsyncGenerator<ChatStreamEvent> {
+    if (corrected) return;
     // Nothing happened -> nothing to conceal; that turn is maybeCorrectFakeAction's.
     if (!toolCallLog.some((t) => t.ok)) return;
     if (!actionFacts.length) return;
@@ -400,6 +443,7 @@ export function createTurnState(actionCtx: ChatActionContext) {
       'concealment-check verdict',
     );
     if (!concealed) return;
+    corrected = true;
 
     logger.warn(
       { userId: actionCtx.userId, sourceMessageId: actionCtx.sourceMessageId, segments: emittedSegments, actionFacts },
@@ -425,5 +469,61 @@ export function createTurnState(actionCtx: ChatActionContext) {
     };
   }
 
-  return { toolCallLog, emittedSegments, logTurn, maybeCorrectFakeAction, maybeCorrectConcealedAction };
+  /**
+   * The third guard, and the one the other two are blind to by construction.
+   * maybeCorrectFakeAction asks "did it claim an action that never happened".
+   * maybeCorrectConcealedAction asks "did it hide one that did". Neither ever
+   * looks at whether the NUMBERS are true — so a reply can be scrupulously
+   * honest about its actions and still tell the user their savings are double
+   * what they are ("You're at $10 total now" against a real $5, seen live, on a
+   * turn where the claim-check correctly passed it because no action was
+   * claimed).
+   *
+   * "Never invent a number" is the app's own rule (CLAUDE.md §2), and every
+   * figure in the system is computed server-side precisely so the model only has
+   * to QUOTE it. This enforces that at the last possible moment, on the way out.
+   *
+   * `groundingFacts` is everything the reply was entitled to state a number from:
+   * the live state block, whatever the server actually did this turn, and the
+   * user's own message. The free check (hasUngroundedFigure) skips the classifier
+   * whenever every number in the reply already appears in those facts — which is
+   * the common case, so this costs nothing on most turns.
+   */
+  async function* maybeCorrectFabricatedFigure(groundingFacts: string): AsyncGenerator<ChatStreamEvent> {
+    if (corrected) return;
+    const text = emittedSegments.join(' ');
+    if (!text.trim()) return;
+    if (!hasUngroundedFigure(text, groundingFacts)) return;
+
+    const misstated = await didMisstateFigure(emittedSegments, groundingFacts);
+    logger.info(
+      { userId: actionCtx.userId, sourceMessageId: actionCtx.sourceMessageId, figure_check: misstated ? 'yes' : 'no' },
+      'figure-check verdict',
+    );
+    if (!misstated) return;
+    corrected = true;
+
+    logger.warn(
+      { userId: actionCtx.userId, sourceMessageId: actionCtx.sourceMessageId, segments: emittedSegments },
+      'chat turn stated a figure the facts do not support — correcting',
+    );
+    // Deliberately does NOT try to restate the right number. The model that just
+    // got it wrong is the same one that would be supplying the fix, and a
+    // confidently-wrong correction is worse than an honest retraction. The true
+    // figures are already on the cards and in the Tasks/Goals tabs, one tap away
+    // — point there, and own the mistake.
+    yield {
+      type: 'segment_end',
+      text: "Actually — scratch that number, I don't trust it. Check the card (or your Goals tab) for the real figure; I shouldn't have guessed at it.",
+    };
+  }
+
+  return {
+    toolCallLog,
+    emittedSegments,
+    logTurn,
+    maybeCorrectFakeAction,
+    maybeCorrectConcealedAction,
+    maybeCorrectFabricatedFigure,
+  };
 }

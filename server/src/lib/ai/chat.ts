@@ -22,9 +22,15 @@ export function streamChatReply(
   history: ChatHistoryMessage[],
   user: ChatUserContext,
   tailText: string,
+  // What the REPLY pass sees — the same state block minus the recent-changes
+  // feed and undo target, which are grounding for the action pass and unprompted
+  // announcements in the reply. See routes/messages.ts.
+  narrateTailText: string,
+  // Just the clock — the state block a pure-conversation reply gets.
+  conversationTailText: string,
   actionCtx: ChatActionContext,
 ): AsyncGenerator<ChatStreamEvent> {
-  if (env.AI_PROVIDER === 'openai') return streamChatReplyOpenai(history, user, tailText, actionCtx);
-  if (env.AI_PROVIDER === 'deepseek') return streamChatReplyDeepseek(history, user, tailText, actionCtx);
+  if (env.AI_PROVIDER === 'openai') return streamChatReplyOpenai(history, user, tailText, actionCtx, narrateTailText, conversationTailText);
+  if (env.AI_PROVIDER === 'deepseek') return streamChatReplyDeepseek(history, user, tailText, actionCtx, narrateTailText, conversationTailText);
   return streamChatReplyAnthropic(history, user, tailText, actionCtx);
 }

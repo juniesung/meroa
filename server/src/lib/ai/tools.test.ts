@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { looksPurelyConversational } from './providers/shared.ts';
+import { hasUngroundedFigure, looksPurelyConversational } from './providers/shared.ts';
 import {
   AI_TOOL_SCHEMAS,
   NO_ACTION_TOOL_NAME,
@@ -217,6 +217,53 @@ describe('looksPurelyConversational — the fast path\'s second key', () => {
     // claim-check guards action claims, not invented numbers.
     for (const m of ['how am i doing so far?', 'how much have i saved', 'where am i at', 'catch me up', "what's left"]) {
       expect(looksPurelyConversational(m), m).toBe(false);
+    }
+  });
+});
+
+describe('hasUngroundedFigure — the figure check\'s free tier', () => {
+  const FACTS = '# Their goals\nG1 "New bike" — savings, $5 / $300\n\n# Their tasks\nT1 "Save $5" — daily';
+
+  it('passes a reply whose every number is already in the facts (no classifier call needed)', () => {
+    expect(hasUngroundedFigure("nice — you're at $5 of $300 on the bike", FACTS)).toBe(false);
+  });
+
+  it('flags a number that appears nowhere in the facts', () => {
+    // The live fabrication: real total $5, reply claimed $10.
+    expect(hasUngroundedFigure("that $5 is logged — you're at $10 total now", FACTS)).toBe(true);
+  });
+
+  it('is deliberately over-eager: a correctly DERIVED figure also trips it', () => {
+    // "$295 to go" is right ($300 - $5) but appears nowhere in the facts. The
+    // regex only decides whether to ASK; didMisstateFigure is what judges, and
+    // it is told that sound arithmetic is fine.
+    expect(hasUngroundedFigure('$295 to go', FACTS)).toBe(true);
+  });
+
+  it('treats 1,200 and 1200 as the same figure', () => {
+    expect(hasUngroundedFigure('you saved 1,200', 'total is 1200')).toBe(false);
+  });
+
+  it('says nothing to flag when the reply has no numbers at all', () => {
+    expect(hasUngroundedFigure('nice, keep it going', FACTS)).toBe(false);
+  });
+});
+
+describe('looksPurelyConversational — state questions must never fast-path', () => {
+  // The fast path hands the reply pass a context with NO task list at all
+  // (providers/act-narrate.ts), so a state question that slipped through would
+  // be answered from nothing. "what's on my list?" tripped none of the original
+  // signal words; only the model's own 'unfulfilled' caught it, and this key is
+  // supposed to hold on its own.
+  it('blocks questions about their list, plans or schedule', () => {
+    for (const m of ["what's on my list?", 'what are my plans', "what's my schedule", 'anything left']) {
+      expect(looksPurelyConversational(m), m).toBe(false);
+    }
+  });
+
+  it('still lets real small talk through', () => {
+    for (const m of ['hey', 'what’s up dawg', 'how are you', 'lol nice', 'haha fair enough']) {
+      expect(looksPurelyConversational(m), m).toBe(true);
     }
   });
 });

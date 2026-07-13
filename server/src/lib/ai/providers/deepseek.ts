@@ -95,6 +95,11 @@ export async function* streamChatReplyDeepseek(
   user: ChatUserContext,
   tailText: string,
   actionCtx: ChatActionContext,
+  // The reply pass's state block — same as tailText minus the recent-changes
+  // feed and undo target (routes/messages.ts). Falls back to tailText for the
+  // single-pass rollback path below, which has only one context to build.
+  narrateTailText: string = tailText,
+  conversationTailText: string = narrateTailText,
 ): AsyncGenerator<ChatStreamEvent> {
   // The act/narrate split is the default — this file's single-pass loop
   // below is the AI_ACT_NARRATE=off rollback path (kept for A/B comparison
@@ -111,6 +116,8 @@ export async function* streamChatReplyDeepseek(
       DEEPSEEK_ACT_EXTRA,
       DEEPSEEK_NARRATE_EXTRA,
       DEEPSEEK_NARRATE_CONVERSATION_EXTRA,
+      narrateTailText,
+      conversationTailText,
     );
     return;
   }

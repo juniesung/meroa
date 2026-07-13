@@ -90,7 +90,9 @@ export type TailBlockInput = {
   counts: { open: number; doneToday: number };
   taskListText: string;
   goalListText: string;
-  recentChangesText: string;
+  // Omitted entirely for the REPLY pass's tail — grounding for the action pass,
+  // an unprompted announcement in the reply (routes/messages.ts).
+  recentChangesText?: string;
   // "4-day perfect streak" / "no streak right now (longest: 6)" — precomputed
   // by lib/goals/consistency.ts, never derived here (docs/goals-redesign-
   // plan.md §2.4).
@@ -102,7 +104,7 @@ export type TailBlockInput = {
   // What undo_last_action would revert right now (lib/ai/recent-changes.ts's
   // renderUndoTarget) — covers actions taken in the app outside chat, which
   // the model's own history can't see. '' when nothing is undoable.
-  undoTargetText: string;
+  undoTargetText?: string;
 };
 
 /**
@@ -119,6 +121,12 @@ export type TailBlockInput = {
  * model scanning rows — same reasoning as never trusting the model to copy
  * a database id.
  */
+/** Just the clock — the entire state block a pure-conversation reply gets. */
+export function buildConversationTailBlock(now: Date, timezone: string | null): string {
+  const tz = timezone ?? 'UTC';
+  return `# Right now\n${now.toLocaleString(undefined, { timeZone: tz, dateStyle: 'full', timeStyle: 'short' })} (${tz})`;
+}
+
 export function buildTailBlock(input: TailBlockInput): string {
   const tz = input.timezone ?? 'UTC';
   const nowLabel = input.now.toLocaleString(undefined, {
