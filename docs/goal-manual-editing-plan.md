@@ -180,6 +180,23 @@ intention, and the app must never blur it.
 
 ## 4. Tests
 
+**The battery is now in the repo: `server/scripts/battery.sh` (`npm run battery`).**
+It mints a fresh account, drives the real server over HTTP in plain English, asserts
+against Postgres after every step, and separately flags abnormal chat behaviour (prose on
+a turn that should be silent, a retraction, a tool-name leak). Read the header comment
+before editing it — several of its oddities are load-bearing (bash not zsh, because `GID`
+is zsh's process group id; a recurring task is *two* rows).
+
+Two things about it are known and expected right now:
+- **Section E (milestone) encodes the flow this plan deletes.** It will fail until you
+  rewrite it. Rewriting it is a work item, not an afterthought: it should assert that
+  "goal to X — a, b, c" produces a 3-stage card with **no second question**, that a bare
+  "goal to X" produces a name-only template, and that advancing **materialises the next
+  stage's `stagePlans` into real tasks**.
+- The `mark water done` ambiguity case is **flaky** — the last run wrote to "Water the
+  plants" instead of asking. That is a golden-rule violation (low-confidence extractions
+  must ask before writing) and pre-exists this plan. Worth a look while you're in here.
+
 **Unit (`vitest`)**
 - `applyStageOps`: insert/delete/reorder keeps `stagePlans` aligned; a completed stage
   cannot be removed or reordered; 2–8 bound; `activeStageIndex` stays valid.
