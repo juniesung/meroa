@@ -174,10 +174,17 @@ export function computeHabitCardSummary(streak: GoalStreak): GoalCardSummary {
  */
 export function computeMilestoneCardSummary(definition: MilestoneGoalDefinition): GoalCardSummary {
   const total = definition.stages.length;
+  // A bare template (0 stages, docs/goal-manual-editing-plan.md §1 decision
+  // 1) is its own case — `activeStageIndex(0) >= total(0)` is trivially true
+  // the same way a genuinely finished goal is, and without this branch it
+  // read as "Complete — all 0 stages" for a goal that hasn't even started.
+  if (total === 0) {
+    return { headline: 'No stages yet', sub: 'add them in Goals', progress: 0, paceLine: null, streak: null };
+  }
   const done = definition.activeStageIndex >= total;
   const headline = done ? `Complete — all ${total} stages` : (definition.stages[definition.activeStageIndex] ?? '');
   const sub = done ? `${total} stage${total === 1 ? '' : 's'} done` : `stage ${definition.activeStageIndex + 1} of ${total}`;
-  const progress = total > 0 ? Math.min(1, definition.activeStageIndex / total) : 0;
+  const progress = Math.min(1, definition.activeStageIndex / total);
   return { headline, sub, progress, paceLine: null, streak: null };
 }
 

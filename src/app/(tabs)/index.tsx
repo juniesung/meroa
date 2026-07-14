@@ -258,6 +258,11 @@ function GoalPreviewCard({ message }: { message: ChatMessage }) {
   const preview = message.meta.preview as GoalPreview | undefined;
   if (!preview) return null;
 
+  // The handoff caption the card can't compute itself — "open in Goals to
+  // add your stages" for a bare milestone template, or how many stages are
+  // already set (docs/goal-manual-editing-plan.md §3.4). Server-computed,
+  // same pattern as TaskActionCard's meta.detail.
+  const detail = message.meta.detail as string | undefined;
   const definition = preview.definition;
   const createdGoalId =
     createGoalFromPreview.data?.goal.id ?? (message.meta.createdGoalId as string | undefined);
@@ -348,6 +353,7 @@ function GoalPreviewCard({ message }: { message: ChatMessage }) {
           </Pressable>
         </View>
       )}
+      {detail ? <Text style={styles.actionDetail}>{detail}</Text> : null}
     </View>
   );
 }

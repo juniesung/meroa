@@ -17,9 +17,11 @@ import {
   GoalActionError,
 } from '../lib/goals/executor.ts';
 import {
+  buildGoalDefinition,
   editGoalPatchSchema,
   logGoalEntryPatchSchema,
   goalDefinitionSchema,
+  manualCreateGoalSchema,
   starterTaskSchema,
   GOAL_TEMPLATES,
   type AdvanceStageProposal,
@@ -113,16 +115,58 @@ goalRoutes.get('/:id/entries', zValidator('query', entriesQuerySchema), async (c
 
 const createFromPreviewSchema = z.object({ previewMessageId: z.string().uuid() });
 
+// Two ways to create a goal (docs/goal-manual-editing-plan.md §1): tap
+// Create on a chat preview card (`previewMessageId`, unchanged — see
+// below), or fill out the Goals-tab form directly (manualCreateGoalSchema
+// — same cross-field rules as the chat create_goal tool, plus stagePlans).
+// A body with `previewMessageId` fails manualCreateGoalSchema (`.strict()`
+// rejects the unknown key) and a manual body fails createFromPreviewSchema
+// (missing the required field), so the two branches are unambiguous.
+const createGoalBodySchema = z.union([createFromPreviewSchema, manualCreateGoalSchema]);
+
 // Confirm-tap target for the AI's create_goal preview card — create_goal
 // itself never writes a goals row (docs/goals-redesign-plan.md §2.1); this
 // is the actual save, using the exact definition that was shown on the
 // card. Idempotent two ways: the stamped meta.createdGoalId (checked here)
 // and the executor's own (sourceMessageId, kind) idempotency check, so a
 // retried or double tap never creates a second goal.
-goalRoutes.post('/', zValidator('json', createFromPreviewSchema), async (c) => {
+//
+// The manual branch (docs/goal-manual-editing-plan.md §1.4) routes through
+// the SAME createGoal executor with the SAME `source: 'goal_ui'` — it
+// yields an identical `goal_created` record, so undo and the recent-
+// changes feed treat a manually-created goal exactly like a chat-created
+// one. It has no sourceMessageId (there's no chat message behind it), so
+// it gets no server-side double-tap idempotency — same as every other
+// manual goal route below (editGoal, archiveGoal, logGoalEntry), none of
+// which set one either; the client is responsible for not double-submitting
+// a form, the same as it already is for every other create sheet.
+goalRoutes.post('/', zValidator('json', createGoalBodySchema), async (c) => {
   const userId = c.get('userId');
-  const { previewMessageId } = c.req.valid('json');
+  const body = c.req.valid('json');
   const timezone = await getUserTimezone(userId);
+
+  if (!('previewMessageId' in body)) {
+    const definition = buildGoalDefinition(body);
+    try {
+      const { goal, tasks } = await createGoal(
+        userId,
+        {
+          template: body.type,
+          name: body.name,
+          icon: body.icon ?? null,
+          definition,
+          starterTasks: body.starterTasks,
+        },
+        timezone,
+        { source: 'goal_ui' },
+      );
+      return c.json({ goal, tasks }, 201);
+    } catch (err) {
+      const { status, body: errBody } = actionErrorResponse(err);
+      return c.json(errBody, status);
+    }
+  }
+  const { previewMessageId } = body;
 
   const [row] = await db
     .select({ message: messages, conversationUserId: conversations.userId })

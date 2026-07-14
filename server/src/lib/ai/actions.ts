@@ -11,6 +11,7 @@ import {
   createTask,
   editTask,
   getTask,
+  listOpenTaskTitles,
   postponeTask,
   progressTask,
   TaskActionError,
@@ -18,6 +19,7 @@ import {
   type ActionSource,
   type TaskRow,
 } from '../tasks/executor.ts';
+import { findAmbiguousTaskMatch, normalizeForMatch } from './ambiguity.ts';
 import {
   archiveGoal,
   createGoal,
@@ -25,11 +27,12 @@ import {
   getGoal as getGoalRow,
   listGoalRetireCandidates,
   logGoalEntry,
+  plannedTasksForStage,
   GoalActionError,
   type GoalRow,
 } from '../goals/executor.ts';
 import {
-  goalDefinitionSchema,
+  buildGoalDefinition,
   type AdvanceStageProposal,
   type EditGoalPatch,
   type GoalDefinition,
@@ -44,10 +47,6 @@ import { buildTaskCompletionHistory, describeCompletionHistory } from './history
 import { describeGoalPreviewForSummary } from './pending-preview.ts';
 import type { TurnRef, TurnRefs } from './task-context.ts';
 import { isAiToolName, validateToolInput, type AiToolName } from './tools.ts';
-
-function normalizeForMatch(s: string): string {
-  return s.toLowerCase().trim().replace(/[^a-z0-9\s]/g, '');
-}
 
 // Lenient on purpose — only needs to catch "completely different task",
 // not penalize reasonable paraphrasing ("the plants task" vs "Water the
@@ -121,8 +120,11 @@ export type TaskActionResult =
       proposal?: AdvanceStageProposal;
     }
   // create_goal — a preview only, nothing saved yet
-  // (docs/goals-redesign-plan.md §2.1/§2.2).
-  | { ok: true; toolName: AiToolName; preview: GoalPreview; summary: string; recordKind: string }
+  // (docs/goals-redesign-plan.md §2.1/§2.2). `detail` is the server-computed
+  // handoff caption the card can't compute itself (docs/goal-manual-
+  // editing-plan.md §3.4) — "open in Goals to add your stages" for a bare
+  // milestone template, or how many stages are already set.
+  | { ok: true; toolName: AiToolName; preview: GoalPreview; detail?: string; summary: string; recordKind: string }
   | { ok: false; error: string };
 
 // "$150" (savings), "175lb" (indirect — the unit trails, never a currency
@@ -220,9 +222,11 @@ async function goalImpactSuffix(
     // reopen doesn't retract a stage that was never advanced by this.
     if (!becameDone) return '';
     const stageLabel =
-      definition.activeStageIndex < definition.stages.length
-        ? `stage ${definition.activeStageIndex + 1} of ${definition.stages.length}, "${definition.stages[definition.activeStageIndex]}"`
-        : `all ${definition.stages.length} stages done`;
+      definition.stages.length === 0
+        ? 'no stages set yet'
+        : definition.activeStageIndex < definition.stages.length
+          ? `stage ${definition.activeStageIndex + 1} of ${definition.stages.length}, "${definition.stages[definition.activeStageIndex]}"`
+          : `all ${definition.stages.length} stages done`;
     return ` That supports "${goal.name}" (${stageLabel}) — say the word when the stage itself is done; it never advances on its own.`;
   }
 
@@ -594,9 +598,12 @@ export async function executeAiToolCall(
   // The newest thing on the user's screen is a tap-to-confirm card they haven't
   // acted on — see the undo guard below.
   pendingConfirmCard?: string | null,
+  // The user's newest message, verbatim — feeds the ambiguity guard below.
+  // Optional; omitting it simply disables that one guard.
+  userMessageText?: string | null,
 ): Promise<TaskActionResult> {
   return wrapFailure(
-    await executeAiToolCallInner(userId, timezone, toolName, rawInput, refs, source, pendingConfirmCard),
+    await executeAiToolCallInner(userId, timezone, toolName, rawInput, refs, source, pendingConfirmCard, userMessageText),
   );
 }
 
@@ -608,6 +615,7 @@ async function executeAiToolCallInner(
   refs: TurnRefs,
   source: ActionSource,
   pendingConfirmCard?: string | null,
+  userMessageText?: string | null,
 ): Promise<TaskActionResult> {
   if (!isAiToolName(toolName)) {
     return { ok: false, error: `unknown tool "${toolName}"` };
@@ -760,6 +768,27 @@ async function executeAiToolCallInner(
         if (!target.ok) return { ok: false, error: target.error };
         const hintCheck = await verifyTitleHint(userId, target.taskId, validated.data.titleHint);
         if (hintCheck) return { ok: false, error: hintCheck.error };
+
+        // Structural backstop for chat-architecture.md §0's "make the
+        // server refuse" (docs/goal-manual-editing-plan.md §4): the prompt
+        // rule alone ("if the user's words could plausibly refer to more
+        // than one item, call no_action") held only ~2/3 of the time live —
+        // "mark water done" with both "Water the plants" and a "drink 8
+        // glasses of water" counter open wrote to one instead of asking.
+        // Judged against the user's OWN words, never the model's titleHint
+        // (its post-hoc justification for whichever task it already
+        // picked — exactly the belief that's wrong when this fails).
+        if (userMessageText) {
+          const candidates = await listOpenTaskTitles(userId);
+          const ambiguity = findAmbiguousTaskMatch(userMessageText, candidates);
+          if (ambiguity) {
+            const titles = ambiguity.candidates.map((c) => `"${c.title}"`).join(' or ');
+            return {
+              ok: false,
+              error: `That could mean more than one task — ${titles} both match what the user said. Don't guess: call no_action and ask which one they mean.`,
+            };
+          }
+        }
 
         let itemIds: string[] | undefined;
         if (validated.data.itemRefs) {
@@ -1008,32 +1037,11 @@ async function executeAiToolCallInner(
         // needs a unit) are already enforced by createGoalParamsSchema's
         // superRefine in validateToolInput above — a violation came back as
         // an error the model can act on, not a half-built preview.
-        const definition = goalDefinitionSchema.parse(
-          validated.data.type === 'habit'
-            ? { type: 'habit' }
-            : validated.data.type === 'indirect'
-              ? {
-                  type: 'indirect',
-                  unit: validated.data.unit,
-                  targetValue: validated.data.targetValue,
-                  deadline: validated.data.deadline,
-                }
-              : validated.data.type === 'milestone'
-                ? {
-                    // activeStageIndex is never a model input — every fresh
-                    // milestone starts at its first stage
-                    // (docs/milestone-goal-plan.md §1).
-                    type: 'milestone',
-                    stages: validated.data.stages,
-                    activeStageIndex: 0,
-                  }
-                : {
-                    type: 'savings',
-                    currency: validated.data.currency ?? '$',
-                    targetValue: validated.data.targetValue,
-                    deadline: validated.data.deadline,
-                  },
-        );
+        // activeStageIndex is never a model input — every fresh milestone
+        // starts at its first stage (docs/milestone-goal-plan.md §1); stages
+        // itself is optional now — omitted means a bare template
+        // (docs/goal-manual-editing-plan.md §1 decision 1).
+        const definition = buildGoalDefinition(validated.data);
         const preview: GoalPreview = {
           template: validated.data.type,
           name: validated.data.name,
@@ -1062,10 +1070,23 @@ async function executeAiToolCallInner(
           }
         }
 
+        // Server-computed handoff caption (docs/goal-manual-editing-plan.md
+        // §3.4) — the one thing the card can't show for itself: a bare
+        // milestone template has nowhere to send the user next, and a
+        // staged one is worth confirming before they tap Create. Never
+        // model-authored (chat-architecture.md §9's trust boundary).
+        const detail =
+          definition.type === 'milestone'
+            ? definition.stages.length === 0
+              ? 'Open in Goals to add your stages'
+              : `${definition.stages.length} stage${definition.stages.length === 1 ? '' : 's'} set — add tasks in Goals`
+            : undefined;
+
         return {
           ok: true,
           toolName,
           preview,
+          detail,
           // FACTS ONLY. This string is three things at once: the narrate pass's
           // input, the tool result in act-pass history, and the persisted content
           // of the card message — so every instruction smuggled in here is a
@@ -1163,6 +1184,12 @@ async function executeAiToolCallInner(
             error: `"${goal.name}" isn't a milestone goal — advance_goal_stage only applies to milestone goals.`,
           };
         }
+        if (definition.stages.length === 0) {
+          return {
+            ok: false,
+            error: `"${goal.name}" has no stages set yet — tell the user to add them in the Goals tab before advancing.`,
+          };
+        }
         if (definition.activeStageIndex >= definition.stages.length) {
           return {
             ok: false,
@@ -1182,7 +1209,16 @@ async function executeAiToolCallInner(
         const retire = retireCandidates.map((t) => ({ taskId: t.id, title: t.title }));
         // A next-stage task proposal only makes sense when there IS a next
         // stage — this advance completing the goal means nothing to create.
-        const nextStageTasks = toStage ? validated.data.nextStageTasks : undefined;
+        // The model's own tasks win if it has them (the user stated the
+        // next stage's plan in the same breath as the advance declaration);
+        // otherwise fall back to what was already planned for that stage in
+        // the Goals tab (docs/goal-manual-editing-plan.md §3.4) — so the
+        // confirm card shows exactly what will materialize on tap.
+        const nextStageTasks = toStage
+          ? validated.data.nextStageTasks?.length
+            ? validated.data.nextStageTasks
+            : plannedTasksForStage(definition, fromStageIndex + 1)
+          : undefined;
 
         const proposal: AdvanceStageProposal = { goalId, fromStageIndex, fromStage, toStage, retire, nextStageTasks };
 

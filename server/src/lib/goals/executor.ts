@@ -4,6 +4,7 @@ import { db } from '../../db/client.ts';
 import { records, goalEntries, goals, tasks } from '../../db/schema.ts';
 import { archiveGoalCascadeInTx, createTaskInTx, type ActionSource, type TaskRow } from '../tasks/executor.ts';
 import {
+  applyStageOps,
   goalDefinitionSchema,
   type AdvanceStageProposal,
   type EditGoalPatch,
@@ -13,6 +14,7 @@ import {
   type GoalEntryData,
   type GoalTemplateKey,
   type MilestoneGoalDefinition,
+  type PlannedTask,
   type SavingsGoalDefinition,
   type StarterTask,
 } from './schema.ts';
@@ -116,6 +118,15 @@ export async function getGoal(userId: string, goalId: string): Promise<GoalRow |
 // as tasks/executor.ts's archiveGoalCascadeInTx cascade filter.
 export function filterRetireCandidates<T extends { recurrence: unknown; status: string }>(rows: T[]): T[] {
   return rows.filter((t) => t.recurrence !== null || t.status === 'open');
+}
+
+// Pure — the single read point for a milestone's planned tasks
+// (docs/goal-manual-editing-plan.md §2). `[]` for a stage with no plan yet,
+// or one that's already active/complete — a plan never lives there (see
+// milestoneGoalDefinitionSchema's comment in schema.ts): the active
+// stage's tasks are real task rows, not a plan.
+export function plannedTasksForStage(definition: MilestoneGoalDefinition, index: number): PlannedTask[] {
+  return definition.stagePlans?.[index] ?? [];
 }
 
 // Pure — whether an advance_goal_stage proposal is stale against the goal's
@@ -303,16 +314,17 @@ function applyEditOps(
   }
 
   if (definition.type === 'milestone') {
-    // Post-creation stage-list editing is deferred (docs/milestone-goal-
-    // plan.md §0) — only name/icon (which live on the goal row, not the
-    // definition) are editable here.
     if (patch.targetValue !== undefined || patch.deadline !== undefined || patch.unit !== undefined) {
       return {
-        error:
-          'a milestone goal has no target amount, deadline, or unit — only its name or icon can be edited here. Stage names are set at creation for now; a stage rename/insert isn\'t supported yet.',
+        error: 'a milestone goal has no target amount, deadline, or unit — only its name, icon, or stages can be edited',
       };
     }
-    return { definition };
+    // stages/stagePlans edits are routed through applyStageOps (schema.ts)
+    // against the LIVE definition — it enforces the completed-prefix-
+    // immutable / 0-or-2-8 / stagePlans-alignment invariants that this flat
+    // patch shape can't (docs/goal-manual-editing-plan.md §2/§3.1).
+    if (patch.stages === undefined && patch.stagePlans === undefined) return { definition };
+    return applyStageOps(definition, patch.stages, patch.stagePlans);
   }
 
   if (definition.type === 'savings') {
@@ -577,6 +589,12 @@ export async function advanceGoalStage(
     if (definition.type !== 'milestone') {
       throw new GoalActionError('invalid_input', `"${goal.name}" isn't a milestone goal — there's nothing to advance.`);
     }
+    if (definition.stages.length === 0) {
+      throw new GoalActionError(
+        'invalid_input',
+        `"${goal.name}" has no stages set yet — add them in the Goals tab before advancing.`,
+      );
+    }
     if (definition.activeStageIndex >= definition.stages.length) {
       throw new GoalActionError('invalid_input', `"${goal.name}" is already complete — every stage is done.`);
     }
@@ -588,9 +606,18 @@ export async function advanceGoalStage(
     }
 
     const prior = { definition: goal.definition, version: goal.version };
-    const nextDefinition: MilestoneGoalDefinition = {
+    const nextActiveIndex = definition.activeStageIndex + 1;
+    // The stage about to activate had its own stagePlans entry (its planned
+    // tasks) — those are materialized into real task rows below, so the
+    // plan is consumed and cleared. A stage's tasks are either a plan or
+    // real tasks, never briefly both (docs/goal-manual-editing-plan.md §2
+    // invariant).
+    const carriedStagePlans = definition.stagePlans?.map((entry, i) => (i === nextActiveIndex ? [] : entry));
+    const hasAnyPlan = carriedStagePlans?.some((entry) => entry.length > 0) ?? false;
+    const nextDefinition = {
       ...definition,
-      activeStageIndex: definition.activeStageIndex + 1,
+      activeStageIndex: nextActiveIndex,
+      stagePlans: hasAnyPlan ? carriedStagePlans : undefined,
     };
     const parsedDefinition = goalDefinitionSchema.parse(nextDefinition);
 
@@ -627,13 +654,28 @@ export async function advanceGoalStage(
     // can't collapse starter #2 into starter #1's result). Never a
     // contribution — a milestone goal never logs a number from a task
     // (schema-enforced upstream, but nothing here would stamp one anyway).
+    //
+    // The tasks come from whoever supplied them: the model, if the user
+    // stated the next stage's plan in the same breath as the advance
+    // declaration ("got the offer! now I need to research salary bands");
+    // otherwise the stage's own `stagePlans` entry, planned earlier in the
+    // Goals tab (docs/goal-manual-editing-plan.md §3.3) — the same default-
+    // source swap plannedTasksForStage exists for.
+    const nextStageTasksRaw: (StarterTask | PlannedTask)[] =
+      proposal.nextStageTasks ?? plannedTasksForStage(definition, nextActiveIndex);
+    const nextStageTasks = nextStageTasksRaw.map((t) => ({
+      title: t.title,
+      recurrence: t.recurrence,
+      icon: 'icon' in t ? t.icon : undefined,
+    }));
+
     const createdTaskIds: string[] = [];
     const createdTasks: TaskRow[] = [];
-    for (const [index, starter] of (proposal.nextStageTasks ?? []).entries()) {
+    for (const [index, starter] of nextStageTasks.entries()) {
       const { task: created } = await createTaskInTx(
         tx,
         userId,
-        { type: 'completion', title: starter.title, recurrence: starter.recurrence, reminder: false },
+        { type: 'completion', title: starter.title, recurrence: starter.recurrence, icon: starter.icon, reminder: false },
         timezone,
         { ...opts, toolCallId: `advance-starter:${index}` },
         { skipRecord: true },

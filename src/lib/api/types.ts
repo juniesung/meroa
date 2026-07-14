@@ -175,13 +175,26 @@ export type GoalDefinition =
     }
   | {
       type: 'milestone';
-      // Ordered stage titles, 2-8 — fixed at creation (docs/milestone-goal-
-      // plan.md §0, post-creation stage editing deferred).
+      // Ordered stage titles — 0 (a bare, name-only template, docs/goal-
+      // manual-editing-plan.md §1 decision 1) or 2-8. Editable any time via
+      // the Goals tab's stage editor (PATCH /goals/:id), not just at
+      // creation.
       stages: string[];
       // 0-based; === stages.length means every stage is done.
       activeStageIndex: number;
+      // Tasks already planned for a stage that hasn't activated yet —
+      // index-aligned with `stages`, only ever set for i > activeStageIndex.
+      // The active stage's tasks are real ApiTasks (filter by goalId), never
+      // here — a plan and a real task are never the same thing.
+      stagePlans?: PlannedTask[][];
       checkInCadence?: 'weekly' | 'off';
     };
+
+export type PlannedTask = {
+  title: string;
+  recurrence?: Recurrence;
+  icon?: string;
+};
 
 export type StarterTask = {
   title: string;
@@ -291,16 +304,24 @@ export type ApiGoalConsistency = {
   calendar: DayBucket[];
 };
 
+// The Goals-tab "+" sheet's direct-create body (docs/goal-manual-editing-
+// plan.md §1) — mirrors server/src/lib/goals/schema.ts's
+// manualCreateGoalSchema exactly, the same cross-field rules as chat's
+// create_goal (savings needs a target, habit needs its check-in task,
+// indirect needs a unit). Milestone `stages` omitted entirely = a bare
+// template; when given, 2-8. `starterTasks` are the first (active) stage's
+// real tasks; `stagePlans` are for stages after it, never the active one.
 export type CreateGoalParams = {
-  type?: 'savings' | 'habit' | 'indirect' | 'milestone';
+  type: 'savings' | 'habit' | 'indirect' | 'milestone';
   name: string;
   icon?: string;
   currency?: string;
   unit?: string;
   targetValue?: number;
   deadline?: string;
-  // Milestone only — 2-8 ordered stage titles.
   stages?: string[];
+  starterTasks?: StarterTask[];
+  stagePlans?: PlannedTask[][];
 };
 
 export type EditGoalPatch = {
@@ -309,6 +330,12 @@ export type EditGoalPatch = {
   targetValue?: number;
   deadline?: string;
   unit?: string;
+  // Milestone only — routed through the server's applyStageOps against the
+  // goal's LIVE definition (completed-prefix-immutable, 0-or-2-8,
+  // stagePlans-alignment invariants enforced there, not here). Whole-list
+  // replacement: send the full next stages/stagePlans arrays, not a diff.
+  stages?: string[];
+  stagePlans?: PlannedTask[][];
 };
 
 export type LogGoalEntryPatch = {

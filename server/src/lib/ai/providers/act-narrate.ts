@@ -34,33 +34,19 @@ const NARRATE_MAX_OUTPUT_TOKENS = MAX_OUTPUT_TOKENS + 1024;
 // conversational intent* — the question the model just asked, the plan the
 // user is saying "yeah" to.
 //
-// This was 4, and 4 silently broke the milestone-goal flow, which is the
-// longest conversational build in the app. It spans FIVE messages:
+// This was bumped 4 -> 6 to hold the milestone-goal chat build, which used
+// to span a five-message question/answer/question/answer exchange the act
+// pass needed all of to finally call create_goal. Deeper history bought
+// that at a real cost — pattern-completion surface: 8 was tried too, and it
+// visibly degraded the long e2e session, dropping a random call or two per
+// run (the longer the session, the more it bites).
 //
-//   1 user  "make a goal to land a summer internship"   <- the intent, the subject
-//   2 asst  "what are the milestones?"
-//   3 user  "applying, interviewing, negotiating"       <- the stages
-//   4 asst  "what'll get you through applying?"
-//   5 user  "update my resume, apply to 5 jobs a day"   <- the tasks  (newest)
-//
-// A window of 4 drops message 1 — so on the very turn it must finally call
-// create_goal, the act pass can no longer see that this was ever a GOAL
-// request, or what it is FOR. It limped along whenever its own questions
-// happened to restate enough, and simply did nothing when they didn't:
-// 1 run in 4 produced no card at all, then spiralled into claiming it had
-// advanced a goal that was never created.
-//
-// The fear behind 4 was pattern-completion — deeper history means older
-// assistant turns to imitate instead of acting — and it is NOT obsolete. 8 was
-// tried: it fixed milestone creation outright (0 misses in 4 runs, from 1-in-4)
-// and visibly degraded the LONG e2e session, which started dropping a random
-// call or two per run. That is exactly the documented failure, and it bites in
-// proportion to session length: the milestone test is 9 turns, the e2e is ~25.
-//
-// So take the smallest window that holds the build: the five messages above,
-// plus one spare. Not a compromise between two failures — the flow needs 5, and
-// every message past that is pure pattern-completion surface with nothing to buy.
-const ACTION_PASS_HISTORY_MESSAGES = 6;
+// docs/goal-manual-editing-plan.md deleted the multi-message build itself —
+// milestone creation is now a single message, stages taken verbatim if
+// given, a bare template otherwise, never a follow-up question — so the
+// thing that forced the window open no longer exists. Back to 4: fewer
+// older turns to imitate instead of act on.
+const ACTION_PASS_HISTORY_MESSAGES = 4;
 
 type MaxTokensParam = 'max_tokens' | 'max_completion_tokens';
 
@@ -381,6 +367,7 @@ export async function* streamChatReplyActNarrate(
           actionCtx.refs,
           { source: 'chat', sourceMessageId: actionCtx.sourceMessageId, toolCallId: call.id },
           actionCtx.pendingConfirmCard,
+          actionCtx.userMessageText,
         );
 
         if (result.ok && 'tasks' in result) {
@@ -393,7 +380,7 @@ export async function* streamChatReplyActNarrate(
         } else if (result.ok && 'preview' in result) {
           // Always goal_preview — create_goal never saves by itself.
           toolCallLog.push({ name: call.function.name, ok: true, pending: true });
-          yield { type: 'action_preview', toolName: result.toolName, preview: result.preview, summary: result.summary, recordKind: result.recordKind };
+          yield { type: 'action_preview', toolName: result.toolName, preview: result.preview, detail: result.detail, summary: result.summary, recordKind: result.recordKind };
           actionFacts.push(result.summary);
           toolResultMessages.push({ role: 'tool', tool_call_id: call.id, content: result.summary });
         } else if (result.ok && 'goal' in result) {

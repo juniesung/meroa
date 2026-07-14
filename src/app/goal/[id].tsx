@@ -11,7 +11,9 @@ import { TrendChart, type TrendPoint } from '@/components/TrendChart';
 import { radii, theme } from '@/constants/theme';
 import { useArchiveGoal, useGoal } from '@/features/goals/queries';
 import { GoalEntrySheet } from '@/features/goals/GoalEntrySheet';
-import type { ApiGoalDetail, ApiGoalEntry } from '@/lib/api/types';
+import { GoalFormSheet } from '@/features/goals/GoalFormSheet';
+import { useCompleteTask, useTasks } from '@/features/tasks/queries';
+import type { ApiGoal, ApiGoalDetail, ApiGoalEntry, ApiTask } from '@/lib/api/types';
 import { formatMoney, formatNumber } from '@/lib/format';
 import { toIconName } from '@/lib/icon';
 
@@ -96,21 +98,39 @@ function TrendView({ detail, entries }: { detail: ApiGoalDetail; entries: ApiGoa
 }
 
 // Milestone goals never have numbers or entries (docs/milestone-goal-plan.md
-// §0) — the hero is the ordered stage list itself: done stages check + strike,
-// the active one gets the accent highlight, pending ones stay dim. Advancing
-// only happens through the chat confirm card, so there's no in-screen action
-// here — same "nothing to log" shape as habit's StreakView.
-function StagesView({ detail }: { detail: ApiGoalDetail }) {
-  const stages = detail.stages ?? [];
-  const activeIndex = detail.activeStageIndex ?? 0;
+// §0) — the hero is the ordered stage list. Advancing only happens through
+// the chat confirm card (nothing here moves a stage), but each stage now
+// shows what's actually attached to it:
+//   - the ACTIVE stage's real, linked ApiTasks — tappable, completable here,
+//     the same TaskCard-style checkbox as everywhere else in the app.
+//   - an upcoming stage's PLANNED tasks (goal.definition.stagePlans) — a
+//     visibly different, non-tappable row (dashed marker, dim text, a clock
+//     icon) since a plan is an intention, not a record. That distinction is
+//     load-bearing (docs/goal-manual-editing-plan.md §3.8): the app must
+//     never blur "planned" with "real."
+function StagesView({ goal, tasks }: { goal: ApiGoal; tasks: ApiTask[] }) {
+  const completeTask = useCompleteTask();
+  if (goal.definition.type !== 'milestone') return null;
+  const { stages, activeStageIndex, stagePlans } = goal.definition;
+  const linkedTasks = tasks.filter((t) => t.goalId === goal.id && t.status !== 'archived');
+
+  if (stages.length === 0) {
+    return (
+      <View style={styles.viewCard}>
+        <Text style={styles.emptyText}>No stages yet — tap Edit above to add them.</Text>
+      </View>
+    );
+  }
+
   return (
-    <View style={styles.viewCard}>
-      <View style={{ gap: 10 }}>
-        {stages.map((stage, i) => {
-          const done = i < activeIndex;
-          const active = i === activeIndex;
-          return (
-            <View key={i} style={styles.stageRow}>
+    <View style={{ gap: 10 }}>
+      {stages.map((stage, i) => {
+        const done = i < activeStageIndex;
+        const active = i === activeStageIndex;
+        const plans = stagePlans?.[i] ?? [];
+        return (
+          <View key={i} style={styles.viewCard}>
+            <View style={styles.stageRow}>
               <View style={[styles.stageMarker, done && styles.stageMarkerDone, active && styles.stageMarkerActive]}>
                 {done ? (
                   <Icon name="check" size={12} color="#fff" stroke={2.4} />
@@ -122,11 +142,47 @@ function StagesView({ detail }: { detail: ApiGoalDetail }) {
                 {stage}
               </Text>
             </View>
-          );
-        })}
-      </View>
+
+            {active && linkedTasks.length > 0 && (
+              <View style={{ gap: 6, marginTop: 8 }}>
+                {linkedTasks.map((t) => (
+                  <Pressable
+                    key={t.id}
+                    onPress={() => completeTask.mutate({ id: t.id })}
+                    style={styles.realTaskRow}
+                  >
+                    <View style={[styles.realTaskCheck, t.status === 'done' && styles.realTaskCheckDone]}>
+                      {t.status === 'done' && <Icon name="check" size={10} color="#fff" stroke={2.6} />}
+                    </View>
+                    <Text
+                      style={[styles.realTaskText, t.status === 'done' && styles.realTaskTextDone]}
+                      numberOfLines={1}
+                    >
+                      {t.title}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            )}
+
+            {!active && !done && plans.length > 0 && (
+              <View style={{ gap: 6, marginTop: 8 }}>
+                {plans.map((p, idx) => (
+                  <View key={idx} style={styles.plannedTaskRow}>
+                    <Icon name="clock" size={12} color={theme.faint} stroke={2} />
+                    <Text style={styles.plannedTaskText} numberOfLines={1}>
+                      {p.title}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            )}
+          </View>
+        );
+      })}
       <Text style={styles.habitNote}>
-        A stage only advances when you tell Meroa it&apos;s done — nothing to log here.
+        A stage only advances when you tell Meroa it&apos;s done. Dashed tasks are planned — they
+        become real tasks automatically once their stage activates.
       </Text>
     </View>
   );
@@ -135,8 +191,10 @@ function StagesView({ detail }: { detail: ApiGoalDetail }) {
 export default function GoalDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { data, isLoading } = useGoal(id);
+  const { data: tasks = [] } = useTasks();
   const archiveGoal = useArchiveGoal();
   const [entrySheetOpen, setEntrySheetOpen] = useState(false);
+  const [editVisible, setEditVisible] = useState(false);
   const [confirmingRemove, setConfirmingRemove] = useState(false);
 
   if (isLoading || !data) {
@@ -175,6 +233,16 @@ export default function GoalDetailScreen() {
           </Text>
           <Text style={styles.subtitle}>{detail.card.sub}</Text>
         </View>
+        <Pressable
+          onPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+            setEditVisible(true);
+          }}
+          style={styles.editButton}
+          hitSlop={8}
+        >
+          <Icon name="edit" size={17} color={theme.dim} stroke={1.8} />
+        </Pressable>
       </View>
 
       <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 120, gap: 12 }}>
@@ -183,7 +251,7 @@ export default function GoalDetailScreen() {
         {isHabit ? (
           <StreakView detail={detail} />
         ) : isMilestone ? (
-          <StagesView detail={detail} />
+          <StagesView goal={goal} tasks={tasks} />
         ) : isIndirect ? (
           <TrendView detail={detail} entries={entries} />
         ) : (
@@ -251,6 +319,8 @@ export default function GoalDetailScreen() {
           <GoalEntrySheet visible={entrySheetOpen} onClose={() => setEntrySheetOpen(false)} goal={goal} />
         </>
       )}
+
+      <GoalFormSheet visible={editVisible} onClose={() => setEditVisible(false)} goal={goal} />
     </SafeAreaView>
   );
 }
@@ -280,6 +350,14 @@ const styles = StyleSheet.create({
     height: 34,
     borderRadius: radii.chip,
     backgroundColor: 'rgba(10,132,255,0.14)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  editButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 999,
+    backgroundColor: theme.surface,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -322,6 +400,37 @@ const styles = StyleSheet.create({
   stageLabel: { color: theme.dim, fontSize: 14, flex: 1 },
   stageLabelDone: { color: theme.faint, textDecorationLine: 'line-through' },
   stageLabelActive: { color: theme.text, fontWeight: '700' },
+  // Active stage: a real, tappable task — same checkbox language as TaskCard
+  // elsewhere in the app, just compact for this nested context.
+  realTaskRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginLeft: 30 },
+  realTaskCheck: {
+    width: 18,
+    height: 18,
+    borderRadius: 999,
+    borderWidth: 1.5,
+    borderColor: theme.borderStrong,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  realTaskCheckDone: { backgroundColor: theme.blue, borderColor: theme.blue },
+  realTaskText: { color: theme.text, fontSize: 13, flex: 1 },
+  realTaskTextDone: { color: theme.faint, textDecorationLine: 'line-through' },
+  // Upcoming stage: a PLAN, not a task — dashed marker, dim text, a clock
+  // instead of a checkbox, and never a Pressable. The visual gap from
+  // realTaskRow above is the point (docs/goal-manual-editing-plan.md §3.8).
+  plannedTaskRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginLeft: 30,
+    paddingVertical: 3,
+    paddingHorizontal: 8,
+    borderRadius: radii.chip,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: theme.border,
+  },
+  plannedTaskText: { color: theme.faint, fontSize: 12.5, flex: 1 },
   sectionTitle: { color: theme.text, fontSize: 15, fontWeight: '700', marginTop: 10 },
   emptyText: { color: theme.dim, fontSize: 13 },
   entryRow: {

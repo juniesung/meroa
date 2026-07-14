@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { api } from '@/lib/api/client';
 import { tasksQueryKey } from '@/features/tasks/queries';
-import type { ApiGoal, EditGoalPatch, LogGoalEntryPatch } from '@/lib/api/types';
+import type { ApiGoal, CreateGoalParams, EditGoalPatch, LogGoalEntryPatch } from '@/lib/api/types';
 
 export const goalsQueryKey = ['goals'] as const;
 export const goalDetailQueryKey = (id: string) => ['goals', id] as const;
@@ -66,6 +66,26 @@ export function useCreateGoalFromPreview() {
       // Starter tasks are created alongside the goal in the same transaction
       // (docs/goals-redesign-plan.md §2.3) — the Tasks tab needs to reflect
       // them the instant Create is tapped, same as any other task action.
+      if (data?.tasks.length) queryClient.invalidateQueries({ queryKey: tasksQueryKey });
+    },
+  });
+}
+
+// The Goals-tab "+" sheet's direct create (docs/goal-manual-editing-plan.md
+// §1) — same invalidation shape as useCreateGoalFromPreview, since it also
+// creates starter tasks in the same transaction.
+export function useCreateGoal() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (params: CreateGoalParams) => api.createGoal(params),
+    onSuccess: (data) => {
+      queryClient.setQueryData<{ goals: ApiGoal[] }>(goalsQueryKey, (prev) => ({
+        goals: upsertGoal(prev?.goals ?? [], data.goal),
+      }));
+    },
+    onSettled: (data) => {
+      queryClient.invalidateQueries({ queryKey: goalsQueryKey });
+      if (data) queryClient.invalidateQueries({ queryKey: goalDetailQueryKey(data.goal.id) });
       if (data?.tasks.length) queryClient.invalidateQueries({ queryKey: tasksQueryKey });
     },
   });

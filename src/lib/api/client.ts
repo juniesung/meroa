@@ -20,6 +20,7 @@ import type {
   BootstrapResponse,
   ApiMessage,
   CompleteTaskInput,
+  CreateGoalParams,
   CreateTaskInput,
   EditTaskPatch,
   EditGoalPatch,
@@ -256,6 +257,16 @@ export const api = {
     request<{ goal: ApiGoal; tasks: ApiTask[] }>('/goals', {
       method: 'POST',
       body: JSON.stringify({ previewMessageId }),
+    }),
+
+  // The Goals-tab "+" sheet's direct create — no preview, no chat message.
+  // Same POST /goals endpoint as createGoalFromPreview (the server branches
+  // on the body shape), same executor underneath, so the resulting goal is
+  // indistinguishable downstream (undo, recent-changes) from a chat-made one.
+  createGoal: (params: CreateGoalParams) =>
+    request<{ goal: ApiGoal; tasks: ApiTask[] }>('/goals', {
+      method: 'POST',
+      body: JSON.stringify(params),
     }),
 
   editGoal: (id: string, patch: EditGoalPatch) =>

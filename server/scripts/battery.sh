@@ -115,8 +115,18 @@ ck_asked() {
 task() { val "select $2 as v from tasks where user_id='$USER_ID' and title ilike '%$1%' and deleted_at is null and template_id is null limit 1"; }
 # today's instance of a recurring series
 inst() { val "select $2 as v from tasks where user_id='$USER_ID' and title ilike '%$1%' and deleted_at is null and template_id is not null limit 1"; }
-goal() { val "select $2 as v from goals where user_id='$USER_ID' and template='$1' and archived_at is null limit 1"; }
+# the NEWEST non-archived goal of a template — sections E/G create more than
+# one goal of the same template (a "run" and a "land an internship"
+# milestone, a manual savings goal alongside the chat-created one), so this
+# is deterministic only as "most recent"; a step that needs an OLDER one of
+# the same type must capture its id right after creating it instead (see
+# MILESTONE_ID below).
+goal() { val "select $2 as v from goals where user_id='$USER_ID' and template='$1' and archived_at is null order by created_at desc limit 1"; }
+goal_id() { val "select id as v from goals where user_id='$USER_ID' and template='$1' and name ilike '%$2%' and archived_at is null order by created_at desc limit 1"; }
+goalcol() { val "select $2 as v from goals where id='$1'"; }
 tap()  { curl -s -X POST "$API$1" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d "$2" > /dev/null; printf '     %s👆 tapped%s\n' "$M" "$X"; }
+patch() { curl -s -X PATCH "$API$1" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d "$2" > /dev/null; printf '     %s👆 PATCHed%s\n' "$M" "$X"; }
+post()  { curl -s -X POST "$API$1" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d "$2" > /dev/null; printf '     %s👆 POSTed%s\n' "$M" "$X"; }
 
 printf '%s═══ A. TASK TYPES ═══%s\n' "$B" "$X"
 say "add a task to call the dentist tomorrow at 3pm"
@@ -190,23 +200,59 @@ ck "indirect goal, unit is pounds" "$(goal indirect "definition->>'unit'" | grep
 say "weighed 183 this morning"
 ck "measurement logged (the value, not a delta)" "$(val "select (data->>'amount') as v from goal_entries ge join goals g on g.id=ge.goal_id join records r on r.id=ge.record_id where g.user_id='$USER_ID' and g.template='indirect' and r.reverted_at is null limit 1")" "183"
 
-printf '\n%s═══ E. MILESTONE ═══%s\n' "$B" "$X"
-# NOTE: this section encodes the CURRENT chat-interrogation flow (commit 541054f).
-# docs/goal-manual-editing-plan.md REPLACES it — chat will take stages if given
-# and otherwise make a bare template, and stage tasks move into the Goals tab.
-# Rewrite this section as part of that work; it is expected to fail until then.
-say "goal to land a summer internship: applying, interviewing, negotiating"
-say "update my resume, and apply to 5 jobs a day"
-ck "preview card" "$KIND" "goal_preview"
+printf '\n%s═══ E. MILESTONE — one message, no interrogation, plans live in Goals ═══%s\n' "$B" "$X"
+# docs/goal-manual-editing-plan.md replaced the two-question chat build
+# (commit 541054f): chat takes stages AND first-stage tasks from ONE
+# message if given, otherwise makes a bare template — never a follow-up
+# question either way. Planning tasks for a NOT-YET-active stage
+# (stagePlans) is a Goals-tab-only concept the model never sees; advancing
+# materializes whatever was planned automatically.
+
+say "goal to land a summer internship: applying, interviewing, negotiating — for applying I'll update my resume and apply to 5 jobs a day"
+ck "preview card on the FIRST message — no second question" "$KIND" "goal_preview"
 MSG="$(val "select m.id as v from messages m join conversations c on c.id=m.conversation_id where c.user_id='$USER_ID' and m.meta->>'kind'='goal_preview' and m.meta->>'createdGoalId' is null order by m.created_at desc limit 1")"
+ck "3 stages proposed, stated verbatim" "$(val "select jsonb_array_length(m.meta->'preview'->'definition'->'stages') as v from messages m where m.id='$MSG'")" "3"
 tap "/goals" "{\"previewMessageId\":\"$MSG\"}"
-ck "milestone goal, on stage 0" "$(goal milestone "definition->>'activeStageIndex'")" "0"
+MILESTONE_ID="$(goal_id milestone internship)"
+ck "milestone goal, 3 stages, on stage 0" "$(goalcol "$MILESTONE_ID" "jsonb_array_length(definition->'stages')")" "3"
+ck "on stage 0 (Applying)" "$(goalcol "$MILESTONE_ID" "definition->>'activeStageIndex'")" "0"
+ck "stage-0 starter task created as a real task" "$(val "select count(*) as v from tasks where user_id='$USER_ID' and goal_id='$MILESTONE_ID' and title ilike '%resume%' and deleted_at is null")" "1"
+
+say "goal to run a marathon"
+ck "bare template — no stages invented, still one card" "$KIND" "goal_preview"
+MSG="$(val "select m.id as v from messages m join conversations c on c.id=m.conversation_id where c.user_id='$USER_ID' and m.meta->>'kind'='goal_preview' and m.meta->>'createdGoalId' is null order by m.created_at desc limit 1")"
+ck "0 stages in the preview" "$(val "select jsonb_array_length(m.meta->'preview'->'definition'->'stages') as v from messages m where m.id='$MSG'")" "0"
+ck "handoff caption tells them where to add stages" "$(val "select (m.meta->>'detail') as v from messages m where m.id='$MSG'")" "Open in Goals to add your stages"
+tap "/goals" "{\"previewMessageId\":\"$MSG\"}"
+ck "bare milestone goal saved with 0 stages" "$(goal milestone "jsonb_array_length(definition->'stages')")" "0"
+
+printf '  %s— stage editing over REST (Goals tab) —%s\n' "$C" "$X"
+patch "/goals/$MILESTONE_ID" '{"stagePlans":[[],[{"title":"Mock interviews"}],[{"title":"Negotiate a higher salary"}]]}'
+ck "stage 2 (Interviewing) plan saved" "$(goalcol "$MILESTONE_ID" "definition->'stagePlans'->1->0->>'title'")" "Mock interviews"
+ck "stage 3 (Negotiation) plan saved" "$(goalcol "$MILESTONE_ID" "definition->'stagePlans'->2->0->>'title'")" "Negotiate a higher salary"
+
+say "finished applying for the internship — I've got interviews lined up"
+ck "advance card, materialized plan already attached" "$KIND" "goal_advance_pending"
+ADV_MSG="$(val "select m.id as v from messages m join conversations c on c.id=m.conversation_id where c.user_id='$USER_ID' and m.meta->>'kind'='goal_advance_pending' and (m.meta->>'advancedRecordId') is null order by m.created_at desc limit 1")"
+tap "/goals/$MILESTONE_ID/advance" "{\"proposalMessageId\":\"$ADV_MSG\"}"
+ck "now on stage 1 (Interviewing)" "$(goalcol "$MILESTONE_ID" "definition->>'activeStageIndex'")" "1"
+ck "stage-2's PLANNED task became a REAL task" "$(val "select count(*) as v from tasks where user_id='$USER_ID' and goal_id='$MILESTONE_ID' and title ilike '%mock interview%' and deleted_at is null")" "1"
+ck "stage-1's tasks were retired" "$(val "select count(*) as v from tasks where user_id='$USER_ID' and goal_id='$MILESTONE_ID' and title ilike '%resume%' and deleted_at is null")" "0"
+ck "consumed stagePlans entry cleared" "$(goalcol "$MILESTONE_ID" "jsonb_array_length(definition->'stagePlans'->1)")" "0"
+ck "not-yet-consumed stagePlans entry survives the advance" "$(goalcol "$MILESTONE_ID" "definition->'stagePlans'->2->0->>'title'")" "Negotiate a higher salary"
 
 printf '\n%s═══ F. SAFETY — the model must NOT act ═══%s\n' "$B" "$X"
 say "i want to save for a laptop"
 ck "no target stated -> no goal invented" "$(val "select count(*) as v from goals where user_id='$USER_ID' and name ilike '%laptop%' and archived_at is null")" "0"
 
 say "add a task to water the plants"
+# A SECOND genuinely open "water" task, made fresh right here — Section C's
+# "did my water for today" already completed the daily water-counter's
+# today's instance, so relying on it for ambiguity would be luck-of-timing,
+# not a real test: an already-done task isn't a completable candidate
+# (lib/tasks/executor.ts's listOpenTaskTitles is deliberately status='open'
+# only), so the setup needs two OPEN water-titled tasks of its own.
+say "add a task to check the water filter"
 DONE_BEFORE="$(val "select count(*) as v from tasks where user_id='$USER_ID' and status='done' and deleted_at is null")"
 say "mark water done"
 ck "ambiguous ref -> nothing written" "$(val "select count(*) as v from tasks where user_id='$USER_ID' and status='done' and deleted_at is null")" "$DONE_BEFORE"
@@ -214,6 +260,34 @@ ck_asked "ambiguous ref -> asks which one"
 
 say "hey what's up"
 ck "plain conversation -> no cards" "$CARDS" "0"
+
+printf '\n%s═══ G. MANUAL CREATE — REST, no chat preview ═══%s\n' "$B" "$X"
+# docs/goal-manual-editing-plan.md §1: POST /goals also accepts a full
+# definition directly (the Goals-tab "+" sheet), not just {previewMessageId}.
+# It must route through the SAME executor as the chat path — same
+# goal_created record shape, same undo, same recent-changes visibility — so
+# a manually-created goal is indistinguishable downstream from a chat-made one.
+
+post "/goals" '{"type":"savings","name":"Manual savings goal","currency":"$","targetValue":250}'
+ck "manual savings goal row created" "$(val "select count(*) as v from goals where user_id='$USER_ID' and name='Manual savings goal' and archived_at is null")" "1"
+ck "wrote a goal_created record (source goal_ui)" "$(val "select count(*) as v from records where user_id='$USER_ID' and kind='goal_created' and source='goal_ui' and payload->>'name'='Manual savings goal' and reverted_at is null")" "1"
+
+post "/goals" '{"type":"habit","name":"Manual habit goal","starterTasks":[{"title":"Manual check-in","recurrence":{"freq":"daily"}}]}'
+ck "manual habit goal row created" "$(val "select count(*) as v from goals where user_id='$USER_ID' and name='Manual habit goal' and archived_at is null")" "1"
+ck "its check-in task was created too" "$(task "Manual check-in" "count(*)")" "1"
+
+post "/goals" '{"type":"indirect","name":"Manual indirect goal","unit":"reps"}'
+ck "manual indirect goal row created" "$(val "select count(*) as v from goals where user_id='$USER_ID' and name='Manual indirect goal' and archived_at is null")" "1"
+
+post "/goals" '{"type":"milestone","name":"Manual milestone goal","stages":["Plan","Build","Ship"],"starterTasks":[{"title":"Write the manual plan"}],"stagePlans":[[],[{"title":"Build it manually"}],[]]}'
+ck "manual milestone goal row created, 3 stages" "$(val "select count(*) as v from goals where user_id='$USER_ID' and name='Manual milestone goal' and archived_at is null and jsonb_array_length(definition->'stages')=3")" "1"
+ck "its stage-0 starter task was created too" "$(val "select count(*) as v from tasks where user_id='$USER_ID' and title ilike '%write the manual plan%' and deleted_at is null")" "1"
+ck "its stage-1 plan was saved (never a real task yet)" "$(val "select (g.definition->'stagePlans'->1->0->>'title') as v from goals g where g.user_id='$USER_ID' and g.name='Manual milestone goal'")" "Build it manually"
+ck "the planned task is NOT a real task" "$(val "select count(*) as v from tasks where user_id='$USER_ID' and title ilike '%build it manually%' and deleted_at is null")" "0"
+
+say "undo that"
+ck "chat undo reverts a manually-created goal (the most recent one)" "$(val "select count(*) as v from goals where user_id='$USER_ID' and name='Manual milestone goal' and archived_at is null")" "0"
+ck "and retracts its starter task cascade too (undo of a create soft-deletes what it made)" "$(val "select count(*) as v from tasks where user_id='$USER_ID' and title ilike '%write the manual plan%' and deleted_at is not null")" "1"
 
 printf '\n%s══════════════════════════════════════%s\n' "$B" "$X"
 printf '%s  DB assertions:  %s%s passed%s   %s%s failed%s\n' "$B" "$G" "$PASS" "$X" "$R" "$FAIL" "$X"

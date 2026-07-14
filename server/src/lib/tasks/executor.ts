@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNull, like, notInArray, or } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNotNull, isNull, like, notInArray, or } from 'drizzle-orm';
 
 import { db } from '../../db/client.ts';
 import { records, tasks, goals, goalEntries } from '../../db/schema.ts';
@@ -146,6 +146,27 @@ export async function getTask(userId: string, taskId: string): Promise<TaskRow |
     .where(and(eq(tasks.id, taskId), eq(tasks.userId, userId), isNull(tasks.deletedAt)))
     .limit(1);
   return task ?? null;
+}
+
+// Read-only — every currently-COMPLETABLE task title (lib/ai/ambiguity.ts's
+// server-side backstop for "mark water done" with two open tasks). A
+// recurring TEMPLATE row itself is excluded (`recurrence IS NOT NULL AND
+// templateId IS NULL`) — complete_task always targets today's occurrence,
+// never the template directly, so including the template alongside its own
+// instance would double-count one real task as two identically-titled
+// candidates.
+export async function listOpenTaskTitles(userId: string): Promise<{ id: string; title: string }[]> {
+  return db
+    .select({ id: tasks.id, title: tasks.title })
+    .from(tasks)
+    .where(
+      and(
+        eq(tasks.userId, userId),
+        isNull(tasks.deletedAt),
+        eq(tasks.status, 'open'),
+        or(isNull(tasks.recurrence), isNotNull(tasks.templateId)),
+      ),
+    );
 }
 
 // --- goal link validation ------------------------------------------------

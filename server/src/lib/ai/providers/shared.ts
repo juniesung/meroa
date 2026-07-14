@@ -69,8 +69,10 @@ export type ChatStreamEvent =
     }
   // create_goal — a preview only, nothing saved yet (docs/goals-redesign-
   // plan.md §2.1). routes/messages.ts persists this as a goal_preview
-  // message; POST /goals {previewMessageId} is the actual save.
-  | { type: 'action_preview'; toolName: string; preview: GoalPreview; summary: string; recordKind: string }
+  // message; POST /goals {previewMessageId} is the actual save. `detail`
+  // is the server-computed handoff caption (docs/goal-manual-editing-
+  // plan.md §3.4).
+  | { type: 'action_preview'; toolName: string; preview: GoalPreview; detail?: string; summary: string; recordKind: string }
   | { type: 'stream_end' }
   | { type: 'error'; retryable: boolean; message: string };
 
@@ -91,6 +93,12 @@ export type ChatActionContext = {
   // This turn's alias -> real-id map (task-context.ts) — every taskRef/
   // itemRef a tool call sends is resolved against this before it executes.
   refs: TurnRefs;
+  // The user's newest message, verbatim — lib/ai/ambiguity.ts's server-
+  // side backstop judges ambiguity against what the USER actually said,
+  // never the model's titleHint (its post-hoc justification for whichever
+  // task it already picked). Optional so a caller that can't supply it
+  // (none today) simply disables that one guard rather than failing.
+  userMessageText?: string;
 };
 
 // Shared by the two OpenAI-compatible providers (openai.ts, deepseek.ts).

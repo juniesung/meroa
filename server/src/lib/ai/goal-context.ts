@@ -90,7 +90,8 @@ export async function buildGoalContext(
       const viaLabel = contribution ? ` · check-in via "${contribution.title}" (complete_task IS the check-in)` : '';
       line = `[${alias}] "${goal.name}" · habit · ${summary.headline} (${summary.sub})${viaLabel}`;
     } else if (definition.type === 'milestone') {
-      const done = definition.activeStageIndex >= definition.stages.length;
+      const noStagesYet = definition.stages.length === 0;
+      const done = !noStagesYet && definition.activeStageIndex >= definition.stages.length;
       const nextStage = definition.stages[definition.activeStageIndex + 1];
       // The FULL ordered stage list, and the next stage by name. Naming only the
       // CURRENT stage was a real bug: advancing now asks the user what they want
@@ -102,14 +103,23 @@ export async function buildGoalContext(
       // honest question with "I don't think that actually went through" (seen live
       // in the milestone flow test). A guard is only as good as the facts you give
       // it — so the facts now include every stage.
-      const stageLabel = done
-        ? `complete — all ${definition.stages.length} stages done`
-        : `stage ${definition.activeStageIndex + 1}/${definition.stages.length} "${definition.stages[definition.activeStageIndex]}"${
-            nextStage
-              ? ` · NEXT stage is "${nextStage}" (name it when you ask what they want to do for it)`
-              : ` · this is the LAST stage — advancing completes the goal, so there is no next stage to ask about`
-          }`;
-      line = `[${alias}] "${goal.name}" · milestone · ${stageLabel} · all stages in order: ${definition.stages.map((s, i) => `${i + 1}. ${s}`).join(' → ')} · advance ONLY on the user's say-so (advance_goal_stage) — a completed linked task is never a reason to advance`;
+      //
+      // `noStagesYet` is its own branch, not folded into `done` — a bare
+      // template (0 stages, activeStageIndex 0) trivially satisfies "index >=
+      // length" the same as a genuinely complete goal, and without this
+      // check it read as "complete — all 0 stages done"
+      // (docs/goal-manual-editing-plan.md §1 decision 1's bare template).
+      const stageLabel = noStagesYet
+        ? 'no stages set yet — tell the user to add them in the Goals tab; do not propose any yourself'
+        : done
+          ? `complete — all ${definition.stages.length} stages done`
+          : `stage ${definition.activeStageIndex + 1}/${definition.stages.length} "${definition.stages[definition.activeStageIndex]}"${
+              nextStage
+                ? ` · NEXT stage is "${nextStage}"`
+                : ` · this is the LAST stage — advancing completes the goal, so there is no next stage`
+            }`;
+      const stagesLine = noStagesYet ? '' : ` · all stages in order: ${definition.stages.map((s, i) => `${i + 1}. ${s}`).join(' → ')}`;
+      line = `[${alias}] "${goal.name}" · milestone · ${stageLabel}${stagesLine} · advance ONLY on the user's say-so (advance_goal_stage) — a completed linked task is never a reason to advance`;
     } else if (definition.type === 'indirect') {
       const deadlineLabel = definition.deadline ? `, due ${formatYmdShort(definition.deadline)}` : '';
       const lastLabel = summary.lastEntryAt ? `, last ${formatYmdShort(ymdInTz(summary.lastEntryAt, tz))}` : '';

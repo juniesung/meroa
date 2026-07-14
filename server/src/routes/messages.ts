@@ -349,6 +349,7 @@ messageRoutes.post('/', zValidator('json', sendSchema), async (c) => {
         refs: taskContext.refs,
         pendingConfirmCard,
         hasPendingPreview: !!pendingPreview,
+        userMessageText: userMessage.content,
       })) {
         if (event.type === 'delta') {
           await stream.writeSSE({ event: 'delta', data: JSON.stringify({ text: event.text }) });
@@ -399,7 +400,17 @@ messageRoutes.post('/', zValidator('json', sendSchema), async (c) => {
               conversationId: conversation.id,
               role: 'assistant',
               content: event.summary,
-              meta: { kind: 'goal_preview', action: event.toolName, preview: event.preview },
+              meta: {
+                kind: 'goal_preview',
+                action: event.toolName,
+                preview: event.preview,
+                // The handoff caption the card can't compute itself — "open
+                // in Goals to add your stages" for a bare milestone
+                // template, or how many stages are set (docs/goal-manual-
+                // editing-plan.md §3.4). Client renders it the same way
+                // TaskActionCard renders meta.detail.
+                ...(event.detail ? { detail: event.detail } : {}),
+              },
             })
             .returning();
           await stream.writeSSE({

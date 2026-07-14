@@ -159,6 +159,8 @@ export async function* streamChatReplyAnthropic(
               sourceMessageId: actionCtx.sourceMessageId,
               toolCallId: block.id,
             },
+            actionCtx.pendingConfirmCard,
+            actionCtx.userMessageText,
           );
           if (result.ok && 'tasks' in result) {
             toolCallLog.push({

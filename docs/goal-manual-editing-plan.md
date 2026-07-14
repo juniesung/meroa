@@ -1,6 +1,6 @@
 # Manual goal creation & editing — implementation plan
 
-> Status: **planned, not built.** Written 2026-07-13.
+> Status: **built.** Written 2026-07-13, implemented and verified end-to-end 2026-07-13/14.
 > Supersedes the chat-interrogation milestone flow shipped in `541054f`.
 
 ---

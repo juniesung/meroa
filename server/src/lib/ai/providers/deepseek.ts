@@ -330,6 +330,8 @@ export async function* streamChatReplyDeepseek(
               sourceMessageId: actionCtx.sourceMessageId,
               toolCallId: call.id,
             },
+            actionCtx.pendingConfirmCard,
+            actionCtx.userMessageText,
           );
 
           if (result.ok && 'tasks' in result) {

@@ -77,7 +77,9 @@ function describeGoalFacts(preview: GoalPreview): string {
       : d.type === 'indirect'
         ? ` · indirect (${d.unit}${d.targetValue !== undefined ? `, target ${d.targetValue}${d.unit}` : ', no target'}${d.deadline ? ` · by ${d.deadline}` : ''})`
         : d.type === 'milestone'
-          ? ` · milestone (${d.stages.length} stages, starting at "${d.stages[0]}")`
+          ? d.stages.length === 0
+            ? ' · milestone (no stages yet — a bare template; the user adds stages in the Goals tab)'
+            : ` · milestone (${d.stages.length} stages, starting at "${d.stages[0]}")`
           : ' · habit (daily check-in streak, no target amount)';
   const starters = preview.starterTasks?.length
     ? ` · starter tasks: ${preview.starterTasks.map((s) => describeStarter(s, currency)).join('; ')}`
