@@ -91,10 +91,25 @@ export async function buildGoalContext(
       line = `[${alias}] "${goal.name}" · habit · ${summary.headline} (${summary.sub})${viaLabel}`;
     } else if (definition.type === 'milestone') {
       const done = definition.activeStageIndex >= definition.stages.length;
+      const nextStage = definition.stages[definition.activeStageIndex + 1];
+      // The FULL ordered stage list, and the next stage by name. Naming only the
+      // CURRENT stage was a real bug: advancing now asks the user what they want
+      // to do for the next milestone, so the reply legitimately names a stage the
+      // user hasn't reached — and the model could only get that name by RECALLING
+      // it from conversation history, which is the one thing nothing here is
+      // allowed to do. Worse, the claim-check guard reads this same block: a stage
+      // name it had no record of read as an invented fact, and it retracted an
+      // honest question with "I don't think that actually went through" (seen live
+      // in the milestone flow test). A guard is only as good as the facts you give
+      // it — so the facts now include every stage.
       const stageLabel = done
-        ? `complete — all ${definition.stages.length} stages`
-        : `stage ${definition.activeStageIndex + 1}/${definition.stages.length} "${definition.stages[definition.activeStageIndex]}"`;
-      line = `[${alias}] "${goal.name}" · milestone · ${stageLabel} · advance ONLY on the user's say-so (advance_goal_stage) — a completed linked task is never a reason to advance`;
+        ? `complete — all ${definition.stages.length} stages done`
+        : `stage ${definition.activeStageIndex + 1}/${definition.stages.length} "${definition.stages[definition.activeStageIndex]}"${
+            nextStage
+              ? ` · NEXT stage is "${nextStage}" (name it when you ask what they want to do for it)`
+              : ` · this is the LAST stage — advancing completes the goal, so there is no next stage to ask about`
+          }`;
+      line = `[${alias}] "${goal.name}" · milestone · ${stageLabel} · all stages in order: ${definition.stages.map((s, i) => `${i + 1}. ${s}`).join(' → ')} · advance ONLY on the user's say-so (advance_goal_stage) — a completed linked task is never a reason to advance`;
     } else if (definition.type === 'indirect') {
       const deadlineLabel = definition.deadline ? `, due ${formatYmdShort(definition.deadline)}` : '';
       const lastLabel = summary.lastEntryAt ? `, last ${formatYmdShort(ymdInTz(summary.lastEntryAt, tz))}` : '';
