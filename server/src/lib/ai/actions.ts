@@ -1066,7 +1066,16 @@ async function executeAiToolCallInner(
           ok: true,
           toolName,
           preview,
-          summary: `Preview card shown — nothing is saved yet; the user taps Create on the card to save it. Do not ask them to confirm in chat text. This card is appearing for the FIRST time, right now, because you just called this tool — it was not up before and the user has not seen it; never tell them it was "already up" or "already there" (that reads as though you did nothing). ${describeGoalPreviewForSummary(preview)} Describe only what's listed here — never add, invent, or assume a starter task that isn't in that list, even if it seems like an obvious next step for this kind of goal.${paceNote}`,
+          // FACTS ONLY. This string is three things at once: the narrate pass's
+          // input, the tool result in act-pass history, and the persisted content
+          // of the card message — so every instruction smuggled in here is a
+          // prompt rule replayed into model-visible history on every future turn,
+          // which chat-architecture.md §5 says will eventually be copied verbatim.
+          // It was ~700 chars of "never say X" and the model duly opened a reply
+          // with "You already have a preview card up" — the exact phrasing the
+          // blob forbade. Negative instructions prime what they forbid. The rules
+          // live in SYSTEM_PROMPT's Goals section now, where rules belong.
+          summary: `Preview card shown — nothing is saved yet; the user taps Create on the card. ${describeGoalPreviewForSummary(preview)}${paceNote}`,
           recordKind: 'goal_preview',
         };
       }
