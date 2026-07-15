@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { AppState } from 'react-native';
 
 import { useMe } from '@/features/profile/queries';
+import { readQuietHours } from '@/features/profile/quiet-hours';
 import { syncTaskReminders } from '@/lib/notifications';
 import { useTasks } from './queries';
 
@@ -16,16 +17,20 @@ export function useTaskReminderSync() {
   const { data: tasks } = useTasks();
   const { data: me } = useMe();
   const enabled = me?.user.prefs.proactiveCheckins === true;
+  const quietHours = readQuietHours(me?.user.prefs);
+  // Depend on the primitive fields, not the object readQuietHours returns —
+  // that's a fresh literal every render, which would resync on every render.
+  const { enabled: quietEnabled, start: quietStart, end: quietEnd } = quietHours;
 
   useEffect(() => {
     if (!tasks) return;
-    void syncTaskReminders(tasks, enabled);
-  }, [tasks, enabled]);
+    void syncTaskReminders(tasks, enabled, quietHours);
+  }, [tasks, enabled, quietEnabled, quietStart, quietEnd]);
 
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (state) => {
-      if (state === 'active' && tasks) void syncTaskReminders(tasks, enabled);
+      if (state === 'active' && tasks) void syncTaskReminders(tasks, enabled, quietHours);
     });
     return () => subscription.remove();
-  }, [tasks, enabled]);
+  }, [tasks, enabled, quietEnabled, quietStart, quietEnd]);
 }

@@ -1,5 +1,6 @@
 import * as Notifications from 'expo-notifications';
 
+import { isWithinQuietHours, nextQuietHoursEnd, type QuietHours } from '@/features/profile/quiet-hours';
 import type { ApiTask, DurationConfig } from './api/types';
 
 Notifications.setNotificationHandler({
@@ -38,8 +39,12 @@ function reminderBody(task: ApiTask): string {
 // Chaining every call onto this queue forces them to run one at a time.
 let syncQueue: Promise<void> = Promise.resolve();
 
-export function syncTaskReminders(tasks: ApiTask[], enabled: boolean): Promise<void> {
-  const run = () => syncTaskRemindersNow(tasks, enabled);
+export function syncTaskReminders(
+  tasks: ApiTask[],
+  enabled: boolean,
+  quietHours: QuietHours,
+): Promise<void> {
+  const run = () => syncTaskRemindersNow(tasks, enabled, quietHours);
   const next = syncQueue.then(run, run);
   // Swallow so a failed sync doesn't permanently wedge the queue for every
   // call after it.
@@ -56,9 +61,14 @@ export function syncTaskReminders(tasks: ApiTask[], enabled: boolean): Promise<v
  * granted; due-time reminders are additionally gated behind `enabled` so
  * disabling the check-in pref reliably silences those, while a running
  * timer's completion alert (below) is not proactive outreach — it's the
- * direct result of the user starting that timer — so it isn't gated by it.
+ * direct result of the user starting that timer — so it isn't gated by it,
+ * or by quiet hours (same reasoning: not unprompted outreach).
  */
-async function syncTaskRemindersNow(tasks: ApiTask[], enabled: boolean): Promise<void> {
+async function syncTaskRemindersNow(
+  tasks: ApiTask[],
+  enabled: boolean,
+  quietHours: QuietHours,
+): Promise<void> {
   await Notifications.cancelAllScheduledNotificationsAsync();
 
   const { status } = await Notifications.getPermissionsAsync();
@@ -99,9 +109,18 @@ async function syncTaskRemindersNow(tasks: ApiTask[], enabled: boolean): Promise
     const dueAt = new Date(task.dueAt).getTime();
     if (dueAt <= now || dueAt > windowEnd) continue;
 
+    // Quiet hours shift a reminder to the window's end rather than drop it
+    // — a reminder that never fires is a lost reminder, not a silenced one.
+    let fireDate = new Date(dueAt);
+    if (isWithinQuietHours(quietHours, fireDate)) {
+      const shifted = nextQuietHoursEnd(quietHours, fireDate);
+      console.log(`[quietHours] shifted reminder for "${task.title}" from ${fireDate.toISOString()} to ${shifted.toISOString()}`);
+      fireDate = shifted;
+    }
+
     await Notifications.scheduleNotificationAsync({
       content: { title: 'Meroa', body: reminderBody(task), data: { taskId: task.id } },
-      trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: new Date(dueAt) },
+      trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: fireDate },
     });
   }
 }

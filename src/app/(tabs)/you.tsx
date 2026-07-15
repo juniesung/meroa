@@ -7,6 +7,9 @@ import { MeroaMark } from '@/components/MeroaMark';
 import { Row } from '@/components/Row';
 import { theme } from '@/constants/theme';
 import { useMe, useUpdatePrefs } from '@/features/profile/queries';
+import { QuietHoursSheet } from '@/features/profile/QuietHoursSheet';
+import { formatHhmmDisplay } from '@/features/tasks/task-form-helpers';
+import { readQuietHours } from '@/features/profile/quiet-hours';
 import { VibePickerSheet } from '@/features/profile/VibePickerSheet';
 import { vibeLabel } from '@/features/profile/vibes';
 import { useTabBarHeight } from '@/hooks/use-tab-bar-inset';
@@ -19,9 +22,14 @@ export default function YouScreen() {
   const { signOut } = useAuth();
   const updatePrefs = useUpdatePrefs();
   const [vibeSheetOpen, setVibeSheetOpen] = useState(false);
+  const [quietHoursSheetOpen, setQuietHoursSheetOpen] = useState(false);
 
   const communicationStyle = vibeLabel(data?.user.prefs.communicationStyle);
   const proactiveCheckins = data?.user.prefs.proactiveCheckins === true;
+  const quietHours = readQuietHours(data?.user.prefs);
+  const quietHoursHint = quietHours.enabled
+    ? `${formatHhmmDisplay(quietHours.start)}–${formatHhmmDisplay(quietHours.end)}`
+    : 'Off';
 
   const handleToggleCheckins = async (next: boolean) => {
     // Ask the OS only when turning check-ins on (CLAUDE.md §2) — the sync
@@ -72,6 +80,12 @@ export default function YouScreen() {
             }
           />
           <Row
+            icon="clock"
+            label="Quiet hours"
+            right={<Text style={styles.hint}>{quietHoursHint}</Text>}
+            onPress={() => setQuietHoursSheetOpen(true)}
+          />
+          <Row
             icon="moon"
             label="Dark appearance"
             right={<Text style={styles.hint}>Always</Text>}
@@ -87,6 +101,7 @@ export default function YouScreen() {
         <Text style={styles.footer}>Meroa · v1.0.0</Text>
       </ScrollView>
       <VibePickerSheet visible={vibeSheetOpen} onClose={() => setVibeSheetOpen(false)} />
+      <QuietHoursSheet visible={quietHoursSheetOpen} onClose={() => setQuietHoursSheetOpen(false)} />
     </SafeAreaView>
   );
 }

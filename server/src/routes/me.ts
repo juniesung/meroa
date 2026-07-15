@@ -36,6 +36,12 @@ meRoutes.get('/', async (c) => {
   });
 });
 
+// Same HH:mm (24h, local) shape as server/src/lib/tasks/schema.ts's
+// timeSchema — quiet hours are evaluated against the device's own local
+// clock (src/lib/notifications.ts), never converted through a stored
+// timezone, so this is deliberately just two wall-clock strings.
+const timeSchema = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'time must be HH:mm (24h, local)');
+
 // Merge-only patch — never replaces the whole prefs blob, so unrelated keys
 // (e.g. communicationStyle) survive a reminders-toggle update untouched.
 const prefsPatchSchema = z.object({
@@ -47,6 +53,13 @@ const prefsPatchSchema = z.object({
       questions: z.literal('fewer').optional(),
       directness: z.enum(['more', 'softer']).optional(),
       emoji: z.enum(['none', 'ok']).optional(),
+    })
+    .optional(),
+  quietHours: z
+    .object({
+      enabled: z.boolean(),
+      start: timeSchema,
+      end: timeSchema,
     })
     .optional(),
 });
