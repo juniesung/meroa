@@ -21,7 +21,11 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { radii, theme } from '@/constants/theme';
 
-const ANIM_DURATION = 220;
+// Exported so callers chaining one sheet's close into another sheet's open
+// (e.g. a menu sheet handing off to the sheet it opened) wait exactly as
+// long as the close animation actually takes, instead of duplicating 220
+// as an unexplained magic number elsewhere.
+export const ANIM_DURATION = 220;
 const OFFSCREEN_Y = 700;
 const DRAG_DISMISS_THRESHOLD = 100;
 const DRAG_DISMISS_VELOCITY = 800;

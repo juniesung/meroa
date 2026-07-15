@@ -34,6 +34,7 @@ export default function TabsLayout() {
     <Tabs
       screenOptions={{
         headerShown: false,
+        animation: 'shift',
         tabBarActiveTintColor: theme.blue,
         tabBarInactiveTintColor: theme.dim,
         tabBarLabelStyle: { fontSize: 10.5, fontWeight: '600' },

@@ -1,4 +1,5 @@
 import * as Haptics from 'expo-haptics';
+import { router } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -24,8 +25,10 @@ import { AnimatedPressable, useTapFeedback } from '@/components/AnimatedPressabl
 import { Bubble } from '@/components/Bubble';
 import { Icon } from '@/components/Icon';
 import { MeroaMark, type MeroaMood } from '@/components/MeroaMark';
+import { ANIM_DURATION } from '@/components/Sheet';
 import { TaskCard } from '@/components/TaskCard';
 import { radii, theme } from '@/constants/theme';
+import { ChatMenuSheet } from '@/features/chat/ChatMenuSheet';
 import { type ChatMessage, useMessages, useSendMessage } from '@/features/chat/queries';
 import {
   useBulkDeleteTasks,
@@ -690,6 +693,7 @@ export default function ChatScreen() {
   const headerStatus = isReplying ? 'Typing…' : 'Listening';
   const { send, retry } = useSendMessage();
   const [draft, setDraft] = useState('');
+  const [menuSheetOpen, setMenuSheetOpen] = useState(false);
   const [vibeSheetOpen, setVibeSheetOpen] = useState(false);
   const { data: me } = useMe();
   const communicationStyle = vibeLabel(me?.user.prefs.communicationStyle);
@@ -746,6 +750,18 @@ export default function ChatScreen() {
     void retry(message);
   };
 
+  // The menu sheet's own close animation has to finish before the next
+  // sheet's Modal mounts — matches Sheet.tsx's ANIM_DURATION so this isn't
+  // an unexplained magic number duplicated here.
+  const openToneFromMenu = () => {
+    setMenuSheetOpen(false);
+    setTimeout(() => setVibeSheetOpen(true), ANIM_DURATION);
+  };
+  const openMemoryFromMenu = () => {
+    setMenuSheetOpen(false);
+    setTimeout(() => router.push('/memories'), ANIM_DURATION);
+  };
+
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
       <View style={styles.header}>
@@ -764,7 +780,7 @@ export default function ChatScreen() {
           <AnimatedPressable
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-              setVibeSheetOpen(true);
+              setMenuSheetOpen(true);
             }}
             onPressIn={ellipsisFeedback.onPressIn}
             onPressOut={ellipsisFeedback.onPressOut}
@@ -774,6 +790,13 @@ export default function ChatScreen() {
           </AnimatedPressable>
         </View>
       </View>
+      <ChatMenuSheet
+        visible={menuSheetOpen}
+        onClose={() => setMenuSheetOpen(false)}
+        communicationStyle={communicationStyle}
+        onSelectTone={openToneFromMenu}
+        onSelectMemory={openMemoryFromMenu}
+      />
       <VibePickerSheet visible={vibeSheetOpen} onClose={() => setVibeSheetOpen(false)} />
 
       <KeyboardAvoidingView

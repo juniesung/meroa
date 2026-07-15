@@ -112,7 +112,7 @@ function EmptyState() {
         </View>
       </View>
       <Text style={styles.emptyText}>
-        No goals yet — tell Meroa what you&apos;re saving toward and it&apos;ll build one with you.
+        No goals yet — tell Meroa what you&apos;re working toward and it&apos;ll build one with you.
       </Text>
     </View>
   );

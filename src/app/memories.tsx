@@ -2,8 +2,9 @@ import { router, Stack } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { AnimatedPressable, useTapFeedback } from '@/components/AnimatedPressable';
 import { Icon } from '@/components/Icon';
 import { SwipeToDelete } from '@/components/SwipeToDelete';
 import { radii, theme } from '@/constants/theme';
@@ -34,6 +35,8 @@ export default function MemoriesScreen() {
   const deleteMemory = useDeleteMemory();
   const [formVisible, setFormVisible] = useState(false);
   const [editing, setEditing] = useState<ApiMemory | null>(null);
+  const insets = useSafeAreaInsets();
+  const fabFeedback = useTapFeedback();
 
   const grouped = useMemo(() => {
     const groups = new Map<string, ApiMemory[]>();
@@ -68,9 +71,7 @@ export default function MemoriesScreen() {
           </View>
         </Pressable>
         <Text style={styles.title}>Memory</Text>
-        <Pressable onPress={openCreate} style={styles.iconButton} hitSlop={8}>
-          <Icon name="plus" size={18} color={theme.text} stroke={2.2} />
-        </Pressable>
+        <View style={styles.headerSpacer} />
       </View>
 
       {isLoading ? (
@@ -120,6 +121,16 @@ export default function MemoriesScreen() {
         </ScrollView>
       )}
 
+      <AnimatedPressable
+        onPress={openCreate}
+        onPressIn={fabFeedback.onPressIn}
+        onPressOut={fabFeedback.onPressOut}
+        style={[styles.fab, { bottom: insets.bottom + 20 }, fabFeedback.animatedStyle]}
+        hitSlop={8}
+      >
+        <Icon name="plus" size={22} color="#fff" stroke={2.4} />
+      </AnimatedPressable>
+
       <MemoryFormSheet visible={formVisible} onClose={() => setFormVisible(false)} memory={editing} />
     </SafeAreaView>
   );
@@ -144,6 +155,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  // Balances the back button on the other side so the title stays centered
+  // — same size as iconButton, but invisible (no FAB-adjacent "+" here anymore).
+  headerSpacer: { width: 32, height: 32 },
   title: { color: theme.text, fontSize: 16, fontWeight: '700' },
   loading: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   empty: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 40 },
@@ -177,4 +191,19 @@ const styles = StyleSheet.create({
     backgroundColor: theme.surface,
   },
   badgeText: { color: theme.dim, fontSize: 10.5, fontWeight: '600' },
+  fab: {
+    position: 'absolute',
+    right: 20,
+    width: 56,
+    height: 56,
+    borderRadius: 999,
+    backgroundColor: theme.blue,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: theme.blue,
+    shadowOpacity: 0.5,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 6,
+  },
 });
