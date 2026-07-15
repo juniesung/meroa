@@ -40,6 +40,32 @@ export function findPendingPreview(messages: MessageLike[]): GoalPreview | null 
   return null;
 }
 
+/**
+ * Same "was a preview shown but never consumed by a Create tap" question as
+ * findPendingPreview, for create_task instead of create_goal — but callers
+ * here only need a yes/no, not the preview's contents (a task preview's
+ * contents already reach the model via the create_task tool result, and the
+ * task list only ever reflects REAL rows). This exists specifically to feed
+ * ChatActionContext.hasPendingPreview: without it, that flag only ever
+ * recognized a pending GOAL preview, so the claim-check guard's exemption
+ * for "describing a card that's legitimately still pending" (shared.ts's
+ * matchedPreviewClaim) had no way to know a pending TASK card was real —
+ * and force-corrected an honest reference to one as a false claim (observed
+ * live: "could you tap Create on that card" about a genuinely-pending
+ * "Take creatine" preview got retracted as "that preview didn't actually go
+ * through," which was itself wrong).
+ */
+export function hasPendingTaskPreview(messages: MessageLike[]): boolean {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i]!;
+    if (message.role !== 'assistant') continue;
+    const meta = message.meta as { kind?: string; createdTaskId?: string } | null;
+    if (meta?.kind !== 'task_creation_pending') continue;
+    return !meta.createdTaskId;
+  }
+  return false;
+}
+
 function describeStarter(starter: StarterTask, currency: string | null): string {
   const cadence =
     starter.recurrence?.freq === 'daily'

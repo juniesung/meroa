@@ -11,6 +11,7 @@ import { maybeExtractMemories } from '../lib/ai/memory-extractor.ts';
 import { pickTaskCreatedQuip } from '../lib/ai/quips.ts';
 import { buildRecentChangesFeed, renderUndoTarget } from '../lib/ai/recent-changes.ts';
 import {
+  applyStyleCasing,
   buildConversationTailBlock,
   buildMemoryFactsText,
   buildTailBlock,
@@ -20,7 +21,7 @@ import {
 import { listMemories } from '../lib/memories/executor.ts';
 import { buildTaskContext } from '../lib/ai/task-context.ts';
 import { buildGoalContext } from '../lib/ai/goal-context.ts';
-import { findPendingPreview, renderPendingPreview } from '../lib/ai/pending-preview.ts';
+import { findPendingPreview, hasPendingTaskPreview, renderPendingPreview } from '../lib/ai/pending-preview.ts';
 import { buildGoalConsistency } from '../lib/goals/consistency.ts';
 import { getOrCreateAppConversation, getRecentMessages } from '../lib/conversations.ts';
 import { peekUndoTarget } from '../lib/tasks/executor.ts';
@@ -340,6 +341,13 @@ messageRoutes.post('/', zValidator('json', sendSchema), async (c) => {
   // must resolve against state rather than deep history.
   const pendingPreview = findPendingPreview(history);
   const pendingPreviewText = renderPendingPreview(pendingPreview);
+  // A pending TASK preview carries no extra context text of its own (its
+  // contents already reached the model via create_task's tool result, and
+  // the task list only ever reflects real, saved rows) — but the claim-check
+  // guard still needs to know ONE EXISTS, or it force-corrects an honest
+  // mention of a still-pending task card as a false claim (see
+  // hasPendingTaskPreview's comment in pending-preview.ts).
+  const hasPendingTask = hasPendingTaskPreview(history);
 
   // "undo that" must work even when the thing to undo happened in the app,
   // not in chat — state it as a fact rather than leaving the model to infer
@@ -418,18 +426,21 @@ messageRoutes.post('/', zValidator('json', sendSchema), async (c) => {
         sourceMessageId: userMessage.id,
         refs: taskContext.refs,
         pendingConfirmCard,
-        hasPendingPreview: !!pendingPreview,
+        hasPendingPreview: !!pendingPreview || hasPendingTask,
         userMessageText: userMessage.content,
       })) {
         if (event.type === 'delta') {
-          await stream.writeSSE({ event: 'delta', data: JSON.stringify({ text: event.text }) });
+          await stream.writeSSE({
+            event: 'delta',
+            data: JSON.stringify({ text: applyStyleCasing(event.text, userContext.style) }),
+          });
         } else if (event.type === 'segment_end') {
           const [assistantMessage] = await db
             .insert(messages)
             .values({
               conversationId: conversation.id,
               role: 'assistant',
-              content: event.text,
+              content: applyStyleCasing(event.text, userContext.style),
               ...(turnHadAction ? { meta: { actionAck: true } } : {}),
             })
             .returning();

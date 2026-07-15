@@ -269,7 +269,7 @@ export async function* streamChatReplyActNarrate(
             stream: true,
             ...maxTokens(NARRATE_MAX_OUTPUT_TOKENS),
             messages: [
-              ...buildTailedMessages(buildSystemPrompt(user) + buildStyleBlock(user) + buildMemoryBlock(user.memories ?? []), conversationTailText, conversationHistory),
+              ...buildTailedMessages(buildSystemPrompt(user) + buildMemoryBlock(user.memories ?? []), conversationTailText + buildStyleBlock(user), conversationHistory),
               { role: 'system', content: noActionResultsBlock('') },
             ],
             ...narrateConversationExtra,
@@ -519,7 +519,7 @@ export async function* streamChatReplyActNarrate(
     // what it needs about a pending card from a server fact instead
     // (actionCtx.pendingConfirmCard).
     const narrateHistory = windowed.filter((m) => !m.isPendingCard && !m.isActionAck);
-    const narrateMessages = buildTailedMessages(buildSystemPrompt(user) + buildStyleBlock(user) + buildMemoryBlock(user.memories ?? []), narrateTailText, narrateHistory);
+    const narrateMessages = buildTailedMessages(buildSystemPrompt(user) + buildMemoryBlock(user.memories ?? []), narrateTailText + buildStyleBlock(user), narrateHistory);
     // Action/failure priority is unchanged from before styleFacts existed
     // (see actionResultsBlock/failureResultsBlock) — style is composed
     // ALONGSIDE that choice, never in place of it, so a style change stated
@@ -608,7 +608,7 @@ export async function* streamChatReplyActNarrate(
         // conversational context, not the state-laden one.
         messages: fastPath
           ? [
-              ...buildTailedMessages(buildSystemPrompt(user) + buildStyleBlock(user) + buildMemoryBlock(user.memories ?? []), conversationTailText, conversationHistory),
+              ...buildTailedMessages(buildSystemPrompt(user) + buildMemoryBlock(user.memories ?? []), conversationTailText + buildStyleBlock(user), conversationHistory),
               { role: 'system', content: noActionResultsBlock(noActionReason, actionCtx.pendingConfirmCard) },
             ]
           : narrateMessages,

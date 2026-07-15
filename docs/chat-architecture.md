@@ -505,3 +505,60 @@ See `docs/phase-5-completion-plan.md` and Phase 7.
 8. **Every change goes through the battery** (`docs/phase-5-completion-plan.md` §3)
    *and* an as-a-user pass. `tsc` and unit tests have never once caught one of these
    bugs.
+9. **A guard's "is this legitimately pending" exemption is only as wide as what it
+   checks for.** §12 below — `hasPendingPreview` was named generically but only ever
+   checked for a pending *goal* preview, so an honest reference to a pending *task*
+   preview had no exemption and got force-corrected as a false claim. If a flag's
+   name is broader than its implementation, assume it will eventually be asked the
+   broader question.
+
+---
+
+## 12. Addendum — 2026-07-15: tone tuning and a task-preview guard gap
+
+A pass to make Meroa a little more "hardass" about follow-through and to encourage
+turning real intentions into tracked structure surfaced two real issues, both fixed:
+
+**A pre-existing guard gap, exposed by the new behavior.** `hasPendingPreview`
+(`pending-preview.ts`'s `findPendingPreview`, fed into `ChatActionContext` in
+`routes/messages.ts`) only ever recognized a pending **goal** preview
+(`meta.kind === 'goal_preview'`) — never a pending **task** preview
+(`task_creation_pending`). The claim-check guard's exemption for "describing a card
+that's legitimately still pending" (`shared.ts`'s `matchedPreviewClaim`) relies on
+that flag, so an honest reply referencing a genuinely-pending task card ("could you
+tap Create on that card") had no way to be recognized as honest and got force-
+corrected: *"Hm, that preview didn't actually go through"* — which was itself false.
+Fixed by adding `hasPendingTaskPreview()` (same newest-wins scan, checking
+`task_creation_pending` / `createdTaskId` instead of `goal_preview` /
+`createdGoalId`) and OR-ing it into the same flag. This is a straight case of §0: the
+fix is structural (the guard now has the fact it needs), not a prompt tweak.
+
+**Encouragement language colliding with the no-false-claims rule.** Separately, a
+turn where `create_goal` failed (malformed tool-call JSON — a known model-reliability
+flake, not something new) was followed by the reply claiming *"you want the gym one
+as a daily task — putting it up now"* — a flat claim of action against a call that
+had just failed, directly contradicting `failureResultsBlock`'s explicit instruction.
+The claim-check guard caught it correctly, but pushing the model toward more
+confident, decisive language (in service of a "hardass"/accountability tone) made it
+measurably more likely to reach for "doing it now" phrasing exactly where a failed
+call needed the opposite: an honest "that didn't go through." Fixed with an explicit
+tie-in in the system prompt: being firm/direct is never a license to describe a task
+or goal as created/started before a real tool result confirms it, and any
+encouragement toward tracking must be phrased as a question or offer, never as
+something already in progress.
+
+**Also landed this session, not guard-related:** a deterministic lowercase transform
+for the `chill` vibe preset (applied at the output boundary in `routes/messages.ts`,
+covering both the SSE stream and the persisted DB row — a guarantee instead of a
+prompt suggestion, per §0), and moving `buildStyleBlock` from the front system
+prompt into the tail block (adjacent to the newest message) so a vibe instruction
+gets the same "recency wins over instruction priority" treatment already given to
+the volatile task/goal state.
+
+**A pattern worth naming:** an early attempt to widen `create_task`'s auto-trigger
+threshold *and* have the reply pass proactively reference existing state for
+encouragement was rolled back after live testing showed it referencing a
+still-*pending* preview in a suggestion-shaped way that tripped the claim-check
+guard. The version that shipped instead scopes proactive state-citing to **real,
+confirmed** records only — never a pending preview — which is the same "quote only
+what's real" rule every other number and fact in this app already follows.
