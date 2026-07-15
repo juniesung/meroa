@@ -246,11 +246,20 @@ export async function buildTaskContext(userId: string, timezone: string | null):
         const nextYmd = nextOccurrenceYmd(recurrence, t, todayYmd, tz);
         offDayDue = `repeats: ${recurrenceDesc} · next: ${formatYmdShort(nextYmd)}`;
       }
-    } else if (t.templateId) {
+    } else if (t.templateId && liveTemplateIds.has(t.templateId)) {
       isRecurringSeries = true;
       templateId = t.templateId;
       instanceId = t.id;
     }
+    // else: an orphan — its template is already gone (deleted while this
+    // done instance survived). isRecurringSeries stays false, so
+    // removeTarget/editTarget/occurrenceTarget (lib/ai/actions.ts) all fall
+    // through to their `!isRecurringSeries` branch and act on this row's own
+    // id — not the dead template's. Series routing here used to key on
+    // `t.templateId` alone, so removeTarget kept redirecting scope:'series'
+    // removals to a template row `getTask` could never find (isNull(deletedAt)
+    // excludes it), and the whole action failed with "no removal happened"
+    // every time. An orphan represents itself now, all the way through.
 
     totalLogical += 1;
     if (displayRow.status === 'open') openCount += 1;
