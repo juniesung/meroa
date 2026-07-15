@@ -32,7 +32,7 @@ async function main() {
       phoneE164: DEMO_PHONE,
       displayName: 'Alex',
       timezone: 'America/Chicago',
-      prefs: { communicationStyle: 'casual' },
+      prefs: { communicationStyle: 'balanced' },
     })
     .returning();
   if (!user) throw new Error('seed_user_insert_failed');
@@ -83,16 +83,19 @@ async function main() {
       userId: user.id,
       kind: 'preference',
       content: 'Prefers casual, low-key check-ins over formal reminders.',
+      source: 'manual',
     },
     {
       userId: user.id,
-      kind: 'goal',
+      kind: 'situation',
       content: 'Trying to work out consistently — chest day is a recurring focus.',
+      source: 'manual',
     },
     {
       userId: user.id,
-      kind: 'pattern',
+      kind: 'trait',
       content: 'Tends to be most responsive to check-ins in the evening.',
+      source: 'manual',
     },
   ]);
 

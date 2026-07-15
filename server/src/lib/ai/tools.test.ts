@@ -75,6 +75,64 @@ describe('AI_TOOL_SCHEMAS — every tool has a working schema', () => {
   });
 });
 
+// adjust_style: every field is a closed enum — no model-authored string may
+// ever cross into a future prompt (docs/chat-architecture.md §9).
+describe('AI_TOOL_SCHEMAS.adjust_style', () => {
+  it('accepts a single-field patch', () => {
+    expect(validateToolInput('adjust_style', { length: 'shorter' }).ok).toBe(true);
+  });
+
+  it('accepts multiple fields at once', () => {
+    const result = validateToolInput('adjust_style', { length: 'shorter', questions: 'fewer', emoji: 'none' });
+    expect(result.ok).toBe(true);
+  });
+
+  it('accepts an empty patch (no-op) and reset alone', () => {
+    expect(validateToolInput('adjust_style', {}).ok).toBe(true);
+    expect(validateToolInput('adjust_style', { reset: true }).ok).toBe(true);
+  });
+
+  it('rejects a value outside the closed enum', () => {
+    expect(validateToolInput('adjust_style', { length: 'medium' }).ok).toBe(false);
+  });
+
+  it('rejects free text on any field — strict schema, no passthrough', () => {
+    expect(validateToolInput('adjust_style', { length: 'shorter', note: 'be nicer about it' }).ok).toBe(false);
+  });
+});
+
+describe('AI_TOOL_SCHEMAS.remember', () => {
+  it('accepts a well-formed memory', () => {
+    const result = validateToolInput('remember', { content: 'Prefers texts over calls', kind: 'preference' });
+    expect(result.ok).toBe(true);
+  });
+
+  it('accepts an explicit sensitive flag', () => {
+    expect(
+      validateToolInput('remember', { content: 'Managing anxiety', kind: 'situation', sensitive: true }).ok,
+    ).toBe(true);
+  });
+
+  it('rejects a kind outside the closed enum', () => {
+    expect(validateToolInput('remember', { content: 'x', kind: 'fact' }).ok).toBe(false);
+  });
+
+  it('rejects missing content or kind', () => {
+    expect(validateToolInput('remember', { kind: 'preference' }).ok).toBe(false);
+    expect(validateToolInput('remember', { content: 'x' }).ok).toBe(false);
+  });
+
+  it('rejects content over 200 characters', () => {
+    expect(validateToolInput('remember', { content: 'x'.repeat(201), kind: 'trait' }).ok).toBe(false);
+  });
+
+  it('rejects free text fields beyond the schema — strict, no passthrough', () => {
+    expect(
+      validateToolInput('remember', { content: 'x', kind: 'trait', note: 'extra' }).ok,
+    ).toBe(false);
+  });
+});
+
 // The .strict()-intersection regression class applies to any tool whose
 // schema is built by extending/merging — new cases added up front per the
 // milestone plan's lesson, not discovered live after a launch.

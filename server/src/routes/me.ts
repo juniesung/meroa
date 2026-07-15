@@ -38,7 +38,18 @@ meRoutes.get('/', async (c) => {
 
 // Merge-only patch — never replaces the whole prefs blob, so unrelated keys
 // (e.g. communicationStyle) survive a reminders-toggle update untouched.
-const prefsPatchSchema = z.object({ proactiveCheckins: z.boolean().optional() });
+const prefsPatchSchema = z.object({
+  proactiveCheckins: z.boolean().optional(),
+  communicationStyle: z.enum(['chill', 'supportive', 'direct', 'playful', 'balanced']).optional(),
+  styleAdjustments: z
+    .object({
+      length: z.enum(['shorter', 'longer']).optional(),
+      questions: z.literal('fewer').optional(),
+      directness: z.enum(['more', 'softer']).optional(),
+      emoji: z.enum(['none', 'ok']).optional(),
+    })
+    .optional(),
+});
 
 // Captured once at OTP verify, but a device's timezone can drift from that
 // (travel, or the OS auto-switching it) with nothing to ever refresh it —

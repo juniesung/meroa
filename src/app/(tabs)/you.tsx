@@ -1,3 +1,5 @@
+import { router } from 'expo-router';
+import { useState } from 'react';
 import { ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -5,24 +7,20 @@ import { MeroaMark } from '@/components/MeroaMark';
 import { Row } from '@/components/Row';
 import { theme } from '@/constants/theme';
 import { useMe, useUpdatePrefs } from '@/features/profile/queries';
+import { VibePickerSheet } from '@/features/profile/VibePickerSheet';
+import { vibeLabel } from '@/features/profile/vibes';
 import { useTabBarHeight } from '@/hooks/use-tab-bar-inset';
 import { useAuth } from '@/lib/auth/AuthProvider';
 import { requestNotificationPermission } from '@/lib/notifications';
-
-function capitalize(value: string): string {
-  return value.length ? value[0]!.toUpperCase() + value.slice(1) : value;
-}
 
 export default function YouScreen() {
   const tabBarHeight = useTabBarHeight();
   const { data } = useMe();
   const { signOut } = useAuth();
   const updatePrefs = useUpdatePrefs();
+  const [vibeSheetOpen, setVibeSheetOpen] = useState(false);
 
-  const communicationStyle =
-    typeof data?.user.prefs.communicationStyle === 'string'
-      ? capitalize(data.user.prefs.communicationStyle)
-      : 'Casual';
+  const communicationStyle = vibeLabel(data?.user.prefs.communicationStyle);
   const proactiveCheckins = data?.user.prefs.proactiveCheckins === true;
 
   const handleToggleCheckins = async (next: boolean) => {
@@ -55,8 +53,9 @@ export default function YouScreen() {
             icon="sparkle"
             label="Communication style"
             right={<Text style={styles.hint}>{communicationStyle}</Text>}
+            onPress={() => setVibeSheetOpen(true)}
           />
-          <Row icon="book" label="Memory" />
+          <Row icon="book" label="Memory" onPress={() => router.push('/memories')} />
         </Section>
 
         <Section title="PREFERENCES">
@@ -87,6 +86,7 @@ export default function YouScreen() {
 
         <Text style={styles.footer}>Meroa · v1.0.0</Text>
       </ScrollView>
+      <VibePickerSheet visible={vibeSheetOpen} onClose={() => setVibeSheetOpen(false)} />
     </SafeAreaView>
   );
 }

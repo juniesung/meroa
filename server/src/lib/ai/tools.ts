@@ -78,7 +78,7 @@ export const AI_TOOLS: Anthropic.Tool[] = [
   {
     name: 'create_task',
     description:
-      'Create a new task for the user to track or do. Only call this when the user clearly asked to track, do, or remember something concrete. If the title, type, or a type-specific value (target count, target amount, target minutes) is vague or unstated, do NOT call this — ask a short clarifying question in your reply instead. Never invent a number the user did not give you, and never invent a specific clock time — if they didn\'t mention one, leave dueAt (and recurrence.time) unset entirely; the app treats it as due sometime that day without a fixed deadline.',
+      'Show the user a preview of a new task before saving it — this does NOT save anything by itself, the same as create_goal. Only call this when the user clearly asked to track, do, or remember something concrete. If the title, type, or a type-specific value (target count, target amount, target minutes) is vague or unstated, do NOT call this — ask a short clarifying question in your reply instead. Never invent a number the user did not give you, and never invent a specific clock time — if they didn\'t mention one, leave dueAt (and recurrence.time) unset entirely; the app treats it as due sometime that day without a fixed deadline. Because nothing is saved yet, there is no real ref for it this turn — never try to complete, edit, or link a task you just previewed in this same turn; that only works once the user taps Create and a later turn sees it in the task list.',
     input_schema: {
       type: 'object',
       properties: {
@@ -474,6 +474,65 @@ export const AI_TOOLS: Anthropic.Tool[] = [
       'Reverse the most recent action (a task create/complete/edit/postpone/remove, or a goal create/edit/entry/remove) across chat, the Tasks tab, and the Goals tab. Call this when the user says something like "undo that" or "undo the last thing".',
     input_schema: { type: 'object', properties: {} },
   },
+  {
+    name: 'remember',
+    description:
+      'Save something worth remembering about the user long-term, for a LATER conversation — call this ONLY when they explicitly ask you to remember something ("remember that...", "don\'t forget...", "keep in mind that..."). Never for a passing disclosure they didn\'t ask you to keep — that is handled automatically in the background, not by this tool. Never call this for something that belongs in a task or goal instead (a concrete to-do or a trackable number) — this is for a fact, preference, or context about THEM, not an action item.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        content: {
+          type: 'string',
+          description: 'The fact itself, short and in your own words (under 200 characters) — not a quote of their exact sentence.',
+        },
+        kind: {
+          type: 'string',
+          enum: ['preference', 'trait', 'relationship', 'situation'],
+          description:
+            'preference: how they like things done ("prefers texts over calls"). trait: a durable fact about who they are ("night owl", "runs marathons"). relationship: a person in their life ("sister Maya, close with her"). situation: something ongoing right now ("job hunting", "recovering from a knee injury").',
+        },
+        sensitive: {
+          type: 'boolean',
+          description: 'True if this touches health, money, or emotional wellbeing — when unsure, set true.',
+        },
+      },
+      required: ['content', 'kind'],
+    },
+  },
+  {
+    name: 'adjust_style',
+    description:
+      'Permanently adjust how you talk to this user going forward — call this ONLY on a direct, explicit request to change your communication style ("be shorter with me", "stop asking so many questions", "can you be more blunt", "less emoji please"). A mood or a one-off comment about THIS conversation ("that was a lot today", "ok I\'m good for now") is NOT a style request — that\'s ordinary conversation, call no_action instead, never this. Every field is optional — set only what they actually asked to change, never more. Pass reset: true only if they explicitly want a previous adjustment undone or to "go back to normal" (this never touches their communication-style preset, only these one-off adjustments on top of it).',
+    input_schema: {
+      type: 'object',
+      properties: {
+        length: {
+          type: 'string',
+          enum: ['shorter', 'longer'],
+          description: 'Only if they specifically asked for shorter or longer replies.',
+        },
+        questions: {
+          type: 'string',
+          enum: ['fewer'],
+          description: 'Only if they asked you to ask fewer questions.',
+        },
+        directness: {
+          type: 'string',
+          enum: ['more', 'softer'],
+          description: 'Only if they asked for more bluntness or a gentler touch.',
+        },
+        emoji: {
+          type: 'string',
+          enum: ['none', 'ok'],
+          description: 'Only if they said something about emoji use.',
+        },
+        reset: {
+          type: 'boolean',
+          description: 'True ONLY if they explicitly want previous style adjustments undone.',
+        },
+      },
+    },
+  },
 ];
 
 // Same tools, wrapped in the shape OpenAI's Chat Completions API wants — the
@@ -602,6 +661,27 @@ const advanceGoalStageToolSchema = goalRefSchema.extend({
   nextStageTasks: z.array(advanceStageTaskSchema).max(5).optional(),
 });
 
+const rememberToolSchema = z
+  .object({
+    content: z.string().trim().min(1).max(200),
+    kind: z.enum(['preference', 'trait', 'relationship', 'situation']),
+    sensitive: z.boolean().optional(),
+  })
+  .strict();
+
+// No free text anywhere — a model-authored string never crosses into a
+// future prompt (docs/chat-architecture.md §9's one rule). Every field is a
+// closed enum; the executor renders the server-authored acknowledgment.
+const adjustStyleToolSchema = z
+  .object({
+    length: z.enum(['shorter', 'longer']).optional(),
+    questions: z.literal('fewer').optional(),
+    directness: z.enum(['more', 'softer']).optional(),
+    emoji: z.enum(['none', 'ok']).optional(),
+    reset: z.boolean().optional(),
+  })
+  .strict();
+
 export const AI_TOOL_SCHEMAS = {
   // NOT .strict() on the intersected object — z.intersection validates the
   // raw input against both operands independently, so a strict() second
@@ -628,6 +708,8 @@ export const AI_TOOL_SCHEMAS = {
   remove_goal: goalRefSchema,
   advance_goal_stage: advanceGoalStageToolSchema,
   undo_last_action: z.object({}),
+  adjust_style: adjustStyleToolSchema,
+  remember: rememberToolSchema,
 } as const;
 
 export type AiToolName = keyof typeof AI_TOOL_SCHEMAS;

@@ -7,6 +7,7 @@ import { logger } from './logger.ts';
 import { authRoutes } from './routes/auth.ts';
 import { bootstrapRoutes } from './routes/bootstrap.ts';
 import { meRoutes } from './routes/me.ts';
+import { memoryRoutes } from './routes/memories.ts';
 import { messageRoutes } from './routes/messages.ts';
 import { taskRoutes } from './routes/tasks.ts';
 import { goalRoutes } from './routes/goals.ts';
@@ -25,6 +26,7 @@ app.route('/bootstrap', bootstrapRoutes);
 app.route('/conversations/current/messages', messageRoutes);
 app.route('/tasks', taskRoutes);
 app.route('/goals', goalRoutes);
+app.route('/memories', memoryRoutes);
 
 serve({ fetch: app.fetch, port: env.PORT }, (info) => {
   logger.info(`meroa-server listening on http://localhost:${info.port}`);

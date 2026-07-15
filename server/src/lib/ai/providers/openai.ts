@@ -218,7 +218,17 @@ export async function* streamChatReplyOpenai(
             actionCtx.userMessageText,
           );
 
-          if (result.ok && 'tasks' in result) {
+          if (result.ok && 'taskPreview' in result) {
+            toolCallLog.push({ name: call.name, ok: true, pending: true });
+            yield {
+              type: 'action_task_preview',
+              toolName: result.toolName,
+              preview: result.taskPreview,
+              summary: result.summary,
+              recordKind: result.recordKind,
+            };
+            toolResultMessages.push({ role: 'tool', tool_call_id: call.id, content: result.summary });
+          } else if (result.ok && 'tasks' in result) {
             toolCallLog.push({
               name: call.name,
               ok: true,
@@ -262,6 +272,14 @@ export async function* streamChatReplyOpenai(
               proposal: result.proposal,
             };
             toolResultMessages.push({ role: 'tool', tool_call_id: call.id, content: result.summary });
+          } else if (result.ok && 'memory' in result) {
+            toolCallLog.push({ name: call.name, ok: true, pending: false });
+            yield { type: 'action_memory', toolName: result.toolName, memory: result.memory, summary: result.summary, recordKind: result.recordKind };
+            toolResultMessages.push({ role: 'tool', tool_call_id: call.id, content: result.summary });
+          } else if (result.ok && 'styleSummary' in result) {
+            // No card — a prefs write, not a task/goal record.
+            toolCallLog.push({ name: call.name, ok: true, pending: false });
+            toolResultMessages.push({ role: 'tool', tool_call_id: call.id, content: result.styleSummary });
           } else if (result.ok) {
             toolCallLog.push({
               name: call.name,

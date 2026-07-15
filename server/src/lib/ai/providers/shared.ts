@@ -2,8 +2,10 @@ import type OpenAI from 'openai';
 
 import { logger } from '../../../logger.ts';
 import type { TaskRow } from '../../tasks/executor.ts';
+import type { CreateTaskInput } from '../../tasks/schema.ts';
 import type { GoalRow } from '../../goals/executor.ts';
 import type { AdvanceStageProposal, GoalPreview } from '../../goals/schema.ts';
+import type { MemoryRow } from '../../memories/executor.ts';
 import { didClaimAction, didConcealAction, didMisstateFigure } from '../claim-check.ts';
 import type { TurnRefs } from '../task-context.ts';
 
@@ -47,6 +49,12 @@ export type ChatHistoryMessage = {
   // absence tore a hole in the record and it stopped acting); the REPLY pass must
   // not have them (their text reads as an open request it owes a follow-up on).
   isPendingCard?: boolean;
+  // A plain acknowledgment bubble persisted alongside a real card on a "mixed
+  // success + failure" turn — see routes/messages.ts's isActionAckMessage.
+  // Informationally empty (the card already shows everything), and read back
+  // by an ungrounded later turn it can bait a fabricated completion claim.
+  // Stripped from EVERY reply pass's history, unlike isCard/isPendingCard.
+  isActionAck?: boolean;
 };
 
 export type ChatStreamEvent =
@@ -73,6 +81,12 @@ export type ChatStreamEvent =
   // is the server-computed handoff caption (docs/goal-manual-editing-
   // plan.md §3.4).
   | { type: 'action_preview'; toolName: string; preview: GoalPreview; detail?: string; summary: string; recordKind: string }
+  // create_task via chat — always a preview, never an immediate save, same
+  // shape as action_preview for a task instead of a goal. See lib/ai/actions.ts.
+  | { type: 'action_task_preview'; toolName: string; preview: CreateTaskInput; summary: string; recordKind: string }
+  // remember — a real write with a real card (routes/messages.ts persists
+  // it as a memory_action message), unlike adjust_style which has none.
+  | { type: 'action_memory'; toolName: string; memory: MemoryRow; summary: string; recordKind: string }
   | { type: 'stream_end' }
   | { type: 'error'; retryable: boolean; message: string };
 
@@ -139,6 +153,57 @@ export function windowHistory(history: ChatHistoryMessage[]): ChatHistoryMessage
     if (totalChars > MAX_HISTORY_CHARS) break;
   }
   return recent.slice(startIndex);
+}
+
+/**
+ * The fast path's own conversationHistory needs to drop cards (§4 — it
+ * can't narrate a task it can't see) without leaving a HOLE behind. Simply
+ * filtering out the response left the REQUEST orphaned — two or three user
+ * messages in a row with no visible assistant turn between them — and the
+ * model read that shape as "unanswered" and fabricated a catch-up reply to
+ * fill it. Observed live: "walk the dog" and "water plants" both handled
+ * (real cards, correctly hidden) — then a bare "Thanks" got back "walk the
+ * dog and water plants, got it — want a time for either?", inventing a
+ * question about two things that were already done. The next turn's honest
+ * "cool, they're in" then read as a false claim and got corrected.
+ *
+ * The fix is symmetric: when a response gets dropped because it's a card or
+ * an ack, its REQUEST is dropped too — not replaced with a placeholder
+ * (never a fixed string in history, docs/chat-architecture.md §5 — the
+ * model copies those), just removed, the same as the response. A request-
+ * and-response pair either both survive or both vanish; nothing is ever
+ * left half-answered. The newest message is never dropped this way (there
+ * is no response to it yet to judge).
+ */
+export function buildConversationHistory(windowed: ChatHistoryMessage[]): ChatHistoryMessage[] {
+  const result: ChatHistoryMessage[] = [];
+  let i = 0;
+  while (i < windowed.length) {
+    const m = windowed[i]!;
+    if (m.role !== 'user') {
+      // A leading assistant run with no captured request in this window
+      // (a boundary artifact, not a real orphan) — just drop cards/acks.
+      if (!(m.isCard || m.isActionAck)) result.push(m);
+      i++;
+      continue;
+    }
+    let j = i + 1;
+    const responses: ChatHistoryMessage[] = [];
+    while (j < windowed.length && windowed[j]!.role === 'assistant') {
+      responses.push(windowed[j]!);
+      j++;
+    }
+    const keptResponses = responses.filter((r) => !(r.isCard || r.isActionAck));
+    // Every response to this request got filtered out — keeping the
+    // request alone is exactly the orphan shape that gets fabricated over.
+    // A request with NO responses yet (the newest message) isn't this case
+    // — responses.length > 0 guards it.
+    if (!(keptResponses.length === 0 && responses.length > 0)) {
+      result.push(m, ...keptResponses);
+    }
+    i = j;
+  }
+  return result;
 }
 
 export function sleep(ms: number) {

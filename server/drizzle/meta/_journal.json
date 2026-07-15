@@ -36,6 +36,13 @@
       "when": 1783832322771,
       "tag": "0004_needy_daimon_hellstrom",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1784061179853,
+      "tag": "0005_curly_jean_grey",
+      "breakpoints": true
     }
   ]
 }

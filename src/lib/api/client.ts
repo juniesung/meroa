@@ -16,6 +16,7 @@ import type {
   ApiGoalDetail,
   ApiGoalEntry,
   ApiUser,
+  ApiMemory,
   AuthTokens,
   BootstrapResponse,
   ApiMessage,
@@ -206,6 +207,13 @@ export const api = {
   createTask: (input: CreateTaskInput) =>
     request<{ task: ApiTask }>('/tasks', { method: 'POST', body: JSON.stringify(input) }),
 
+  // Confirm-tap for a chat create_task preview card (prefs.confirmBeforeCreate)
+  // — create_task itself never writes a row in that mode; this is the actual
+  // create, using the exact input the card showed. Same POST /tasks endpoint,
+  // server branches on the body shape (routes/tasks.ts).
+  createTaskFromPreview: (previewMessageId: string) =>
+    request<{ task: ApiTask }>('/tasks', { method: 'POST', body: JSON.stringify({ previewMessageId }) }),
+
   editTask: (id: string, patch: EditTaskPatch) =>
     request<{ task: ApiTask }>(`/tasks/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
 
@@ -288,4 +296,17 @@ export const api = {
     }),
 
   archiveGoal: (id: string) => request<{ goal: ApiGoal }>(`/goals/${id}`, { method: 'DELETE' }),
+
+  // includeSuppressed is always on server-side for this route — the memory-
+  // controls screen has to be able to find and un-suppress a row that chat
+  // itself never sees (server/src/routes/memories.ts).
+  listMemories: () => request<{ memories: ApiMemory[] }>('/memories'),
+
+  createMemory: (input: { content: string; kind: string; sensitive?: boolean }) =>
+    request<{ memory: ApiMemory }>('/memories', { method: 'POST', body: JSON.stringify(input) }),
+
+  updateMemory: (id: string, patch: { content?: string; sensitive?: boolean; suppressed?: boolean }) =>
+    request<{ memory: ApiMemory }>(`/memories/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+
+  deleteMemory: (id: string) => request<{ ok: true }>(`/memories/${id}`, { method: 'DELETE' }),
 };

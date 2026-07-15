@@ -2,9 +2,16 @@ import type OpenAI from 'openai';
 
 import { logger } from '../../../logger.ts';
 import { executeAiToolCall } from '../actions.ts';
-import { ACTION_SYSTEM_PROMPT, buildSystemPrompt, type ChatUserContext } from '../system-prompt.ts';
+import {
+  ACTION_SYSTEM_PROMPT,
+  buildMemoryBlock,
+  buildStyleBlock,
+  buildSystemPrompt,
+  type ChatUserContext,
+} from '../system-prompt.ts';
 import { NO_ACTION_TOOL_NAME, OPENAI_ACTION_PASS_TOOLS } from '../tools.ts';
 import {
+  buildConversationHistory,
   buildTailedMessages,
   createTurnState,
   isToolCallMarkupLeak,
@@ -77,6 +84,18 @@ function failureResultsBlock(failures: string[]): string {
 ${failures.map((f) => `- ${f}`).join('\n')}
 
 The user's tasks and goals are EXACTLY as they were before they spoke. Nothing was created, completed, logged, removed, undone or previewed. Tell them plainly what could not be done and why, in one short sentence, and ask for whatever would let them proceed. Never describe any part of it as done.`;
+}
+
+// adjust_style has no card, so unlike every other successful action this
+// one genuinely needs a spoken acknowledgment — see the silence-skip carve-
+// out above. Composed alongside actionResultsBlock/failureResultsBlock/
+// noActionResultsBlock rather than replacing them, so a style change stated
+// in the same turn as a real action or a question still gets folded in.
+function styleResultsBlock(styleFacts: string[]): string {
+  return `# Your own settings changed this turn (by you, just now)
+${styleFacts.map((f) => `- ${f}`).join('\n')}
+
+This is real and it applies starting with THIS reply. Acknowledge it briefly and casually — one short line is enough. If nothing else happened this turn, that line is your whole reply: say it and stop, don't pad it out. If something else also belongs in this reply, fold the acknowledgment in naturally rather than tacking it on.`;
 }
 
 // `reason` is empty for the speculative call — the action pass hasn't spoken
@@ -182,6 +201,13 @@ export async function* streamChatReplyActNarrate(
     const actionFacts: string[] = [];
     // Kept apart from actionFacts on purpose — see failureResultsBlock.
     const failureFacts: string[] = [];
+    // adjust_style successes — kept apart from actionFacts on purpose too:
+    // a style change is real (it belongs in the results block), but a turn
+    // whose ONLY effect was adjusting style must NOT go silent under the
+    // "cards speak for themselves" rule below — there is no card, so silence
+    // would be the one case that really did say nothing back. See the
+    // silence-skip condition and styleResultsBlock.
+    const styleFacts: string[] = [];
     // Why the action pass declined, in its own words — the ONLY channel
     // between the two passes on a no-action turn. Without it the reply pass
     // knows only "nothing happened" and not *why*, so it can't ask the
@@ -235,7 +261,7 @@ export async function* streamChatReplyActNarrate(
     // A pass cannot announce what it cannot see. That is a guarantee; "please
     // don't mention their tasks" would only have been a request — and this
     // session's whole lesson is that the difference matters.
-    const conversationHistory = windowed.filter((m) => !m.isCard);
+    const conversationHistory = buildConversationHistory(windowed);
     const speculation = mayBeConversational
       ? client.chat.completions
           .create({
@@ -243,7 +269,7 @@ export async function* streamChatReplyActNarrate(
             stream: true,
             ...maxTokens(NARRATE_MAX_OUTPUT_TOKENS),
             messages: [
-              ...buildTailedMessages(buildSystemPrompt(user), conversationTailText, conversationHistory),
+              ...buildTailedMessages(buildSystemPrompt(user) + buildStyleBlock(user) + buildMemoryBlock(user.memories ?? []), conversationTailText, conversationHistory),
               { role: 'system', content: noActionResultsBlock('') },
             ],
             ...narrateConversationExtra,
@@ -370,7 +396,14 @@ export async function* streamChatReplyActNarrate(
           actionCtx.userMessageText,
         );
 
-        if (result.ok && 'tasks' in result) {
+        if (result.ok && 'taskPreview' in result) {
+          // Always task_creation_pending — create_task never saves by
+          // itself when this preference is on, only the confirm tap does.
+          toolCallLog.push({ name: call.function.name, ok: true, pending: true });
+          yield { type: 'action_task_preview', toolName: result.toolName, preview: result.taskPreview, summary: result.summary, recordKind: result.recordKind };
+          actionFacts.push(result.summary);
+          toolResultMessages.push({ role: 'tool', tool_call_id: call.id, content: result.summary });
+        } else if (result.ok && 'tasks' in result) {
           // Always task_bulk_removal_pending — remove_tasks never mutates
           // by itself, only its own confirm card does.
           toolCallLog.push({ name: call.function.name, ok: true, taskId: result.tasks.map((t) => t.id).join(','), pending: true });
@@ -388,6 +421,20 @@ export async function* streamChatReplyActNarrate(
           yield { type: 'action_goal', toolName: result.toolName, goal: result.goal, summary: result.summary, recordKind: result.recordKind, proposal: result.proposal };
           actionFacts.push(result.summary);
           toolResultMessages.push({ role: 'tool', tool_call_id: call.id, content: result.summary });
+        } else if (result.ok && 'memory' in result) {
+          // A real card, like any other action — participates in the
+          // ordinary §3 silence rule (actionFacts, not styleFacts).
+          toolCallLog.push({ name: call.function.name, ok: true, pending: false });
+          yield { type: 'action_memory', toolName: result.toolName, memory: result.memory, summary: result.summary, recordKind: result.recordKind };
+          actionFacts.push(result.summary);
+          toolResultMessages.push({ role: 'tool', tool_call_id: call.id, content: result.summary });
+        } else if (result.ok && 'styleSummary' in result) {
+          // No card — a prefs write, not a task/goal record — so no `yield`
+          // here. Goes to styleFacts, not actionFacts, precisely so the
+          // silence-skip check below still runs the narrate pass.
+          toolCallLog.push({ name: call.function.name, ok: true, pending: false });
+          styleFacts.push(result.styleSummary);
+          toolResultMessages.push({ role: 'tool', tool_call_id: call.id, content: result.styleSummary });
         } else if (result.ok) {
           toolCallLog.push({ name: call.function.name, ok: true, taskId: result.task.id, pending: result.recordKind === 'task_removal_pending' });
           yield { type: 'action', toolName: result.toolName, task: result.task, summary: result.summary, detail: result.detail, recordKind: result.recordKind };
@@ -442,7 +489,10 @@ export async function* streamChatReplyActNarrate(
      *  - ordinary conversation.
      */
     const anyFailed = failureFacts.length > 0;
-    if (actionFacts.length > 0 && !anyFailed) {
+    // A style adjustment is real, but has no card — "the card is the
+    // confirmation" doesn't hold for it, so it must never fall through this
+    // silence rule on its own. styleFacts.length === 0 is the whole carve-out.
+    if (actionFacts.length > 0 && !anyFailed && styleFacts.length === 0) {
       if (speculation) {
         const settled = await speculation;
         if (settled.ok) {
@@ -468,16 +518,26 @@ export async function* streamChatReplyActNarrate(
     // assistant turn it reads as an open request still owed a follow-up. It learns
     // what it needs about a pending card from a server fact instead
     // (actionCtx.pendingConfirmCard).
-    const narrateHistory = windowed.filter((m) => !m.isPendingCard);
-    const narrateMessages = buildTailedMessages(buildSystemPrompt(user), narrateTailText, narrateHistory);
+    const narrateHistory = windowed.filter((m) => !m.isPendingCard && !m.isActionAck);
+    const narrateMessages = buildTailedMessages(buildSystemPrompt(user) + buildStyleBlock(user) + buildMemoryBlock(user.memories ?? []), narrateTailText, narrateHistory);
+    // Action/failure priority is unchanged from before styleFacts existed
+    // (see actionResultsBlock/failureResultsBlock) — style is composed
+    // ALONGSIDE that choice, never in place of it, so a style change stated
+    // in the same turn as a real action or a failure still surfaces.
+    const baseResultsBlock =
+      actionFacts.length > 0
+        ? actionResultsBlock(actionFacts)
+        : failureFacts.length > 0
+          ? failureResultsBlock(failureFacts)
+          : styleFacts.length > 0
+            ? '' // nothing else happened — the style block below is the whole story
+            : noActionResultsBlock(noActionReason, actionCtx.pendingConfirmCard);
     narrateMessages.push({
       role: 'system',
       content:
-        actionFacts.length > 0
-          ? actionResultsBlock(actionFacts)
-          : failureFacts.length > 0
-            ? failureResultsBlock(failureFacts)
-            : noActionResultsBlock(noActionReason, actionCtx.pendingConfirmCard),
+        styleFacts.length > 0
+          ? [baseResultsBlock, styleResultsBlock(styleFacts)].filter(Boolean).join('\n\n')
+          : baseResultsBlock,
     });
 
     /**
@@ -498,7 +558,16 @@ export async function* streamChatReplyActNarrate(
      * caught by the model's own 'unfulfilled'. Neither key can, alone, put a
      * real request on the fast path.
      */
-    const fastPath = actionFacts.length === 0 && noActionIntent === 'conversation' && mayBeConversational;
+    // styleFacts.length === 0 is defensive: the fast path's own results
+    // block (below) only knows noActionResultsBlock, so a turn that also
+    // adjusted style must never take this branch even in the unlikely case
+    // the act pass paired adjust_style with a no_action(intent:'conversation')
+    // call in the same turn.
+    const fastPath =
+      actionFacts.length === 0 &&
+      styleFacts.length === 0 &&
+      noActionIntent === 'conversation' &&
+      mayBeConversational;
 
     let stream: Awaited<ReturnType<typeof client.chat.completions.create>> | null = null;
     if (fastPath && speculation) {
@@ -539,7 +608,7 @@ export async function* streamChatReplyActNarrate(
         // conversational context, not the state-laden one.
         messages: fastPath
           ? [
-              ...buildTailedMessages(buildSystemPrompt(user), conversationTailText, conversationHistory),
+              ...buildTailedMessages(buildSystemPrompt(user) + buildStyleBlock(user) + buildMemoryBlock(user.memories ?? []), conversationTailText, conversationHistory),
               { role: 'system', content: noActionResultsBlock(noActionReason, actionCtx.pendingConfirmCard) },
             ]
           : narrateMessages,

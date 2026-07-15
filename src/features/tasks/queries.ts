@@ -61,6 +61,10 @@ export function useCreateTask() {
   return useTaskMutation((input: CreateTaskInput) => api.createTask(input));
 }
 
+export function useCreateTaskFromPreview() {
+  return useTaskMutation((previewMessageId: string) => api.createTaskFromPreview(previewMessageId));
+}
+
 export function useEditTask() {
   return useTaskMutation(({ id, patch }: { id: string; patch: EditTaskPatch }) =>
     api.editTask(id, patch),

@@ -137,6 +137,76 @@ export async function didClaimAction(segments: string[], stateFacts: string): Pr
   }
 }
 
+// The background memory extractor (memory-extractor.ts) only structurally
+// verifies that a create op's sourceMessageId is a real message in its own
+// batch — it never checked whether the CLAIMED CONTENT is actually
+// supported by what that message says. Observed live: given a batch
+// containing only "my girlfriend broke up with me" plus unrelated banter,
+// the extractor wrote "User has a new girlfriend, met at school." — a fact
+// invented outright, timestamped hours before the user ever said anything
+// about a new girlfriend at all. The resolve-then-verify discipline caught
+// a hallucinated ID; it had nothing that could catch a hallucinated FACT
+// wearing a real ID. This is that check — the extractor's own equivalent of
+// didClaimAction, but for "did they actually say this" instead of "does the
+// state show this."
+const MEMORY_GROUNDING_SYSTEM_PROMPT = `You will be shown (1) something a user actually typed to their AI companion, and (2) a fact an extraction process wants to save about that user, citing THAT message as its source.
+
+Answer with exactly YES or NO: is the claimed fact actually supported by what the user said — not embellished, not inferred beyond it, not invented?
+
+YES — the fact is a fair restatement of something the message actually says or directly, unambiguously implies. Example: message "I've been really into rock climbing lately" -> fact "Into rock climbing" is YES.
+
+NO — the fact adds any specific detail, name, place, or event the message never mentioned, even if it sounds plausible or is the kind of thing that could plausibly follow. Example: message "my girlfriend broke up with me" -> fact "User has a new girlfriend, met at school" is NO — nothing in the message says anything about a new girlfriend or where they met. A breakup is not evidence a new relationship started, and "met at school" was invented outright.
+
+Also NO if the fact contradicts the message, or states something as an ongoing trait when the message only describes a single past instant with no sign it's lasting.
+
+When genuinely unsure whether a detail was really said or was quietly added, answer NO — a memory that never gets saved costs nothing; a fabricated one about a real person is exactly what this check exists to catch.`;
+
+/**
+ * Runs once per proposed `create` op (never update/supersede — those cite
+ * an existing memory by id, not a new source message, and resolve-then-
+ * verify already confirms that id is real). Deliberately no free regex gate
+ * first, unlike didClaimAction: extraction itself is already batched,
+ * capped at 5 ops per run, and deliberately conservative (most batches
+ * produce zero), so the volume never justifies a cheaper pre-filter.
+ *
+ * Fails CLOSED on any error (missing key, timeout, malformed answer) —
+ * the opposite default from didClaimAction, which falls back to the regex
+ * result. There is no regex to fall back to here, and "never invent a
+ * fact" is the one rule this whole check exists to enforce, so an
+ * unverifiable claim is treated the same as a false one: dropped.
+ */
+export async function isMemoryGrounded(content: string, sourceText: string): Promise<boolean> {
+  const openai = getClient();
+  if (!openai) return false;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), CLASSIFIER_TIMEOUT_MS);
+  try {
+    const completion = await openai.chat.completions.create(
+      {
+        model: env.CLAIM_CHECK_MODEL,
+        max_tokens: CLASSIFIER_MAX_TOKENS,
+        temperature: 0,
+        messages: [
+          { role: 'system', content: MEMORY_GROUNDING_SYSTEM_PROMPT },
+          {
+            role: 'user',
+            content: `THE USER'S ACTUAL MESSAGE:\n"""\n${sourceText}\n"""\n\nTHE CLAIMED FACT ABOUT THEM:\n"""\n${content}\n"""`,
+          },
+        ],
+      },
+      { signal: controller.signal },
+    );
+    const answer = completion.choices[0]?.message?.content?.trim().toUpperCase() ?? '';
+    return answer.startsWith('YES');
+  } catch (err) {
+    logger.warn({ err }, 'memory grounding check failed — dropping the memory rather than risk an ungrounded write');
+    return false;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 // The MIRROR of CLASSIFIER_SYSTEM_PROMPT, for the opposite failure. The
 // claim-check above only ever runs on turns where NOTHING happened, so for
 // the whole life of this app the reverse case has gone unchecked: a turn

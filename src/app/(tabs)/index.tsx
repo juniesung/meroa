@@ -1,5 +1,5 @@
 import * as Haptics from 'expo-haptics';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -30,13 +30,17 @@ import { type ChatMessage, useMessages, useSendMessage } from '@/features/chat/q
 import {
   useBulkDeleteTasks,
   useCompleteTask,
+  useCreateTaskFromPreview,
   useDeleteTask,
   useProgressTask,
   useTasks,
 } from '@/features/tasks/queries';
 import { useAdvanceGoalStage, useCreateGoalFromPreview, useGoalConsistency, useGoals } from '@/features/goals/queries';
+import { useMe } from '@/features/profile/queries';
+import { VibePickerSheet } from '@/features/profile/VibePickerSheet';
+import { vibeLabel } from '@/features/profile/vibes';
 import { useTabBarHeight } from '@/hooks/use-tab-bar-inset';
-import type { AdvanceStageProposal, ApiTask, GoalPreview, StarterTask } from '@/lib/api/types';
+import type { AdvanceStageProposal, ApiTask, CreateTaskInput, GoalPreview, StarterTask } from '@/lib/api/types';
 import { formatMoney } from '@/lib/format';
 import { toIconName } from '@/lib/icon';
 import { requestNotificationPermission } from '@/lib/notifications';
@@ -45,6 +49,40 @@ import { requestNotificationPermission } from '@/lib/notifications';
 // otherwise an over-limit send round-trips to a 400, gets marked "failed",
 // and retry just resends the identical text into the same 400 forever.
 const MAX_MESSAGE_LENGTH = 4000;
+
+// Bubbles more than a minute apart read as separate turns even if the
+// sender didn't change — a stack shouldn't span a real gap in the
+// conversation.
+const GROUP_GAP_MS = 60_000;
+
+function isCardMessage(m: ChatMessage): boolean {
+  return m.role === 'assistant' && typeof m.meta?.kind === 'string' && m.meta.kind.length > 0;
+}
+
+/**
+ * iMessage-style stacking (CLAUDE.md §5): consecutive plain-text bubbles
+ * from the same sender, close together in time, form one visual group —
+ * only the group's last bubble gets the tail corner, only its first gets
+ * the full gap above it. Cards, a role change, or a real time gap always
+ * break a group. A streaming placeholder deliberately counts as "same
+ * sender, no gap" so the tail on the bubble above it doesn't pop in only to
+ * disappear the instant the next segment starts arriving.
+ */
+function computeGroupFlags(messages: ChatMessage[]): Map<string, { isFirst: boolean; isLast: boolean }> {
+  const flags = new Map<string, { isFirst: boolean; isLast: boolean }>();
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i]!;
+    if (isCardMessage(m)) continue;
+    const prev = messages[i - 1];
+    const next = messages[i + 1];
+    const gapFrom = (a: ChatMessage, b: ChatMessage) =>
+      Math.abs(new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()) > GROUP_GAP_MS;
+    const isFirst = !prev || prev.role !== m.role || isCardMessage(prev) || gapFrom(prev, m);
+    const isLast = !next || next.role !== m.role || isCardMessage(next) || gapFrom(m, next);
+    flags.set(m.id, { isFirst, isLast });
+  }
+  return flags;
+}
 
 function TypingDots() {
   const d1 = useSharedValue(0.3);
@@ -250,6 +288,84 @@ function describeStarterTaskRecurrence(recurrence: StarterTask['recurrence']): s
   return ` · every ${recurrence.n} days`;
 }
 
+function describeTaskPreviewFields(preview: CreateTaskInput): string[] {
+  const lines: string[] = [];
+  if (preview.type === 'counter') lines.push(`Target: ${preview.target}${preview.unit ? ` ${preview.unit}` : ''}`);
+  else if (preview.type === 'duration') lines.push(`Target: ${preview.targetMinutes} min`);
+  else if (preview.type === 'checklist') lines.push(`${preview.items.length} item${preview.items.length === 1 ? '' : 's'}`);
+  if (preview.recurrence) lines.push(`Repeats${describeStarterTaskRecurrence(preview.recurrence)}`);
+  else if (preview.dueAt) {
+    const due = new Date(preview.dueAt);
+    lines.push(`Due ${due.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} at ${due.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`);
+  }
+  return lines;
+}
+
+// prefs.confirmBeforeCreate's card — chat-only, same preview-then-tap shape
+// as GoalPreviewCard just below, for a task instead of a goal.
+function TaskPreviewCard({ message }: { message: ChatMessage }) {
+  const createTaskFromPreview = useCreateTaskFromPreview();
+  const { data: liveTasks } = useTasks();
+  const [dismissed, setDismissed] = useState(false);
+
+  const preview = message.meta.preview as CreateTaskInput | undefined;
+  if (!preview) return null;
+
+  const createdTaskId =
+    createTaskFromPreview.data?.task.id ?? (message.meta.createdTaskId as string | undefined);
+  const created = !!createdTaskId;
+  const createdButRemoved = created && !!liveTasks && !liveTasks.some((t) => t.id === createdTaskId);
+
+  const statusText = created
+    ? createdButRemoved
+      ? 'Created — since removed'
+      : 'Created ✓'
+    : dismissed
+      ? 'Not saved'
+      : 'Create this task?';
+
+  return (
+    <View style={styles.actionCard}>
+      <View style={styles.removalRow}>
+        <View style={styles.removalIconChip}>
+          <Icon name={toIconName(preview.icon)} size={18} color={theme.blue} stroke={1.9} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.removalTitle} numberOfLines={1}>
+            {preview.title}
+          </Text>
+          <Text style={styles.removalStatus}>{statusText}</Text>
+        </View>
+      </View>
+      <View style={styles.previewBody}>
+        {describeTaskPreviewFields(preview).map((line, idx) => (
+          <Text key={idx} style={styles.previewFields}>
+            {line}
+          </Text>
+        ))}
+      </View>
+      {!created && !dismissed && (
+        <View style={styles.removalButtons}>
+          <Pressable onPress={() => setDismissed(true)} style={styles.removalCancelButton} hitSlop={4}>
+            <Text style={styles.removalCancelText}>Not now</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => {
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+              createTaskFromPreview.mutate(message.id);
+            }}
+            style={styles.previewConfirmButton}
+            hitSlop={4}
+          >
+            <Icon name="check" size={14} color="#fff" stroke={2.2} />
+            <Text style={styles.removalConfirmText}>Create</Text>
+          </Pressable>
+        </View>
+      )}
+    </View>
+  );
+}
+
 function GoalPreviewCard({ message }: { message: ChatMessage }) {
   const createGoalFromPreview = useCreateGoalFromPreview();
   const { data: liveGoals } = useGoals();
@@ -359,6 +475,33 @@ function GoalPreviewCard({ message }: { message: ChatMessage }) {
 }
 
 // Resolves the live goal by id (falls back to the meta snapshot, same
+// The remember tool's card — a static snapshot, not a live view (unlike
+// TaskActionCard/GoalActionCard): a memory has no live record to re-fetch
+// by id, so it just shows what meta.memory captured at write time. Editing
+// or deleting it happens in the You tab's memory screen, not from here.
+function MemoryActionCard({ message }: { message: ChatMessage }) {
+  const memory = message.meta.memory as { kind: string; content: string } | undefined;
+  if (!memory) return null;
+
+  return (
+    <View style={styles.actionCard}>
+      <View style={styles.removalRow}>
+        <View style={styles.removalIconChip}>
+          <Icon name="book" size={18} color={theme.blue} stroke={1.9} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.removalTitle} numberOfLines={2}>
+            {memory.content}
+          </Text>
+          <Text style={styles.removalStatus} numberOfLines={1}>
+            Remembered
+          </Text>
+        </View>
+      </View>
+    </View>
+  );
+}
+
 // live-view-of-the-record pattern as TaskActionCard) — the summary sentence
 // itself already states the concrete post-action fact (docs/ai-reliability-
 // hardening.md lesson 16), so it's shown directly rather than re-derived.
@@ -477,9 +620,13 @@ function GoalAdvanceConfirmCard({ message }: { message: ChatMessage }) {
 function MessageRow({
   message,
   onRetry,
+  isFirstInGroup = true,
+  isLastInGroup = true,
 }: {
   message: ChatMessage;
   onRetry: (m: ChatMessage) => void;
+  isFirstInGroup?: boolean;
+  isLastInGroup?: boolean;
 }) {
   const isStreamingEmpty =
     message.role === 'assistant' && message.status === 'streaming' && !message.content;
@@ -494,6 +641,9 @@ function MessageRow({
   if (message.role === 'assistant' && message.meta?.kind === 'task_bulk_removal_pending') {
     return <TaskBulkRemovalConfirmCard message={message} />;
   }
+  if (message.role === 'assistant' && message.meta?.kind === 'task_creation_pending') {
+    return <TaskPreviewCard message={message} />;
+  }
   if (message.role === 'assistant' && message.meta?.kind === 'goal_preview') {
     return <GoalPreviewCard message={message} />;
   }
@@ -503,10 +653,19 @@ function MessageRow({
   if (message.role === 'assistant' && message.meta?.kind === 'goal_advance_pending') {
     return <GoalAdvanceConfirmCard message={message} />;
   }
+  if (message.role === 'assistant' && message.meta?.kind === 'memory_action') {
+    return <MemoryActionCard message={message} />;
+  }
 
   return (
     <View>
-      <Bubble from={message.role === 'user' ? 'me' : 'ai'}>{message.content}</Bubble>
+      <Bubble
+        from={message.role === 'user' ? 'me' : 'ai'}
+        isFirstInGroup={isFirstInGroup}
+        isLastInGroup={isLastInGroup}
+      >
+        {message.content}
+      </Bubble>
       {message.status === 'failed' && (
         <Pressable onPress={() => onRetry(message)} style={styles.statusRow} hitSlop={8}>
           <Text style={styles.statusText}>Not delivered · Tap to retry</Text>
@@ -523,8 +682,17 @@ function MessageRow({
 
 export default function ChatScreen() {
   const { data: messages = [], isLoading } = useMessages();
+  const groupFlags = useMemo(() => computeGroupFlags(messages), [messages]);
+  // A real state, not decoration: 'streaming' covers the whole round trip
+  // from send through the last segment (the same status TypingDots keys off
+  // of), so this is never true unless Meroa is actually generating a reply.
+  const isReplying = messages.some((m) => m.status === 'streaming');
+  const headerStatus = isReplying ? 'Typing…' : 'Listening';
   const { send, retry } = useSendMessage();
   const [draft, setDraft] = useState('');
+  const [vibeSheetOpen, setVibeSheetOpen] = useState(false);
+  const { data: me } = useMe();
+  const communicationStyle = vibeLabel(me?.user.prefs.communicationStyle);
   const scrollRef = useRef<ScrollView>(null);
   const ellipsisFeedback = useTapFeedback();
   const attachFeedback = useTapFeedback();
@@ -587,18 +755,26 @@ export default function ChatScreen() {
             <Text style={styles.title}>Meroa</Text>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
               <View style={styles.dot} />
-              <Text style={styles.subtitle}>Listening · learning your style</Text>
+              <Text style={styles.subtitle}>{headerStatus}</Text>
             </View>
           </View>
         </View>
-        <AnimatedPressable
-          onPressIn={ellipsisFeedback.onPressIn}
-          onPressOut={ellipsisFeedback.onPressOut}
-          style={[styles.iconBtn, ellipsisFeedback.animatedStyle]}
-        >
-          <Icon name="ellipsis" size={16} color={theme.text} stroke={2.4} />
-        </AnimatedPressable>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <Text style={styles.hint}>{communicationStyle}</Text>
+          <AnimatedPressable
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+              setVibeSheetOpen(true);
+            }}
+            onPressIn={ellipsisFeedback.onPressIn}
+            onPressOut={ellipsisFeedback.onPressOut}
+            style={[styles.iconBtn, ellipsisFeedback.animatedStyle]}
+          >
+            <Icon name="ellipsis" size={16} color={theme.text} stroke={2.4} />
+          </AnimatedPressable>
+        </View>
       </View>
+      <VibePickerSheet visible={vibeSheetOpen} onClose={() => setVibeSheetOpen(false)} />
 
       <KeyboardAvoidingView
         style={{ flex: 1 }}
@@ -620,9 +796,18 @@ export default function ChatScreen() {
               {new Date().toLocaleDateString(undefined, { weekday: 'long' })} ·{' '}
               {new Date().toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}
             </Text>
-            {messages.map((m) => (
-              <MessageRow key={m.id} message={m} onRetry={handleRetry} />
-            ))}
+            {messages.map((m) => {
+              const flags = groupFlags.get(m.id);
+              return (
+                <MessageRow
+                  key={m.id}
+                  message={m}
+                  onRetry={handleRetry}
+                  isFirstInGroup={flags?.isFirst}
+                  isLastInGroup={flags?.isLast}
+                />
+              );
+            })}
           </ScrollView>
         )}
 
@@ -740,6 +925,7 @@ const styles = StyleSheet.create({
   },
   title: { color: theme.text, fontSize: 16, fontWeight: '700', letterSpacing: -0.2 },
   subtitle: { color: theme.dim, fontSize: 11 },
+  hint: { color: theme.dim, fontSize: 12, fontWeight: '600' },
   dot: { width: 6, height: 6, borderRadius: 999, backgroundColor: theme.success },
   iconBtn: {
     width: 32,

@@ -5,10 +5,9 @@ import {
   ymdEndOfDayToUtcDate,
   ymdInTz,
 } from '../tasks/recurrence.ts';
-import type { ProgressInput, Recurrence } from '../tasks/schema.ts';
+import type { CreateTaskInput, ProgressInput, Recurrence } from '../tasks/schema.ts';
 import {
   completeTask,
-  createTask,
   editTask,
   getTask,
   listOpenTaskTitles,
@@ -19,7 +18,12 @@ import {
   type ActionSource,
   type TaskRow,
 } from '../tasks/executor.ts';
+import { eq } from 'drizzle-orm';
+import { db } from '../../db/client.ts';
+import { users } from '../../db/schema.ts';
 import { findAmbiguousTaskMatch, normalizeForMatch } from './ambiguity.ts';
+import { isStyleAdjustments, type StyleAdjustments } from './system-prompt.ts';
+import { createMemory, raiseSensitivityIfNeeded, type MemoryRow } from '../memories/executor.ts';
 import {
   archiveGoal,
   createGoal,
@@ -125,6 +129,27 @@ export type TaskActionResult =
   // editing-plan.md §3.4) — "open in Goals to add your stages" for a bare
   // milestone template, or how many stages are already set.
   | { ok: true; toolName: AiToolName; preview: GoalPreview; detail?: string; summary: string; recordKind: string }
+  // create_task via chat — always a preview, never an immediate save, same
+  // shape as create_goal's preview (docs/goals-redesign-plan.md §2.1),
+  // unconditional, matching remove_task's own always-confirm pattern. Only
+  // reachable via chat — the manual Tasks-tab create route never calls
+  // executeAiToolCall at all, so it stays immediate, unaffected — see the
+  // create_task case below. `taskPreview` is the already-fully-resolved
+  // CreateTaskInput (dueAt defaulted, goalId/goalContribution resolved from
+  // refs) — exactly what createTask() would be called with; the confirm
+  // tap (routes/tasks.ts) re-validates and replays it verbatim.
+  | { ok: true; toolName: AiToolName; taskPreview: CreateTaskInput; summary: string; recordKind: 'task_creation_pending' }
+  // adjust_style — a prefs write, not a task/goal record. No `task`/`tasks`/
+  // `goal`/`preview` key, so providers/act-narrate.ts routes it away from
+  // every card-rendering branch and into its own results block instead
+  // (docs/chat-architecture.md's silence rule would otherwise swallow the
+  // acknowledgment — a style change met with silence is exactly the wrong
+  // note). `styleSummary` is SERVER-authored, never the model's own words —
+  // same reasoning as every other summary in this file.
+  | { ok: true; toolName: AiToolName; styleSummary: string; recordKind: 'style_adjusted' }
+  // remember — a real write with a real card, unlike adjust_style. Routes
+  // through the ordinary §3 silence flow: the card IS the confirmation.
+  | { ok: true; toolName: AiToolName; memory: MemoryRow; summary: string; recordKind: 'memory_action' }
   | { ok: false; error: string };
 
 // "$150" (savings), "175lb" (indirect — the unit trails, never a currency
@@ -361,9 +386,29 @@ function shortDueLabel(task: TaskRow, timezone: string | null): string {
   return `${due.toLocaleDateString(undefined, { timeZone: tz, month: 'short', day: 'numeric' })} at ${time}`;
 }
 
-function summarizeCreate(task: TaskRow, timezone: string | null): string {
-  const label = shortDueLabel(task, timezone);
-  return label ? `Added "${task.title}" for ${label}.` : `Added "${task.title}".`;
+// The preview-only mirror of shortDueLabel/summarizeCreate — same wording,
+// worked off the not-yet-saved CreateTaskInput instead of a real TaskRow
+// (there's no task.config yet to read dueTimeExplicit from).
+function shortDueLabelForPreview(
+  dueAt: string | undefined,
+  dueTimeExplicit: boolean | undefined,
+  timezone: string | null,
+): string {
+  if (!dueAt || dueTimeExplicit === false) return '';
+  const tz = timezone ?? 'UTC';
+  const due = new Date(dueAt);
+  const time = due.toLocaleTimeString(undefined, { timeZone: tz, hour: 'numeric', minute: '2-digit' });
+  const dueYmd = ymdInTz(due, tz);
+  const todayYmd = ymdInTz(new Date(), tz);
+  if (dueYmd === todayYmd) return time;
+  const tomorrowYmd = ymdInTz(new Date(Date.now() + 24 * 60 * 60 * 1000), tz);
+  if (dueYmd === tomorrowYmd) return `tomorrow at ${time}`;
+  return `${due.toLocaleDateString(undefined, { timeZone: tz, month: 'short', day: 'numeric' })} at ${time}`;
+}
+
+function summarizeTaskPreview(preview: CreateTaskInput, timezone: string | null): string {
+  const label = shortDueLabelForPreview(preview.dueAt, preview.dueTimeExplicit, timezone);
+  return `Preview card shown — nothing is saved yet; the user taps Create on the card. Would create "${preview.title}"${label ? ` for ${label}` : ''}.`;
 }
 
 function summarizeComplete(task: TaskRow): string {
@@ -443,53 +488,6 @@ function resolveTaskRef(
 // title, and target live on the template, not a day's instance.
 function editTarget(ref: ResolvedTaskRef): string {
   return ref.templateId ?? ref.taskId;
-}
-
-/**
- * A task created mid-turn gets a ref immediately, in the same TurnRefs map
- * the turn started with — without this, a create→act chain in one turn
- * always fails: the refs map is built at turn start, so the model's natural
- * follow-up ("created the counter, now log your current 165") has nothing
- * to target and guesses the next T-number, which is rejected. Observed
- * live doing exactly that (guessed "T8", failed, then spiraled into raw
- * markup leaks and a "glitched on my end" ending). The assigned ref is
- * appended to the tool-result summary so the model knows it — that summary
- * is model-facing, and the prompt already forbids repeating refs to the
- * user.
- */
-function registerCreatedTaskRef(refs: TurnRefs, task: TaskRow): string {
-  let maxIndex = 0;
-  for (const key of refs.keys()) {
-    const match = /^T(\d+)$/.exec(key);
-    if (match) maxIndex = Math.max(maxIndex, Number(match[1]));
-  }
-  const alias = `T${maxIndex + 1}`;
-
-  if (task.recurrence) {
-    // createTask returned the template itself (recurring, no instance due
-    // today) — same ref shape task-context.ts gives an off-day template.
-    refs.set(alias, { kind: 'task', taskId: task.id, isRecurringSeries: true, templateId: task.id });
-  } else if (task.templateId) {
-    // createTask returned today's freshly-materialized instance.
-    refs.set(alias, {
-      kind: 'task',
-      taskId: task.id,
-      isRecurringSeries: true,
-      instanceId: task.id,
-      templateId: task.templateId,
-    });
-  } else {
-    refs.set(alias, { kind: 'task', taskId: task.id, isRecurringSeries: false });
-  }
-
-  const items = (task.config as { items?: { id: string }[] }).items;
-  if (task.type === 'checklist' && items) {
-    items.forEach((item, idx) => {
-      refs.set(`${alias}.${idx + 1}`, { kind: 'checklist_item', taskId: task.id, itemId: item.id });
-    });
-  }
-
-  return alias;
 }
 
 // complete_task / progress_task / postpone_task are always about a concrete
@@ -573,6 +571,66 @@ async function verifyNameHint(
 // individual error string to carry that weight. This wraps the boundary
 // itself (not each string) so new failure paths get the same guarantee for
 // free; the unwrapped error still flows into toolCallLog, which is log-only.
+const MEMORY_KIND_LABEL: Record<string, string> = {
+  preference: 'Preference',
+  trait: 'Trait',
+  relationship: 'Relationship',
+  situation: 'Situation',
+};
+
+function summarizeRemember(memory: MemoryRow): string {
+  const label = MEMORY_KIND_LABEL[memory.kind] ?? 'Memory';
+  return `Remembered (${label}): ${memory.content}`;
+}
+
+// Server-authored, deliberately — the narrate pass quotes this verbatim
+// rather than describing the change in its own words, same reasoning as
+// every other summary in this file (CLAUDE.md §2: never invent a number,
+// and by extension never invent what a settings write actually did).
+function describeStyleAdjustment(patch: {
+  length?: 'shorter' | 'longer';
+  questions?: 'fewer';
+  directness?: 'more' | 'softer';
+  emoji?: 'none' | 'ok';
+  reset?: boolean;
+}): string {
+  if (patch.reset) return 'Style adjustments reset to just their preset.';
+  const parts: string[] = [];
+  if (patch.length === 'shorter') parts.push('shorter replies');
+  if (patch.length === 'longer') parts.push('longer replies');
+  if (patch.questions === 'fewer') parts.push('fewer questions');
+  if (patch.directness === 'more') parts.push('more directness');
+  if (patch.directness === 'softer') parts.push('a softer touch');
+  if (patch.emoji === 'none') parts.push('no emoji');
+  if (patch.emoji === 'ok') parts.push('emoji is fine again');
+  return parts.length > 0 ? `Style updated: ${parts.join(', ')}.` : 'Style adjustment saved.';
+}
+
+// Read-merge-write against the same users.prefs blob routes/me.ts patches —
+// deliberately NOT that endpoint (this runs from inside the AI action
+// layer, not an HTTP request), but the same merge-only discipline: only
+// `styleAdjustments` is touched, every other prefs key survives untouched.
+async function applyStyleAdjustment(
+  userId: string,
+  patch: {
+    length?: 'shorter' | 'longer';
+    questions?: 'fewer';
+    directness?: 'more' | 'softer';
+    emoji?: 'none' | 'ok';
+    reset?: boolean;
+  },
+): Promise<void> {
+  const [row] = await db.select({ prefs: users.prefs }).from(users).where(eq(users.id, userId)).limit(1);
+  const prefs = (row?.prefs ?? {}) as Record<string, unknown>;
+  const current = isStyleAdjustments(prefs.styleAdjustments) ? prefs.styleAdjustments : {};
+  const { reset: _reset, ...fields } = patch;
+  const next: StyleAdjustments = patch.reset ? {} : { ...current, ...fields };
+  await db
+    .update(users)
+    .set({ prefs: { ...prefs, styleAdjustments: next } })
+    .where(eq(users.id, userId));
+}
+
 function wrapFailure(result: TaskActionResult): TaskActionResult {
   if (result.ok) return result;
   return {
@@ -683,18 +741,23 @@ async function executeAiToolCallInner(
           };
         }
 
-        const { task } = await createTask(userId, input, timezone, source);
-        const alias = registerCreatedTaskRef(refs, task);
-        const linkSummary = await describeGoalLinkChange(userId, timezone, task, !!goalId, false, false);
-        const summary = `${summarizeCreate(task, timezone)}${linkSummary}`;
+        // Always a preview via chat, never an immediate save — same "nothing
+        // saved yet" shape as create_goal (docs/goals-redesign-plan.md
+        // §2.1), unconditional now, matching remove_task's own always-
+        // confirm pattern (a model apology in prose doesn't persist to the
+        // next turn; only a guarantee does — see docs/chat-architecture.md
+        // §0). `input` here is already fully resolved (dueAt defaulted,
+        // goalId/goalContribution resolved from refs) — routes/tasks.ts's
+        // confirm tap replays it verbatim, no re-derivation needed. Because
+        // this never hands back a real ref anymore, a same-turn chain
+        // ("create X and mark it done") can't complete — tools.ts's
+        // description tells the model not to attempt one.
         return {
           ok: true,
           toolName,
-          task,
-          summary,
-          modelSummary: `${summary} Its ref is ${alias} — use that (never a guessed ref) if you need to act on it later this same turn, e.g. to log initial progress.`,
-          detail: linkSummary.trim(),
-          recordKind: 'task_created',
+          taskPreview: input,
+          summary: summarizeTaskPreview(input, timezone),
+          recordKind: 'task_creation_pending',
         };
       }
       case 'edit_task': {
@@ -1338,6 +1401,29 @@ async function executeAiToolCallInner(
             ? `Undid the last change — restored ${tasks.length} tasks: ${tasks.map((t) => `"${t.title}"`).join(', ')}.`
             : `Undid the last change to "${task.title}"${restoredDetail}.`;
         return { ok: true, toolName, task, summary, recordKind: action };
+      }
+      case 'remember': {
+        const validated = validateToolInput('remember', rawInput);
+        if (!validated.ok) return { ok: false, error: validated.error };
+        const memory = await createMemory(userId, {
+          kind: validated.data.kind,
+          content: validated.data.content,
+          sensitive: validated.data.sensitive,
+          source: 'chat_explicit',
+          sourceMessageId: source.sourceMessageId,
+        });
+        return { ok: true, toolName, memory, summary: summarizeRemember(memory), recordKind: 'memory_action' };
+      }
+      case 'adjust_style': {
+        const validated = validateToolInput('adjust_style', rawInput);
+        if (!validated.ok) return { ok: false, error: validated.error };
+        await applyStyleAdjustment(userId, validated.data);
+        return {
+          ok: true,
+          toolName,
+          styleSummary: describeStyleAdjustment(validated.data),
+          recordKind: 'style_adjusted',
+        };
       }
       default: {
         const exhaustive: never = toolName;

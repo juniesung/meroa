@@ -162,7 +162,21 @@ export async function* streamChatReplyAnthropic(
             actionCtx.pendingConfirmCard,
             actionCtx.userMessageText,
           );
-          if (result.ok && 'tasks' in result) {
+          if (result.ok && 'taskPreview' in result) {
+            toolCallLog.push({ name: block.name, ok: true, pending: true });
+            yield {
+              type: 'action_task_preview',
+              toolName: result.toolName,
+              preview: result.taskPreview,
+              summary: result.summary,
+              recordKind: result.recordKind,
+            };
+            toolResults.push({
+              type: 'tool_result',
+              tool_use_id: block.id,
+              content: result.summary,
+            });
+          } else if (result.ok && 'tasks' in result) {
             toolCallLog.push({
               name: block.name,
               ok: true,
@@ -217,6 +231,22 @@ export async function* streamChatReplyAnthropic(
               type: 'tool_result',
               tool_use_id: block.id,
               content: result.summary,
+            });
+          } else if (result.ok && 'memory' in result) {
+            toolCallLog.push({ name: block.name, ok: true, pending: false });
+            yield { type: 'action_memory', toolName: result.toolName, memory: result.memory, summary: result.summary, recordKind: result.recordKind };
+            toolResults.push({
+              type: 'tool_result',
+              tool_use_id: block.id,
+              content: result.summary,
+            });
+          } else if (result.ok && 'styleSummary' in result) {
+            // No card — a prefs write, not a task/goal record.
+            toolCallLog.push({ name: block.name, ok: true, pending: false });
+            toolResults.push({
+              type: 'tool_result',
+              tool_use_id: block.id,
+              content: result.styleSummary,
             });
           } else if (result.ok) {
             toolCallLog.push({

@@ -39,6 +39,8 @@ function RootNavigator() {
       <Stack.Protected guard={status === 'signedIn'}>
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="goal/[id]" options={{ presentation: 'card' }} />
+        <Stack.Screen name="vibe-pick" options={{ presentation: 'modal', gestureEnabled: false }} />
+        <Stack.Screen name="memories" options={{ presentation: 'card' }} />
       </Stack.Protected>
       <Stack.Protected guard={status === 'signedOut'}>
         <Stack.Screen name="(auth)" />

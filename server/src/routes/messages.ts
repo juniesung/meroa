@@ -7,8 +7,17 @@ import { z } from 'zod';
 import { db } from '../db/client.ts';
 import { messages, records, users } from '../db/schema.ts';
 import { streamChatReply, type ChatHistoryMessage } from '../lib/ai/chat.ts';
+import { maybeExtractMemories } from '../lib/ai/memory-extractor.ts';
+import { pickTaskCreatedQuip } from '../lib/ai/quips.ts';
 import { buildRecentChangesFeed, renderUndoTarget } from '../lib/ai/recent-changes.ts';
-import { buildConversationTailBlock, buildTailBlock } from '../lib/ai/system-prompt.ts';
+import {
+  buildConversationTailBlock,
+  buildMemoryFactsText,
+  buildTailBlock,
+  isStyleAdjustments,
+  type ChatUserContext,
+} from '../lib/ai/system-prompt.ts';
+import { listMemories } from '../lib/memories/executor.ts';
 import { buildTaskContext } from '../lib/ai/task-context.ts';
 import { buildGoalContext } from '../lib/ai/goal-context.ts';
 import { findPendingPreview, renderPendingPreview } from '../lib/ai/pending-preview.ts';
@@ -42,6 +51,8 @@ function isChatRole(role: string): role is 'user' | 'assistant' {
   return role === 'user' || role === 'assistant';
 }
 
+const VIBE_PRESETS = new Set(['chill', 'supportive', 'direct', 'playful', 'balanced']);
+
 // An action turn's card IS the assistant's reply — so it has to appear in the
 // model's history as one, or the conversation record lies about what happened.
 //
@@ -71,9 +82,11 @@ const CARD_KINDS = new Set([
   'task_action',
   'task_removal_pending',
   'task_bulk_removal_pending',
+  'task_creation_pending',
   'goal_action',
   'goal_preview',
   'goal_advance_pending',
+  'memory_action',
 ]);
 
 function isCardMessage(m: { meta: unknown }): boolean {
@@ -97,6 +110,7 @@ function isCardMessage(m: { meta: unknown }): boolean {
 const PENDING_CARD_KINDS = new Set([
   'task_removal_pending',
   'task_bulk_removal_pending',
+  'task_creation_pending',
   'goal_advance_pending',
   'goal_preview',
 ]);
@@ -104,6 +118,22 @@ const PENDING_CARD_KINDS = new Set([
 function isPendingCardMessage(m: { meta: unknown }): boolean {
   const meta = m.meta as { kind?: string } | null;
   return !!meta?.kind && PENDING_CARD_KINDS.has(meta.kind);
+}
+
+// A plain narrate reply persisted on a turn that ALSO produced a real card
+// (the "mixed success + failure" case — see the loop in this file that sets
+// turnHadAction). Its only content was acknowledging something the card
+// already shows in full, live from the DB, so it carries nothing worth
+// reading back later — and read out of context by a LATER, ungrounded turn
+// (the conversation fast path, providers/act-narrate.ts, which gets only the
+// clock, no task list), it reads as an open thread still needing a close.
+// Observed live: "On it." here baited an unrelated later "Nice" into
+// inventing "Done. Your aloe's officially on the clock now." — a claim the
+// claim-check guard correctly caught and replaced with a generic correction,
+// confusing since the ACTUAL task creation, two turns earlier, was fine.
+function isActionAckMessage(m: { meta: unknown }): boolean {
+  const meta = m.meta as { actionAck?: boolean } | null;
+  return meta?.actionAck === true;
 }
 
 function historyContentFor(m: { content: string; meta: unknown }): string {
@@ -172,11 +202,32 @@ messageRoutes.post('/', zValidator('json', sendSchema), async (c) => {
   const { userMessage } = result;
 
   const [user] = await db
-    .select({ displayName: users.displayName, timezone: users.timezone })
+    .select({ displayName: users.displayName, timezone: users.timezone, prefs: users.prefs })
     .from(users)
     .where(eq(users.id, userId))
     .limit(1);
-  const userContext = user ?? { displayName: null, timezone: null };
+  const prefs = (user?.prefs ?? {}) as Record<string, unknown>;
+  const style = VIBE_PRESETS.has(prefs.communicationStyle as string)
+    ? (prefs.communicationStyle as ChatUserContext['style'])
+    : undefined;
+  const styleAdjustments = isStyleAdjustments(prefs.styleAdjustments)
+    ? (prefs.styleAdjustments as ChatUserContext['styleAdjustments'])
+    : undefined;
+  // Capped at 50 — stable between extractions (memory-extractor.ts runs in
+  // batches, not per-turn), so this stays cache-friendly the same way
+  // buildStyleBlock's per-user text does. Non-suppressed only: a "don't
+  // bring this up unless I do" memory must not reach the model at all — a
+  // guarantee, not a prompt instruction (docs/chat-architecture.md's whole
+  // point about where invariants have to live).
+  const memoryRows = (await listMemories(userId)).slice(0, 50);
+  const memoryContext = memoryRows.map((m) => ({ kind: m.kind, content: m.content, sensitive: m.sensitive }));
+  const userContext: ChatUserContext = {
+    displayName: user?.displayName ?? null,
+    timezone: user?.timezone ?? null,
+    style,
+    styleAdjustments,
+    memories: memoryContext,
+  };
 
   // Includes the message just inserted above, and merges the sms-channel
   // continuity history (Phase 1) chronologically with the app channel.
@@ -192,6 +243,7 @@ messageRoutes.post('/', zValidator('json', sendSchema), async (c) => {
       content: historyContentFor(m),
       isCard: isCardMessage(m),
       isPendingCard: isPendingCardMessage(m),
+      isActionAck: isActionAckMessage(m),
     }))
     // Never feed a past tool-call leak back to the model. This is the fix that
     // actually matters, because a leak is SELF-REINFORCING: any leaked reply is
@@ -323,7 +375,11 @@ messageRoutes.post('/', zValidator('json', sendSchema), async (c) => {
     pendingPreviewText,
   };
   const tailText = buildTailBlock({ ...sharedTail, recentChangesText, undoTargetText });
-  const narrateTailText = buildTailBlock({ ...sharedTail, recentChangesText });
+  // recentChangesText is grounding for the ACT pass only (undo needs to know
+  // what the last out-of-band change was) — the reply pass must NOT get it,
+  // or it announces it as news on an unrelated turn. See the comment above
+  // sharedTail: this is the guarantee it describes, restored.
+  const narrateTailText = buildTailBlock({ ...sharedTail });
   const conversationTailText = buildConversationTailBlock(sharedTail.now, userContext.timezone);
   // What the GUARDS are shown (claim-check, figure-check): the plain truth about
   // what the user has, and nothing else. Deliberately NOT tailText — that carries
@@ -332,7 +388,11 @@ messageRoutes.post('/', zValidator('json', sendSchema), async (c) => {
   // "nothing changed this turn" is a contradiction. It duly got confused and
   // retracted two perfectly honest replies live. A guard can only be as good as
   // the facts you give it.
-  const stateFactsText = buildTailBlock(sharedTail);
+  // Memories are appended here too — a reply that quotes a remembered
+  // detail with a number in it must be judged against facts that actually
+  // contain it, or the figure guard retracts an honest reply (§4's "a guard
+  // can only be as good as the facts you give it").
+  const stateFactsText = buildTailBlock(sharedTail) + buildMemoryFactsText(memoryContext);
 
   return streamSSE(c, async (stream) => {
     await stream.writeSSE({ event: 'user_message', data: JSON.stringify(userMessage) });
@@ -342,6 +402,16 @@ messageRoutes.post('/', zValidator('json', sendSchema), async (c) => {
     // (rare, but possible) would leave the client's typing indicator hanging
     // forever with no error and no retry path.
     try {
+      // Cards are always yielded before any narrate segment_end in the SAME
+      // turn (the tool-call loop runs, then the narrate pass) — see the
+      // "mixed success + failure" case: the failure means the turn doesn't
+      // qualify for §3's silence rule, so the narrate pass runs anyway and
+      // produces a plain, informationally-empty acknowledgment ("On it.")
+      // ALONGSIDE the real card. That bubble carries nothing the card
+      // doesn't already show, and tagging it here lets act-narrate.ts strip
+      // it from history the same way a pending card is stripped — see
+      // isActionAckMessage below.
+      let turnHadAction = false;
       for await (const event of streamChatReply(chatHistory, userContext, tailText, narrateTailText, conversationTailText, stateFactsText, {
         userId,
         timezone: userContext.timezone,
@@ -356,13 +426,19 @@ messageRoutes.post('/', zValidator('json', sendSchema), async (c) => {
         } else if (event.type === 'segment_end') {
           const [assistantMessage] = await db
             .insert(messages)
-            .values({ conversationId: conversation.id, role: 'assistant', content: event.text })
+            .values({
+              conversationId: conversation.id,
+              role: 'assistant',
+              content: event.text,
+              ...(turnHadAction ? { meta: { actionAck: true } } : {}),
+            })
             .returning();
           await stream.writeSSE({
             event: 'segment',
             data: JSON.stringify({ message: assistantMessage }),
           });
         } else if (event.type === 'action') {
+          turnHadAction = true;
           // remove_task doesn't delete outright — it comes back with
           // recordKind: 'task_removal_pending' so the client renders a
           // Confirm/Cancel card instead of a read-only one.
@@ -389,7 +465,25 @@ messageRoutes.post('/', zValidator('json', sendSchema), async (c) => {
             event: 'action',
             data: JSON.stringify({ message: assistantMessage, task: event.task }),
           });
+          // A short, PRE-WRITTEN follow-up — never model-generated, so it
+          // can't hallucinate and needs no claim-check. Tagged actionAck for
+          // the same reason "On it." needed to be: untagged, it would sit in
+          // later history as bait for a fabricated claim on an unrelated
+          // turn (see isActionAckMessage). Real creations only — never fires
+          // on the task_creation_pending preview path (a different branch
+          // entirely), so it never congratulates something not yet saved.
+          if (event.toolName === 'create_task' && event.recordKind === 'task_created') {
+            const quip = pickTaskCreatedQuip(style);
+            if (quip) {
+              const [quipMessage] = await db
+                .insert(messages)
+                .values({ conversationId: conversation.id, role: 'assistant', content: quip, meta: { actionAck: true } })
+                .returning();
+              await stream.writeSSE({ event: 'segment', data: JSON.stringify({ message: quipMessage }) });
+            }
+          }
         } else if (event.type === 'action_preview') {
+          turnHadAction = true;
           // create_goal never saves — this is a preview card only. Its
           // meta.preview is exactly what POST /goals {previewMessageId}
           // re-validates and saves once the user taps Create
@@ -417,7 +511,27 @@ messageRoutes.post('/', zValidator('json', sendSchema), async (c) => {
             event: 'action',
             data: JSON.stringify({ message: assistantMessage, preview: event.preview }),
           });
+        } else if (event.type === 'action_task_preview') {
+          turnHadAction = true;
+          // create_task via chat never saves by itself — this is a preview
+          // card only, same shape as create_goal's. Its meta.preview is
+          // exactly what POST /tasks {previewMessageId} re-validates and
+          // creates once the user taps Create.
+          const [assistantMessage] = await db
+            .insert(messages)
+            .values({
+              conversationId: conversation.id,
+              role: 'assistant',
+              content: event.summary,
+              meta: { kind: 'task_creation_pending', action: event.toolName, preview: event.preview },
+            })
+            .returning();
+          await stream.writeSSE({
+            event: 'action',
+            data: JSON.stringify({ message: assistantMessage, preview: event.preview }),
+          });
         } else if (event.type === 'action_goal') {
+          turnHadAction = true;
           // advance_goal_stage doesn't mutate anything — it comes back with
           // recordKind: 'goal_advance_pending' so the client renders a
           // Confirm/Cancel card (same `task_removal_pending` trick as the
@@ -445,6 +559,7 @@ messageRoutes.post('/', zValidator('json', sendSchema), async (c) => {
             data: JSON.stringify({ message: assistantMessage, goal: event.goal }),
           });
         } else if (event.type === 'action_bulk') {
+          turnHadAction = true;
           // remove_tasks — one card, one confirm, for the whole batch. The
           // client's Confirm button calls POST /tasks/bulk-remove with
           // every taskId listed here.
@@ -466,8 +581,33 @@ messageRoutes.post('/', zValidator('json', sendSchema), async (c) => {
             event: 'action',
             data: JSON.stringify({ message: assistantMessage, tasks: event.tasks }),
           });
+        } else if (event.type === 'action_memory') {
+          turnHadAction = true;
+          // remember — a real write, always applied immediately (no
+          // confirm-card flow; the memory-controls UI is the undo path).
+          const [assistantMessage] = await db
+            .insert(messages)
+            .values({
+              conversationId: conversation.id,
+              role: 'assistant',
+              content: event.summary,
+              meta: { kind: 'memory_action', action: event.toolName, memoryId: event.memory.id, memory: event.memory },
+            })
+            .returning();
+          await stream.writeSSE({
+            event: 'action',
+            data: JSON.stringify({ message: assistantMessage, memory: event.memory }),
+          });
         } else if (event.type === 'stream_end') {
           await stream.writeSSE({ event: 'stream_end', data: JSON.stringify({}) });
+          // Fire-and-forget, deliberately never awaited — the reply has
+          // already fully reached the user by this point, so nothing about
+          // this call can add latency to it or surface as a chat error
+          // (memory-extractor.ts already catches everything internally;
+          // this .catch is a second backstop against a truly unexpected throw).
+          void maybeExtractMemories(userId).catch((err) =>
+            logger.error({ err, userId }, 'memory extraction trigger failed'),
+          );
         } else {
           await stream.writeSSE({
             event: 'error',

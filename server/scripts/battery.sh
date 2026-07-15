@@ -128,11 +128,27 @@ tap()  { curl -s -X POST "$API$1" -H "Authorization: Bearer $TOKEN" -H "Content-
 patch() { curl -s -X PATCH "$API$1" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d "$2" > /dev/null; printf '     %s👆 PATCHed%s\n' "$M" "$X"; }
 post()  { curl -s -X POST "$API$1" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d "$2" > /dev/null; printf '     %s👆 POSTed%s\n' "$M" "$X"; }
 
+# create_task via chat is ALWAYS a preview now, never an immediate save
+# (lib/ai/actions.ts's create_task case — matches remove_task's own
+# always-confirm pattern; a model apology in prose doesn't persist to the
+# next turn, only a guarantee does). say <prompt>, then confirm_task taps
+# Create on the newest un-consumed task_creation_pending card, mirroring
+# the goal-preview tap pattern already used throughout this script.
+confirm_task() {
+  local msg
+  msg="$(val "select m.id as v from messages m join conversations c on c.id=m.conversation_id where c.user_id='$USER_ID' and m.meta->>'kind'='task_creation_pending' and (m.meta->>'createdTaskId') is null order by m.created_at desc limit 1")"
+  curl -s -X POST "$API/tasks" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d "{\"previewMessageId\":\"$msg\"}" > /dev/null
+  printf '     %s👆 tapped Create%s\n' "$M" "$X"
+}
+
 printf '%s═══ A. TASK TYPES ═══%s\n' "$B" "$X"
 say "add a task to call the dentist tomorrow at 3pm"
+ck "preview card, nothing saved yet" "$KIND" "task_creation_pending"
+confirm_task
 ck "completion task" "$(task dentist type)" "completion"
 
 say "add a daily task to drink 8 glasses of water"
+confirm_task
 ck "counter, target 8" "$(task water "config->>'target'")" "8"
 
 say "drank 3"
@@ -143,9 +159,11 @@ ck "target cascades to today's instance" "$(inst water "config->>'target'")" "10
 ck "progress survives the edit" "$(inst water "config->>'count'")" "3"
 
 say "add a 30 min reading task every day"
+confirm_task
 ck "duration, 30 min" "$(task read "config->>'targetMinutes'")" "30"
 
 say "packing list: passport, charger, socks"
+confirm_task
 ck "checklist, 3 items" "$(val "select jsonb_array_length(config->'items') as v from tasks where user_id='$USER_ID' and type='checklist' and deleted_at is null limit 1")" "3"
 
 say "check off the passport"
@@ -246,6 +264,7 @@ say "i want to save for a laptop"
 ck "no target stated -> no goal invented" "$(val "select count(*) as v from goals where user_id='$USER_ID' and name ilike '%laptop%' and archived_at is null")" "0"
 
 say "add a task to water the plants"
+confirm_task
 # A SECOND genuinely open "water" task, made fresh right here — Section C's
 # "did my water for today" already completed the daily water-counter's
 # today's instance, so relying on it for ambiguity would be luck-of-timing,
@@ -253,6 +272,7 @@ say "add a task to water the plants"
 # (lib/tasks/executor.ts's listOpenTaskTitles is deliberately status='open'
 # only), so the setup needs two OPEN water-titled tasks of its own.
 say "add a task to check the water filter"
+confirm_task
 DONE_BEFORE="$(val "select count(*) as v from tasks where user_id='$USER_ID' and status='done' and deleted_at is null")"
 say "mark water done"
 ck "ambiguous ref -> nothing written" "$(val "select count(*) as v from tasks where user_id='$USER_ID' and status='done' and deleted_at is null")" "$DONE_BEFORE"

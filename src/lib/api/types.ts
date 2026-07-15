@@ -27,6 +27,7 @@ export type ApiMemory = {
   content: string;
   sensitive: boolean;
   suppressed: boolean;
+  source: string;
   sourceMessageId: string | null;
   createdAt: string;
   deletedAt: string | null;

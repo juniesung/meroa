@@ -4,7 +4,7 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 
 import { db } from '../db/client.ts';
-import { tasks, users } from '../db/schema.ts';
+import { conversations, messages, tasks, users } from '../db/schema.ts';
 import { requireAuth, type AuthVariables } from '../middleware/auth.ts';
 import { taskStatusOrder } from '../lib/task-order.ts';
 import { materializeRecurringInstances } from '../lib/tasks/recurrence.ts';
@@ -62,16 +62,82 @@ taskRoutes.get('/', async (c) => {
   return c.json({ tasks: rows });
 });
 
-taskRoutes.post('/', zValidator('json', createTaskInputSchema), async (c) => {
+const createFromPreviewSchema = z.object({ previewMessageId: z.string().uuid() });
+
+// Two ways to create a task, same split as goals (routes/goals.ts): a full
+// definition (the Tasks-tab "+" sheet, always immediate — confirmBeforeCreate
+// never applies here), or `{previewMessageId}` confirming a chat preview
+// card (lib/ai/actions.ts's create_task case, when that preference is on).
+// `.strict()` isn't needed to disambiguate — a previewMessageId body fails
+// createTaskInputSchema's discriminated union (no `type`) and vice versa.
+const createTaskBodySchema = z.union([createFromPreviewSchema, createTaskInputSchema]);
+
+taskRoutes.post('/', zValidator('json', createTaskBodySchema), async (c) => {
   const userId = c.get('userId');
-  const input = c.req.valid('json');
+  const body = c.req.valid('json');
   const timezone = await getUserTimezone(userId);
+
+  if (!('previewMessageId' in body)) {
+    try {
+      const { task } = await createTask(userId, body, timezone, { source: 'tasks_ui' });
+      return c.json({ task }, 201);
+    } catch (err) {
+      const { status, body: errBody } = actionErrorResponse(err);
+      return c.json(errBody, status);
+    }
+  }
+
+  // Confirm-tap target for the AI's create_task preview card — create_task
+  // never writes a row itself when confirmBeforeCreate is on; this is the
+  // actual save, using the exact input that was shown on the card. Same
+  // idempotency shape as POST /goals's previewMessageId branch: a stamped
+  // meta.createdTaskId, checked first, so a retried or double tap never
+  // creates a second task.
+  const { previewMessageId } = body;
+  const [row] = await db
+    .select({ message: messages, conversationUserId: conversations.userId })
+    .from(messages)
+    .innerJoin(conversations, eq(messages.conversationId, conversations.id))
+    .where(eq(messages.id, previewMessageId))
+    .limit(1);
+  if (!row || row.conversationUserId !== userId) {
+    return c.json({ error: 'not_found', message: 'that preview no longer exists' }, 404);
+  }
+
+  const meta = row.message.meta as {
+    kind?: string;
+    preview?: unknown;
+    createdTaskId?: string;
+  };
+  if (meta.createdTaskId) {
+    const [existing] = await db
+      .select()
+      .from(tasks)
+      .where(and(eq(tasks.id, meta.createdTaskId), eq(tasks.userId, userId)))
+      .limit(1);
+    if (existing) return c.json({ task: existing }, 200);
+  }
+  if (meta.kind !== 'task_creation_pending' || !meta.preview) {
+    return c.json({ error: 'invalid_input', message: 'that message is not a task preview' }, 400);
+  }
+  const parsedPreview = createTaskInputSchema.safeParse(meta.preview);
+  if (!parsedPreview.success) {
+    return c.json({ error: 'invalid_input', message: 'stored preview is malformed' }, 400);
+  }
+
   try {
-    const { task } = await createTask(userId, input, timezone, { source: 'tasks_ui' });
+    const { task } = await createTask(userId, parsedPreview.data, timezone, {
+      source: 'chat',
+      sourceMessageId: previewMessageId,
+    });
+    await db
+      .update(messages)
+      .set({ meta: { ...meta, createdTaskId: task.id } })
+      .where(eq(messages.id, previewMessageId));
     return c.json({ task }, 201);
   } catch (err) {
-    const { status, body } = actionErrorResponse(err);
-    return c.json(body, status);
+    const { status, body: errBody } = actionErrorResponse(err);
+    return c.json(errBody, status);
   }
 });
 

@@ -226,6 +226,14 @@ export const goalEntries = pgTable(
 // --- memories ------------------------------------------------------------
 // Sensitivity + suppression are enforced at the schema/query level from
 // day one (CLAUDE.md §2: health/financial/emotional data is sensitive).
+// `kind` is a closed set on purpose — Phase 6's memory extractor (lib/ai/
+// memory-extractor.ts) is deliberately unable to invent a category, which
+// does more to keep the corpus tight than any amount of "only store
+// important things" prompt language. `source` distinguishes an explicit
+// remember-tool write (`chat_explicit`) from the batched background
+// extractor (`extracted`) from a user-authored row via the You tab
+// (`manual`) — the memory-controls UI shows this back as "you told me" vs
+// "from conversation" vs typed directly.
 export const memories = pgTable(
   'memories',
   {
@@ -237,14 +245,37 @@ export const memories = pgTable(
     content: text('content').notNull(),
     sensitive: boolean('sensitive').notNull().default(false),
     suppressed: boolean('suppressed').notNull().default(false),
+    source: text('source').notNull().default('manual'),
     sourceMessageId: uuid('source_message_id').references(() => messages.id, {
       onDelete: 'set null',
     }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
   },
-  (t) => [index('memories_user_idx').on(t.userId)],
+  (t) => [
+    index('memories_user_idx').on(t.userId),
+    check(
+      'memories_kind_check',
+      sql`${t.kind} in ('preference','trait','relationship','situation')`,
+    ),
+    check('memories_source_check', sql`${t.source} in ('chat_explicit','extracted','manual')`),
+  ],
 );
+
+// --- memory_extraction_state ----------------------------------------------
+// One row per user: the watermark the background extractor (lib/ai/memory-
+// extractor.ts) advances past. Batched rather than per-turn — memory is
+// slow-moving, and a model call per user message would be latency-free but
+// not cost-free (docs/chat-architecture.md's "never on the critical path"
+// applies to money too). `lastMessageId` is nullable so a user with zero
+// processed messages still gets a row on first touch, no special-casing.
+export const memoryExtractionState = pgTable('memory_extraction_state', {
+  userId: uuid('user_id')
+    .primaryKey()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  lastMessageId: uuid('last_message_id').references(() => messages.id, { onDelete: 'set null' }),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
 
 // --- entitlements --------------------------------------------------------
 // Server-side plan truth for Phase 7; never trust a client-asserted plan.
@@ -274,6 +305,10 @@ export const usersRelations = relations(users, ({ many, one }) => ({
   entitlement: one(entitlements, {
     fields: [users.id],
     references: [entitlements.userId],
+  }),
+  memoryExtractionState: one(memoryExtractionState, {
+    fields: [users.id],
+    references: [memoryExtractionState.userId],
   }),
 }));
 
@@ -319,6 +354,18 @@ export const goalEntriesRelations = relations(goalEntries, ({ one }) => ({
 
 export const memoriesRelations = relations(memories, ({ one }) => ({
   user: one(users, { fields: [memories.userId], references: [users.id] }),
+  sourceMessage: one(messages, {
+    fields: [memories.sourceMessageId],
+    references: [messages.id],
+  }),
+}));
+
+export const memoryExtractionStateRelations = relations(memoryExtractionState, ({ one }) => ({
+  user: one(users, { fields: [memoryExtractionState.userId], references: [users.id] }),
+  lastMessage: one(messages, {
+    fields: [memoryExtractionState.lastMessageId],
+    references: [messages.id],
+  }),
 }));
 
 export const entitlementsRelations = relations(entitlements, ({ one }) => ({
