@@ -1,5 +1,6 @@
 import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { Picker } from '@react-native-picker/picker';
+import { router } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { useState } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
@@ -11,6 +12,7 @@ import { isOverdue } from '@/components/TaskCard';
 import { useMe } from '@/features/profile/queries';
 import { useGoals } from '@/features/goals/queries';
 import { radii, theme } from '@/constants/theme';
+import { asLimitReached, limitReachedMessage } from '@/lib/api/limits';
 import type {
   ApiTask,
   ChecklistConfig,
@@ -169,6 +171,7 @@ function TaskFormBody({ task, onClose }: { task?: ApiTask; onClose: () => void }
   }
 
   const submitting = createTask.isPending || editTask.isPending;
+  const [formError, setFormError] = useState<string | null>(null);
 
   function validTitle() {
     return title.trim().length > 0;
@@ -277,7 +280,14 @@ function TaskFormBody({ task, onClose }: { task?: ApiTask; onClose: () => void }
         break;
       }
     }
-    createTask.mutate(input, { onSuccess: onClose });
+    setFormError(null);
+    createTask.mutate(input, {
+      onSuccess: onClose,
+      onError: (err) => {
+        const limit = asLimitReached(err);
+        setFormError(limit ? limitReachedMessage(limit) : "Couldn't create that — try again.");
+      },
+    });
   }
 
   function handleReason(reason: 'bad_timing' | 'low_energy' | 'avoided') {
@@ -575,6 +585,17 @@ function TaskFormBody({ task, onClose }: { task?: ApiTask; onClose: () => void }
         </Text>
       </Pressable>
 
+      {formError && (
+        <View style={styles.errorBox}>
+          <Text style={styles.errorText}>{formError}</Text>
+          {asLimitReached(createTask.error) && (
+            <Text style={styles.upgradeLink} onPress={() => router.push('/paywall')}>
+              Upgrade to Meroa Plus →
+            </Text>
+          )}
+        </View>
+      )}
+
       <PrimaryButton
         label={submitting ? 'Saving…' : isEdit ? 'Save changes' : 'Create task'}
         onPress={canSubmit() ? handleSubmit : undefined}
@@ -687,6 +708,9 @@ function Chip({
 }
 
 const styles = StyleSheet.create({
+  errorBox: { marginTop: 16, gap: 6 },
+  errorText: { color: theme.danger, fontSize: 13, textAlign: 'center' },
+  upgradeLink: { color: theme.blue, fontSize: 13, fontWeight: '600', textAlign: 'center' },
   fieldLabel: {
     color: theme.dim,
     fontSize: 11,

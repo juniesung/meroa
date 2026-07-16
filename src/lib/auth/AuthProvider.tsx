@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 
+import { logOutPurchases } from '@/features/billing/purchases';
 import { api, setSessionExpiredHandler } from '@/lib/api/client';
 import type { AuthTokens } from '@/lib/api/types';
 
@@ -35,6 +36,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       },
       signOut: async () => {
         await api.logout();
+        await logOutPurchases();
         setStatus('signedOut');
       },
     }),

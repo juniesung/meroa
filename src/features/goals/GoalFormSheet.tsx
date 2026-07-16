@@ -1,4 +1,5 @@
 import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
+import { router } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { useState, type Dispatch, type SetStateAction } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
@@ -8,6 +9,7 @@ import { PrimaryButton } from '@/components/PrimaryButton';
 import { Icon, type IconName } from '@/components/Icon';
 import { radii, theme } from '@/constants/theme';
 import type { ApiGoal, CreateGoalParams, EditGoalPatch, GoalTemplateKey, PlannedTask } from '@/lib/api/types';
+import { asLimitReached, limitReachedMessage } from '@/lib/api/limits';
 import { useCreateGoal, useEditGoal } from './queries';
 
 const TYPE_OPTIONS: { type: GoalTemplateKey; label: string; icon: IconName }[] = [
@@ -98,6 +100,7 @@ function GoalFormBody({ goal, onClose }: { goal?: ApiGoal; onClose: () => void }
   const createGoal = useCreateGoal();
   const editGoal = useEditGoal();
   const submitting = createGoal.isPending || editGoal.isPending;
+  const [formError, setFormError] = useState<string | null>(null);
 
   const [type, setType] = useState<GoalTemplateKey>(definition?.type ?? 'savings');
   const [name, setName] = useState(goal?.name ?? '');
@@ -261,7 +264,14 @@ function GoalFormBody({ goal, onClose }: { goal?: ApiGoal; onClose: () => void }
       const laterPlans = stages.slice(1).map((s) => s.tasks.map(toPlannedTask));
       if (laterPlans.some((p) => p.length)) params.stagePlans = [[], ...laterPlans];
     }
-    createGoal.mutate(params, { onSuccess: onClose });
+    setFormError(null);
+    createGoal.mutate(params, {
+      onSuccess: onClose,
+      onError: (err) => {
+        const limit = asLimitReached(err);
+        setFormError(limit ? limitReachedMessage(limit) : "Couldn't create that — try again.");
+      },
+    });
   }
 
   return (
@@ -441,6 +451,17 @@ function GoalFormBody({ goal, onClose }: { goal?: ApiGoal; onClose: () => void }
             </View>
           )}
         </>
+      )}
+
+      {formError && (
+        <View style={styles.errorBox}>
+          <Text style={styles.errorText}>{formError}</Text>
+          {asLimitReached(createGoal.error) && (
+            <Text style={styles.upgradeLink} onPress={() => router.push('/paywall')}>
+              Upgrade to Meroa Plus →
+            </Text>
+          )}
+        </View>
       )}
 
       <PrimaryButton
@@ -624,6 +645,9 @@ function Chip({
 }
 
 const styles = StyleSheet.create({
+  errorBox: { marginTop: 16, gap: 6 },
+  errorText: { color: theme.danger, fontSize: 13, textAlign: 'center' },
+  upgradeLink: { color: theme.blue, fontSize: 13, fontWeight: '600', textAlign: 'center' },
   fieldLabel: { color: theme.dim, fontSize: 11, fontWeight: '700', letterSpacing: 1, marginTop: 18, marginBottom: 8 },
   hint: { color: theme.faint, fontSize: 12, marginTop: -2, marginBottom: 8, lineHeight: 16 },
   lockedValue: { color: theme.text, fontSize: 15, paddingVertical: 4 },

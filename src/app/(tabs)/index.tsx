@@ -43,6 +43,7 @@ import { useMe } from '@/features/profile/queries';
 import { VibePickerSheet } from '@/features/profile/VibePickerSheet';
 import { vibeLabel } from '@/features/profile/vibes';
 import { useTabBarHeight } from '@/hooks/use-tab-bar-inset';
+import { asLimitReached, limitReachedMessage } from '@/lib/api/limits';
 import type { AdvanceStageProposal, ApiTask, CreateTaskInput, GoalPreview, StarterTask } from '@/lib/api/types';
 import { formatMoney } from '@/lib/format';
 import { toIconName } from '@/lib/icon';
@@ -365,6 +366,29 @@ function TaskPreviewCard({ message }: { message: ChatMessage }) {
           </Pressable>
         </View>
       )}
+      {createTaskFromPreview.isError && !created && (
+        <PreviewLimitBanner error={createTaskFromPreview.error} />
+      )}
+    </View>
+  );
+}
+
+// A TOCTOU edge case (rare — see docs/phase-7 plan): the AI's create_task
+// pre-check passes, then the free-plan quota gets used up elsewhere before
+// this exact card is tapped. The card can't prevent it, only fail gracefully
+// instead of doing nothing on tap.
+function PreviewLimitBanner({ error }: { error: unknown }) {
+  const limit = asLimitReached(error);
+  return (
+    <View style={styles.previewErrorBox}>
+      <Text style={styles.previewErrorText}>
+        {limit ? limitReachedMessage(limit) : "Couldn't create — try again."}
+      </Text>
+      {limit && (
+        <Text style={styles.previewUpgradeLink} onPress={() => router.push('/paywall')}>
+          Upgrade to Meroa Plus →
+        </Text>
+      )}
     </View>
   );
 }
@@ -471,6 +495,9 @@ function GoalPreviewCard({ message }: { message: ChatMessage }) {
             <Text style={styles.removalConfirmText}>Create</Text>
           </Pressable>
         </View>
+      )}
+      {createGoalFromPreview.isError && !created && (
+        <PreviewLimitBanner error={createGoalFromPreview.error} />
       )}
       {detail ? <Text style={styles.actionDetail}>{detail}</Text> : null}
     </View>
@@ -675,9 +702,11 @@ function MessageRow({
         </Pressable>
       )}
       {message.status === 'limit_reached' && (
-        <View style={styles.statusRow}>
-          <Text style={styles.statusText}>You&apos;ve reached today&apos;s message limit</Text>
-        </View>
+        <Pressable onPress={() => router.push('/paywall')} style={styles.statusRow} hitSlop={8}>
+          <Text style={styles.statusText}>
+            You&apos;ve reached today&apos;s message limit · Upgrade for more →
+          </Text>
+        </Pressable>
       )}
     </View>
   );
@@ -936,6 +965,9 @@ const styles = StyleSheet.create({
     borderRadius: radii.controlTight,
     backgroundColor: theme.blue,
   },
+  previewErrorBox: { paddingHorizontal: 14, paddingBottom: 12, gap: 4 },
+  previewErrorText: { color: theme.danger, fontSize: 12 },
+  previewUpgradeLink: { color: theme.blue, fontSize: 12, fontWeight: '600' },
   header: {
     flexDirection: 'row',
     alignItems: 'center',

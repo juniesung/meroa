@@ -5,6 +5,7 @@ import { z } from 'zod';
 
 import { db } from '../db/client.ts';
 import { entitlements, users } from '../db/schema.ts';
+import { resolvePlan } from '../lib/billing/plan.ts';
 import { requireAuth, type AuthVariables } from '../middleware/auth.ts';
 
 export const meRoutes = new Hono<{ Variables: AuthVariables }>();
@@ -30,9 +31,7 @@ meRoutes.get('/', async (c) => {
       timezone: user.timezone,
       prefs: user.prefs,
     },
-    entitlement: entitlement
-      ? { plan: entitlement.plan, expiresAt: entitlement.expiresAt }
-      : { plan: 'free', expiresAt: null },
+    entitlement: { plan: resolvePlan(entitlement), expiresAt: entitlement?.expiresAt ?? null },
   });
 });
 

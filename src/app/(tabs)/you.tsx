@@ -94,7 +94,11 @@ export default function YouScreen() {
         </Section>
 
         <Section title="ACCOUNT">
-          <Row icon="crown" label="Manage subscription" />
+          <Row
+            icon="crown"
+            label={data?.entitlement.plan === 'plus' ? 'Manage subscription' : 'Upgrade to Meroa Plus'}
+            onPress={() => router.push('/paywall')}
+          />
           <Row icon="logout" label="Sign out" danger onPress={() => signOut()} />
         </Section>
 

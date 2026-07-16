@@ -448,7 +448,14 @@ export async function* streamChatReplyActNarrate(
           toolCallLog.push({ name: call.function.name, ok: false, error: result.error });
           failureFacts.push(result.error);
           toolResultMessages.push({ role: 'tool', tool_call_id: call.id, content: result.error });
-          needsAnotherRound = true; // corrective error — give it a chance to fix and retry
+          // Ordinarily a corrective error is worth another round — give the
+          // model a chance to fix and retry. A small set of failures
+          // (result.retryable === false — a free-plan creation cap) are
+          // deterministic within this turn: nothing the model does changes
+          // the outcome, so looping just spends a guaranteed-empty round
+          // trip. The "do not retry" sentence in the fact usually gets a
+          // no_action next round anyway; this just stops paying for it.
+          if (result.retryable !== false) needsAnotherRound = true;
         }
       }
 

@@ -18,6 +18,7 @@ import {
   isStyleAdjustments,
   type ChatUserContext,
 } from '../lib/ai/system-prompt.ts';
+import { computeActiveGoalAllowance, computeTaskCreateAllowance } from '../lib/limits.ts';
 import { listMemories } from '../lib/memories/executor.ts';
 import { buildTaskContext } from '../lib/ai/task-context.ts';
 import { buildGoalContext } from '../lib/ai/goal-context.ts';
@@ -191,16 +192,16 @@ messageRoutes.post('/', zValidator('json', sendSchema), async (c) => {
       .values({ conversationId: conversation.id, role: 'user', content: text })
       .returning();
     if (!userMessage) throw new Error('message_insert_failed');
-    return { limited: false as const, userMessage };
+    return { limited: false as const, userMessage, allowance };
   });
 
   if (result.limited) {
     return c.json(
-      { error: 'limit_reached', plan: result.allowance.plan, limit: result.allowance.limit },
+      { error: 'limit_reached', feature: 'messages', plan: result.allowance.plan, limit: result.allowance.limit },
       429,
     );
   }
-  const { userMessage } = result;
+  const { userMessage, allowance: chatAllowance } = result;
 
   const [user] = await db
     .select({ displayName: users.displayName, timezone: users.timezone, prefs: users.prefs })
@@ -306,9 +307,12 @@ messageRoutes.post('/', zValidator('json', sendSchema), async (c) => {
   // rest runs concurrently instead of as a four-query chain (measured 418ms
   // sequential, and every millisecond here is upstream of the first token).
   await materializeRecurringInstances(userId, userContext.timezone, db);
-  const [taskContext, consistency] = await Promise.all([
+  const isFreePlan = chatAllowance.plan === 'free';
+  const [taskContext, consistency, taskAllowance, goalAllowance] = await Promise.all([
     buildTaskContext(userId, userContext.timezone),
     buildGoalConsistency(userId, userContext.timezone),
+    isFreePlan ? computeTaskCreateAllowance(db, userId) : Promise.resolve(null),
+    isFreePlan ? computeActiveGoalAllowance(db, userId) : Promise.resolve(null),
   ]);
   // Appends into the same TurnRefs map task context just built — one ref
   // namespace ("T*"/"G*") covers both tasks and goals for the turn.
@@ -373,6 +377,20 @@ messageRoutes.post('/', zValidator('json', sendSchema), async (c) => {
   // current state, so it cannot say anything stale. So it simply doesn't get it.
   // A pass cannot announce what it cannot see — which is a guarantee, where "do
   // not announce this" would only have been a request.
+  // Free-plan-only fact so the ACT pass can decline a doomed create_task/
+  // create_goal gracefully before ever attempting it, the NARRATE pass can
+  // quote the real remaining counts if asked or if a create just failed,
+  // and the figure guard's stateFactsText sees these numbers as grounded
+  // (chat-architecture.md §9: every number is server-computed and quoted).
+  // Omitted entirely for Plus — there is nothing to say. Rides sharedTail,
+  // not a separate block, so it reaches ACT/NARRATE/guards in one place and
+  // is deliberately absent from conversationTailText (the fast path gets
+  // only the clock — no plan/limit talk on a plain greeting).
+  const limitsText =
+    taskAllowance && goalAllowance
+      ? `Plan: free. New tasks left today: ${taskAllowance.remaining} of ${taskAllowance.limit} (resets on a rolling 24-hour window). Active goals: ${goalAllowance.used} of ${goalAllowance.limit}${goalAllowance.remaining === 0 ? ' (at the limit)' : ''}. Completing tasks and logging progress are never limited. Meroa Plus lifts these caps.`
+      : undefined;
+
   const sharedTail = {
     now: new Date(),
     timezone: userContext.timezone,
@@ -381,6 +399,7 @@ messageRoutes.post('/', zValidator('json', sendSchema), async (c) => {
     goalListText: goalContext.text,
     streakText,
     pendingPreviewText,
+    limitsText,
   };
   const tailText = buildTailBlock({ ...sharedTail, recentChangesText, undoTargetText });
   // recentChangesText is grounding for the ACT pass only (undo needs to know

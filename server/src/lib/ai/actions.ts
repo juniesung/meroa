@@ -21,6 +21,7 @@ import {
 import { eq } from 'drizzle-orm';
 import { db } from '../../db/client.ts';
 import { users } from '../../db/schema.ts';
+import { computeActiveGoalAllowance, computeTaskCreateAllowance } from '../limits.ts';
 import { findAmbiguousTaskMatch, normalizeForMatch } from './ambiguity.ts';
 import { isStyleAdjustments, type StyleAdjustments } from './system-prompt.ts';
 import { createMemory, raiseSensitivityIfNeeded, type MemoryRow } from '../memories/executor.ts';
@@ -150,7 +151,13 @@ export type TaskActionResult =
   // remember — a real write with a real card, unlike adjust_style. Routes
   // through the ordinary §3 silence flow: the card IS the confirmation.
   | { ok: true; toolName: AiToolName; memory: MemoryRow; summary: string; recordKind: 'memory_action' }
-  | { ok: false; error: string };
+  // `retryable` defaults to true (the ordinary case: a corrective error the
+  // model should act on this same turn — see providers/act-narrate.ts's
+  // needsAnotherRound). Set false only for a failure that's deterministic
+  // within the turn — retrying changes nothing until real state changes
+  // (e.g. a free-plan creation cap) — so the loop doesn't spend a
+  // guaranteed-empty round trip on it.
+  | { ok: false; error: string; retryable?: boolean };
 
 // "$150" (savings), "175lb" (indirect — the unit trails, never a currency
 // prefix), or "$150 (birthday money)" with a note — used both to confirm
@@ -636,6 +643,7 @@ function wrapFailure(result: TaskActionResult): TaskActionResult {
   return {
     ok: false,
     error: `ACTION NOT COMPLETED — nothing was changed. ${result.error}\nTell the user you couldn't do this; do not describe it as done or already done.`,
+    retryable: result.retryable,
   };
 }
 
@@ -684,6 +692,22 @@ async function executeAiToolCallInner(
       case 'create_task': {
         const validated = validateToolInput('create_task', rawInput);
         if (!validated.ok) return { ok: false, error: validated.error };
+
+        // Checked here, not only at the confirm-tap route, so an at-limit
+        // turn never mints a preview card whose Create tap would then 429 —
+        // chat-architecture.md's "the card is the confirmation" means a card
+        // that fails on tap is a lie. A rare TOCTOU (quota consumed between
+        // this check and the tap) still lands gracefully client-side. Read-
+        // only against `db`, not a lock — the real, atomic enforcement is
+        // routes/tasks.ts's withUserLock at write time.
+        const taskAllowance = await computeTaskCreateAllowance(db, userId);
+        if (!taskAllowance.allowed) {
+          return {
+            ok: false,
+            retryable: false,
+            error: `Not created — their free plan's ${taskAllowance.limit} new task${taskAllowance.limit === 1 ? '' : 's'} per day ${taskAllowance.limit === 1 ? 'is' : 'are'} already used up (resets on a rolling 24-hour window, not midnight). Do not retry — it will fail again until then. Completing, editing, and progressing existing tasks is never limited. Meroa Plus removes this cap.`,
+          };
+        }
 
         let goalId: string | undefined;
         let goalContribution: number | undefined;
@@ -1092,6 +1116,17 @@ async function executeAiToolCallInner(
       case 'create_goal': {
         const validated = validateToolInput('create_goal', rawInput);
         if (!validated.ok) return { ok: false, error: validated.error };
+
+        // Same reasoning as create_task's cap check above — never mint a
+        // goal preview the confirm tap can't actually save.
+        const goalAllowance = await computeActiveGoalAllowance(db, userId);
+        if (!goalAllowance.allowed) {
+          return {
+            ok: false,
+            retryable: false,
+            error: `Not created — the free plan allows ${goalAllowance.limit} active goal${goalAllowance.limit === 1 ? '' : 's'} and they already have ${goalAllowance.used}. Do not retry — it will fail again. They can archive their current goal to free a slot, or Meroa Plus allows multiple active goals.`,
+          };
+        }
 
         // Never saves — this returns a preview only (docs/goals-redesign-
         // plan.md §2.1). POST /goals {previewMessageId} does the actual

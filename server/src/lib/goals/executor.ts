@@ -21,7 +21,7 @@ import {
 
 export type GoalRow = typeof goals.$inferSelect;
 export type GoalEntryRow = typeof goalEntries.$inferSelect;
-type Tx = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
+export type Tx = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 export class GoalActionError extends Error {
   code: 'not_found' | 'invalid_input';
@@ -163,6 +163,141 @@ export async function listGoalRetireCandidates(
 // `config.goalContribution` — the connected loop's setup half
 // (docs/goals-redesign-plan.md §2.3); the other half lives in
 // lib/tasks/executor.ts's applyProgress.
+// Transaction-parameterized core (mirrors tasks/executor.ts's
+// createTaskInTx) — routes/goals.ts wraps this in withUserLock so the
+// free-plan active-goal cap check and the insert are atomic.
+export async function createGoalInTx(
+  tx: Tx,
+  userId: string,
+  input: {
+    template: GoalTemplateKey;
+    name: string;
+    icon?: string | null;
+    definition: GoalDefinition;
+    starterTasks?: StarterTask[];
+  },
+  timezone: string | null,
+  opts: ActionSource,
+): Promise<{ goal: GoalRow; tasks: TaskRow[] }> {
+  const idempotent = await findIdempotentGoalRecord(tx, userId, opts, 'goal_created');
+  if (idempotent) {
+    const payload = idempotent.payload as { goalId: string };
+    const [existingGoal] = await tx.select().from(goals).where(eq(goals.id, payload.goalId)).limit(1);
+    if (existingGoal) {
+      const linkedTasks = await tx.select().from(tasks).where(eq(tasks.goalId, existingGoal.id));
+      return { goal: existingGoal, tasks: linkedTasks };
+    }
+  }
+
+  const definition = goalDefinitionSchema.parse(input.definition);
+
+  const [goal] = await tx
+    .insert(goals)
+    .values({
+      userId,
+      template: input.template,
+      name: input.name,
+      icon: input.icon ?? null,
+      version: 1,
+      definition,
+    })
+    .returning();
+  if (!goal) throw new Error('goal_insert_failed');
+
+  const createdTasks: TaskRow[] = [];
+  for (const [index, starter] of (input.starterTasks ?? []).entries()) {
+    const { task: created } = await createTaskInTx(
+      tx,
+      userId,
+      { type: 'completion', title: starter.title, recurrence: starter.recurrence, reminder: false },
+      timezone,
+      // Each starter gets its own toolCallId — createTaskInTx's idempotency
+      // otherwise keys on (sourceMessageId, 'task_created') alone, and with
+      // every starter sharing this create's sourceMessageId, starter #2
+      // would find starter #1's record and silently return it instead of
+      // creating anything (caught by the as-a-user test pass, not live).
+      { ...opts, toolCallId: `starter:${index}` },
+      // The Create tap is one user action — the goal_created record below
+      // (payload.starterTaskIds) is its single record; per-starter
+      // task_created records would tie with it on createdAt (same
+      // transaction, same frozen now()) and make undo's "most recent
+      // record" pick nondeterministic.
+      { skipRecord: true },
+    );
+    // Recurring: createTaskInTx materialized instances from the template
+    // BEFORE the goal link exists on it (the stamp below) — so every
+    // instance row that materialization just created must be stamped too,
+    // not only the template. Crucially that is NOT always just today's:
+    // the first-ever-run bump in recurrence.ts can materialize the first
+    // instance for *tomorrow* (a daily time that already passed — hit
+    // live: the model set time "11:53" at 11:53:38, the instance landed
+    // on tomorrow, was never returned as "today's instance", stayed
+    // unlinked, and completing it moved nothing). Stamping every instance
+    // of the template closes that hole for any occurrence date.
+    const templateId = created.templateId ?? created.id;
+    // Habit starters never stamp a contribution — even if one slipped past
+    // the schema, a stamped amount would make the completion hook insert
+    // goal_entries against a goal that must have none (the completions ARE
+    // the record). Only savings starters stamp an auto-log amount.
+    const contributionExtra =
+      input.definition.type === 'savings' && starter.contribution !== undefined
+        ? { goalContribution: starter.contribution }
+        : {};
+    const [templateRow] = await tx.select().from(tasks).where(eq(tasks.id, templateId)).limit(1);
+    if (!templateRow) throw new Error('task_insert_failed');
+    const [updatedTemplate] = await tx
+      .update(tasks)
+      .set({
+        goalId: goal.id,
+        config: { ...(templateRow.config as Record<string, unknown>), ...contributionExtra },
+      })
+      .where(eq(tasks.id, templateId))
+      .returning();
+    if (!updatedTemplate) throw new Error('task_update_failed');
+
+    const instances = await tx.select().from(tasks).where(eq(tasks.templateId, templateId));
+    let returnedInstance: TaskRow | null = null;
+    for (const instance of instances) {
+      const [updatedInstance] = await tx
+        .update(tasks)
+        .set({
+          goalId: goal.id,
+          config: { ...(instance.config as Record<string, unknown>), ...contributionExtra },
+        })
+        .where(eq(tasks.id, instance.id))
+        .returning();
+      if (!updatedInstance) throw new Error('task_update_failed');
+      if (created.id === instance.id) returnedInstance = updatedInstance;
+    }
+
+    createdTasks.push(returnedInstance ?? updatedTemplate);
+  }
+
+  // The goal_created record is inserted *after* the starter tasks' own
+  // task_created records, deliberately — undo_last_action reverts the most
+  // recent record, and a user saying "undo that" right after tapping
+  // Create means the whole thing, not just the last starter task. Its
+  // payload carries the starter template ids so undoGoalRecord
+  // (lib/tasks/executor.ts) can cascade them away with the goal.
+  await tx.insert(records).values({
+    userId,
+    kind: 'goal_created',
+    payload: {
+      goalId: goal.id,
+      name: goal.name,
+      starterTaskIds: createdTasks.map((t) => t.templateId ?? t.id),
+    },
+    source: opts.source,
+    sourceMessageId: opts.sourceMessageId ?? null,
+    toolCallId: opts.toolCallId ?? null,
+  });
+
+  return { goal, tasks: createdTasks };
+}
+
+// Non-transactional wrapper for callers with no existing tx (kept for any
+// direct caller other than routes/goals.ts, which uses createGoalInTx inside
+// withUserLock so the active-goal cap check and the insert are atomic).
 export async function createGoal(
   userId: string,
   input: {
@@ -175,122 +310,7 @@ export async function createGoal(
   timezone: string | null,
   opts: ActionSource,
 ): Promise<{ goal: GoalRow; tasks: TaskRow[] }> {
-  return db.transaction(async (tx) => {
-    const idempotent = await findIdempotentGoalRecord(tx, userId, opts, 'goal_created');
-    if (idempotent) {
-      const payload = idempotent.payload as { goalId: string };
-      const [existingGoal] = await tx.select().from(goals).where(eq(goals.id, payload.goalId)).limit(1);
-      if (existingGoal) {
-        const linkedTasks = await tx.select().from(tasks).where(eq(tasks.goalId, existingGoal.id));
-        return { goal: existingGoal, tasks: linkedTasks };
-      }
-    }
-
-    const definition = goalDefinitionSchema.parse(input.definition);
-
-    const [goal] = await tx
-      .insert(goals)
-      .values({
-        userId,
-        template: input.template,
-        name: input.name,
-        icon: input.icon ?? null,
-        version: 1,
-        definition,
-      })
-      .returning();
-    if (!goal) throw new Error('goal_insert_failed');
-
-    const createdTasks: TaskRow[] = [];
-    for (const [index, starter] of (input.starterTasks ?? []).entries()) {
-      const { task: created } = await createTaskInTx(
-        tx,
-        userId,
-        { type: 'completion', title: starter.title, recurrence: starter.recurrence, reminder: false },
-        timezone,
-        // Each starter gets its own toolCallId — createTaskInTx's idempotency
-        // otherwise keys on (sourceMessageId, 'task_created') alone, and with
-        // every starter sharing this create's sourceMessageId, starter #2
-        // would find starter #1's record and silently return it instead of
-        // creating anything (caught by the as-a-user test pass, not live).
-        { ...opts, toolCallId: `starter:${index}` },
-        // The Create tap is one user action — the goal_created record below
-        // (payload.starterTaskIds) is its single record; per-starter
-        // task_created records would tie with it on createdAt (same
-        // transaction, same frozen now()) and make undo's "most recent
-        // record" pick nondeterministic.
-        { skipRecord: true },
-      );
-      // Recurring: createTaskInTx materialized instances from the template
-      // BEFORE the goal link exists on it (the stamp below) — so every
-      // instance row that materialization just created must be stamped too,
-      // not only the template. Crucially that is NOT always just today's:
-      // the first-ever-run bump in recurrence.ts can materialize the first
-      // instance for *tomorrow* (a daily time that already passed — hit
-      // live: the model set time "11:53" at 11:53:38, the instance landed
-      // on tomorrow, was never returned as "today's instance", stayed
-      // unlinked, and completing it moved nothing). Stamping every instance
-      // of the template closes that hole for any occurrence date.
-      const templateId = created.templateId ?? created.id;
-      // Habit starters never stamp a contribution — even if one slipped past
-      // the schema, a stamped amount would make the completion hook insert
-      // goal_entries against a goal that must have none (the completions ARE
-      // the record). Only savings starters stamp an auto-log amount.
-      const contributionExtra =
-        input.definition.type === 'savings' && starter.contribution !== undefined
-          ? { goalContribution: starter.contribution }
-          : {};
-      const [templateRow] = await tx.select().from(tasks).where(eq(tasks.id, templateId)).limit(1);
-      if (!templateRow) throw new Error('task_insert_failed');
-      const [updatedTemplate] = await tx
-        .update(tasks)
-        .set({
-          goalId: goal.id,
-          config: { ...(templateRow.config as Record<string, unknown>), ...contributionExtra },
-        })
-        .where(eq(tasks.id, templateId))
-        .returning();
-      if (!updatedTemplate) throw new Error('task_update_failed');
-
-      const instances = await tx.select().from(tasks).where(eq(tasks.templateId, templateId));
-      let returnedInstance: TaskRow | null = null;
-      for (const instance of instances) {
-        const [updatedInstance] = await tx
-          .update(tasks)
-          .set({
-            goalId: goal.id,
-            config: { ...(instance.config as Record<string, unknown>), ...contributionExtra },
-          })
-          .where(eq(tasks.id, instance.id))
-          .returning();
-        if (!updatedInstance) throw new Error('task_update_failed');
-        if (created.id === instance.id) returnedInstance = updatedInstance;
-      }
-
-      createdTasks.push(returnedInstance ?? updatedTemplate);
-    }
-
-    // The goal_created record is inserted *after* the starter tasks' own
-    // task_created records, deliberately — undo_last_action reverts the most
-    // recent record, and a user saying "undo that" right after tapping
-    // Create means the whole thing, not just the last starter task. Its
-    // payload carries the starter template ids so undoGoalRecord
-    // (lib/tasks/executor.ts) can cascade them away with the goal.
-    await tx.insert(records).values({
-      userId,
-      kind: 'goal_created',
-      payload: {
-        goalId: goal.id,
-        name: goal.name,
-        starterTaskIds: createdTasks.map((t) => t.templateId ?? t.id),
-      },
-      source: opts.source,
-      sourceMessageId: opts.sourceMessageId ?? null,
-      toolCallId: opts.toolCallId ?? null,
-    });
-
-    return { goal, tasks: createdTasks };
-  });
+  return db.transaction((tx) => createGoalInTx(tx, userId, input, timezone, opts));
 }
 
 // --- edit (constrained ops) ---------------------------------------------

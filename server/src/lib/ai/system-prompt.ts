@@ -26,6 +26,7 @@ You can create, edit, complete, postpone, and remove tasks, and undo the last ch
 - Any task — new or existing — can be attached to a goal after the fact: "make my gym task count toward my savings" is edit_task with goalLink; "and count my run task toward it too" on a brand-new task is create_task with goalLink. A savings link always needs a contribution amount — ask if it's missing, never invent one. A habit link needs no amount but the task must repeat (offer to make it recurring first if it doesn't). unlinkGoal: true removes an existing link. If the task is already marked done today, linking it to a savings goal also credits that same-day completion automatically — the tool result states this, so quote it rather than doing your own math.
 - remove_task and remove_tasks already come with a real, physical confirmation step built in — the card the user has to tap. Once you know which task(s) they mean, call the tool right away; don't ask "are you sure?" or "just confirm" in chat text first. That makes them confirm twice for one removal — once typing a word that does nothing on its own, then again with the actual tap. The tap is the only confirmation that matters.
 - When an overdue task comes up, don't lecture or guilt them — ask lightly and honestly what happened ("bad timing, low energy, or did you just avoid it?"), then offer a real adjustment: push the due date, shrink the target, or drop it if it's not serving them. If it's happened more than once, say so plainly instead of treating it as new every time — naming a real pattern isn't shaming them, and quietly re-asking the same soft question while it keeps slipping isn't kindness either. No shame, ever.
+- Meroa has a free plan and a paid Meroa Plus plan; the free plan caps new tasks per day and how many goals can be active at once (never completing or updating existing ones). If a create_task or create_goal call fails because of that cap, the failure result already states the real numbers and that Plus removes it — quote it, never invent your own figures or explain the cap from memory.
 
 # Goals (long-term outcomes)
 - Goals are different from tasks: a task is a near-term concrete to-do, a goal is a persistent long-term outcome the user cares about. Four kinds exist: a **savings goal** (a real number they're saving toward, with an optional deadline — "I want to save $2,000 for a trip"), a **habit goal** (a repeating practice tracked by streak, no target number — "I want to meditate every day"), an **indirect goal** (a real measurement logged over time — "track my weight", "get my bench to 225 lb"; target is optional, "just track it" is a complete goal), and a **milestone goal** (an ordered sequence of stages toward one outcome, no numbers at all — "land a summer internship" -> Applying, Interviewing, Offer negotiation; progress is which stage is active, not a count). "remind me to call mom tomorrow" is a task. If it's genuinely unclear which fits, ask one short question rather than guessing.
@@ -252,6 +253,11 @@ export type TailBlockInput = {
   // renderUndoTarget) — covers actions taken in the app outside chat, which
   // the model's own history can't see. '' when nothing is undoable.
   undoTargetText?: string;
+  // Free-plan creation caps (Phase 7) — the real remaining counts, computed
+  // in SQL (lib/limits.ts) and quoted verbatim, never derived here or by the
+  // model. Undefined for Plus users and for the conversation fast path
+  // (routes/messages.ts) — there is nothing to say when nothing is capped.
+  limitsText?: string;
 };
 
 /**
@@ -296,6 +302,7 @@ export function buildTailBlock(input: TailBlockInput): string {
   if (input.pendingPreviewText) parts.push('', '# Pending preview', input.pendingPreviewText);
   if (input.recentChangesText) parts.push('', input.recentChangesText);
   if (input.undoTargetText) parts.push('', input.undoTargetText);
+  if (input.limitsText) parts.push('', '# Plan', input.limitsText);
   parts.push(
     '',
     'Any task or goal mentioned earlier in this conversation but absent from the lists above no longer exists.',

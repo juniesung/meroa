@@ -5,6 +5,7 @@ import { cors } from 'hono/cors';
 import { env } from './env.ts';
 import { logger } from './logger.ts';
 import { authRoutes } from './routes/auth.ts';
+import { billingRoutes } from './routes/billing.ts';
 import { bootstrapRoutes } from './routes/bootstrap.ts';
 import { meRoutes } from './routes/me.ts';
 import { memoryRoutes } from './routes/memories.ts';
@@ -27,6 +28,7 @@ app.route('/conversations/current/messages', messageRoutes);
 app.route('/tasks', taskRoutes);
 app.route('/goals', goalRoutes);
 app.route('/memories', memoryRoutes);
+app.route('/billing', billingRoutes);
 
 serve({ fetch: app.fetch, port: env.PORT }, (info) => {
   logger.info(`meroa-server listening on http://localhost:${info.port}`);

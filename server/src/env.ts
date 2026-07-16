@@ -29,6 +29,18 @@ const schema = z.object({
   // remember to revert it.
   FREE_DAILY_MESSAGES: z.coerce.number().int().positive().default(50),
   PLUS_DAILY_MESSAGES: z.coerce.number().int().positive().default(1000),
+  // Phase 7 billing: RevenueCat is the receipt-verification layer; the
+  // `entitlements` table stays the source of truth (lib/billing/entitlement.ts
+  // always refetches RC's current subscriber state rather than trusting event
+  // payloads). Optional so the server boots without billing configured —
+  // routes/billing.ts returns 503 billing_unconfigured until these are set.
+  REVENUECAT_SECRET_API_KEY: z.string().optional(),
+  REVENUECAT_WEBHOOK_SECRET: z.string().optional(),
+  REVENUECAT_ENTITLEMENT_ID: z.string().default('plus'),
+  // Free-plan creation caps (core three, CLAUDE.md §2/phase-7): task/goal
+  // creation only — never completion or progress (lib/limits.ts).
+  FREE_DAILY_TASKS: z.coerce.number().int().positive().default(2),
+  FREE_MAX_ACTIVE_GOALS: z.coerce.number().int().positive().default(1),
 });
 
 export const env = schema

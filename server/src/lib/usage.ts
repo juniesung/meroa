@@ -3,6 +3,7 @@ import { and, eq, gte, sql } from 'drizzle-orm';
 import { db } from '../db/client.ts';
 import { conversations, entitlements, messages } from '../db/schema.ts';
 import { env } from '../env.ts';
+import { resolvePlan } from './billing/plan.ts';
 
 // Free vs premium chat allowances (CLAUDE.md §2: enforced server-side, never
 // client-trusted). Phase 7 wires the real Apple/Google billing gate; this
@@ -21,17 +22,18 @@ export type ChatAllowance = {
 
 // The type Drizzle gives the callback in `db.transaction(async (tx) => ...)`.
 // `computeAllowance` accepts either `db` or a `tx` so the same count logic
-// can run inside `withUserChatLock`'s locked transaction.
-type DbOrTx = typeof db | Parameters<Parameters<(typeof db)['transaction']>[0]>[0];
+// can run inside `withUserLock`'s locked transaction. Exported for
+// lib/limits.ts's task/goal allowance functions, which follow the same shape.
+export type DbOrTx = typeof db | Parameters<Parameters<(typeof db)['transaction']>[0]>[0];
 
 async function computeAllowance(executor: DbOrTx, userId: string): Promise<ChatAllowance> {
   const [entitlement] = await executor
-    .select({ plan: entitlements.plan })
+    .select({ plan: entitlements.plan, expiresAt: entitlements.expiresAt })
     .from(entitlements)
     .where(eq(entitlements.userId, userId))
     .limit(1);
 
-  const plan = (entitlement?.plan ?? 'free') as 'free' | 'plus';
+  const plan = resolvePlan(entitlement);
   const limit = plan === 'plus' ? env.PLUS_DAILY_MESSAGES : env.FREE_DAILY_MESSAGES;
 
   const since = new Date(Date.now() - DAY_MS);
@@ -65,13 +67,14 @@ export async function getChatAllowance(userId: string): Promise<ChatAllowance> {
 /**
  * Runs `fn` inside a transaction holding a Postgres advisory lock keyed on
  * `userId` — the same pattern `auth.ts` uses for OTP rate limiting. This
- * serializes concurrent chat sends from the *same* user (so a burst of
+ * serializes concurrent same-user writes gated by a per-user allowance (chat
+ * sends, task creates, goal creates — see lib/limits.ts) so a burst of
  * simultaneous requests can't all see "under limit" before any of them
- * commits) without blocking requests from other users. `fn` should check
- * `computeAllowance(tx, userId)` and, if allowed, insert the user's message
- * in the same transaction — that's what makes the check-then-insert atomic.
+ * commits, without blocking requests from other users. `fn` should check the
+ * relevant allowance against `tx` and, if allowed, perform the write in the
+ * same transaction — that's what makes the check-then-insert atomic.
  */
-export async function withUserChatLock<T>(
+export async function withUserLock<T>(
   userId: string,
   fn: (tx: Parameters<Parameters<(typeof db)['transaction']>[0]>[0]) => Promise<T>,
 ): Promise<T> {
@@ -80,5 +83,9 @@ export async function withUserChatLock<T>(
     return fn(tx);
   });
 }
+
+// Kept as an alias — messages.ts's chat-cap call site predates the
+// task/goal caps and reads fine under its original name.
+export const withUserChatLock = withUserLock;
 
 export { computeAllowance };

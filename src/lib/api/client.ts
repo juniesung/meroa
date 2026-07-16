@@ -309,4 +309,10 @@ export const api = {
     request<{ memory: ApiMemory }>(`/memories/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
 
   deleteMemory: (id: string) => request<{ ok: true }>(`/memories/${id}`, { method: 'DELETE' }),
+
+  // Called right after a RevenueCat purchase or a "Restore purchases" tap —
+  // the server refetches RC's current subscriber state and updates
+  // `entitlements` (server/src/lib/billing/entitlement.ts), so this is the
+  // freshest the client can ever get the plan without waiting on a webhook.
+  billingSync: () => request<{ entitlement: ApiEntitlement }>('/billing/sync', { method: 'POST' }),
 };

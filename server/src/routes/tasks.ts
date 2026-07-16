@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { db } from '../db/client.ts';
 import { conversations, messages, tasks, users } from '../db/schema.ts';
 import { requireAuth, type AuthVariables } from '../middleware/auth.ts';
+import { computeTaskCreateAllowance, limitReachedBody, LimitReachedError } from '../lib/limits.ts';
 import { taskStatusOrder } from '../lib/task-order.ts';
 import { materializeRecurringInstances } from '../lib/tasks/recurrence.ts';
 import {
@@ -16,7 +17,7 @@ import {
 } from '../lib/tasks/schema.ts';
 import {
   completeTask,
-  createTask,
+  createTaskInTx,
   editTask,
   postponeTask,
   progressTask,
@@ -25,6 +26,7 @@ import {
   TaskActionError,
   undoLastAction,
 } from '../lib/tasks/executor.ts';
+import { withUserLock } from '../lib/usage.ts';
 
 export const taskRoutes = new Hono<{ Variables: AuthVariables }>();
 taskRoutes.use('*', requireAuth);
@@ -79,9 +81,17 @@ taskRoutes.post('/', zValidator('json', createTaskBodySchema), async (c) => {
 
   if (!('previewMessageId' in body)) {
     try {
-      const { task } = await createTask(userId, body, timezone, { source: 'tasks_ui' });
+      const { task } = await withUserLock(userId, async (tx) => {
+        const allowance = await computeTaskCreateAllowance(tx, userId);
+        if (!allowance.allowed) throw new LimitReachedError('tasks', allowance);
+        return createTaskInTx(tx, userId, body, timezone, { source: 'tasks_ui' });
+      });
       return c.json({ task }, 201);
     } catch (err) {
+      if (err instanceof LimitReachedError) {
+        const { status, body } = limitReachedBody(err);
+        return c.json(body, status);
+      }
       const { status, body: errBody } = actionErrorResponse(err);
       return c.json(errBody, status);
     }
@@ -126,16 +136,25 @@ taskRoutes.post('/', zValidator('json', createTaskBodySchema), async (c) => {
   }
 
   try {
-    const { task } = await createTask(userId, parsedPreview.data, timezone, {
-      source: 'chat',
-      sourceMessageId: previewMessageId,
+    const { task } = await withUserLock(userId, async (tx) => {
+      const allowance = await computeTaskCreateAllowance(tx, userId);
+      if (!allowance.allowed) throw new LimitReachedError('tasks', allowance);
+      const result = await createTaskInTx(tx, userId, parsedPreview.data, timezone, {
+        source: 'chat',
+        sourceMessageId: previewMessageId,
+      });
+      await tx
+        .update(messages)
+        .set({ meta: { ...meta, createdTaskId: result.task.id } })
+        .where(eq(messages.id, previewMessageId));
+      return result;
     });
-    await db
-      .update(messages)
-      .set({ meta: { ...meta, createdTaskId: task.id } })
-      .where(eq(messages.id, previewMessageId));
     return c.json({ task }, 201);
   } catch (err) {
+    if (err instanceof LimitReachedError) {
+      const { status, body } = limitReachedBody(err);
+      return c.json(body, status);
+    }
     const { status, body: errBody } = actionErrorResponse(err);
     return c.json(errBody, status);
   }

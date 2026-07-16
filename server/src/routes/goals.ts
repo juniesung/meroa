@@ -8,7 +8,7 @@ import { conversations, messages, goals, users } from '../db/schema.ts';
 import {
   advanceGoalStage,
   archiveGoal,
-  createGoal,
+  createGoalInTx,
   editGoal,
   getGoal,
   isAdvanceProposalStale,
@@ -16,6 +16,8 @@ import {
   logGoalEntry,
   GoalActionError,
 } from '../lib/goals/executor.ts';
+import { computeActiveGoalAllowance, limitReachedBody, LimitReachedError } from '../lib/limits.ts';
+import { withUserLock } from '../lib/usage.ts';
 import {
   buildGoalDefinition,
   editGoalPatchSchema,
@@ -148,20 +150,29 @@ goalRoutes.post('/', zValidator('json', createGoalBodySchema), async (c) => {
   if (!('previewMessageId' in body)) {
     const definition = buildGoalDefinition(body);
     try {
-      const { goal, tasks } = await createGoal(
-        userId,
-        {
-          template: body.type,
-          name: body.name,
-          icon: body.icon ?? null,
-          definition,
-          starterTasks: body.starterTasks,
-        },
-        timezone,
-        { source: 'goal_ui' },
-      );
+      const { goal, tasks } = await withUserLock(userId, async (tx) => {
+        const allowance = await computeActiveGoalAllowance(tx, userId);
+        if (!allowance.allowed) throw new LimitReachedError('goals', allowance);
+        return createGoalInTx(
+          tx,
+          userId,
+          {
+            template: body.type,
+            name: body.name,
+            icon: body.icon ?? null,
+            definition,
+            starterTasks: body.starterTasks,
+          },
+          timezone,
+          { source: 'goal_ui' },
+        );
+      });
       return c.json({ goal, tasks }, 201);
     } catch (err) {
+      if (err instanceof LimitReachedError) {
+        const { status, body } = limitReachedBody(err);
+        return c.json(body, status);
+      }
       const { status, body: errBody } = actionErrorResponse(err);
       return c.json(errBody, status);
     }
@@ -221,24 +232,34 @@ goalRoutes.post('/', zValidator('json', createGoalBodySchema), async (c) => {
   }
 
   try {
-    const { goal, tasks } = await createGoal(
-      userId,
-      {
-        template: template as GoalTemplateKey,
-        name,
-        icon: icon ?? null,
-        definition: parsedDefinition.data,
-        starterTasks: parsedStarterTasks?.data,
-      },
-      timezone,
-      { source: 'goal_ui', sourceMessageId: previewMessageId },
-    );
-    await db
-      .update(messages)
-      .set({ meta: { ...meta, createdGoalId: goal.id } })
-      .where(eq(messages.id, previewMessageId));
+    const { goal, tasks } = await withUserLock(userId, async (tx) => {
+      const allowance = await computeActiveGoalAllowance(tx, userId);
+      if (!allowance.allowed) throw new LimitReachedError('goals', allowance);
+      const result = await createGoalInTx(
+        tx,
+        userId,
+        {
+          template: template as GoalTemplateKey,
+          name,
+          icon: icon ?? null,
+          definition: parsedDefinition.data,
+          starterTasks: parsedStarterTasks?.data,
+        },
+        timezone,
+        { source: 'goal_ui', sourceMessageId: previewMessageId },
+      );
+      await tx
+        .update(messages)
+        .set({ meta: { ...meta, createdGoalId: result.goal.id } })
+        .where(eq(messages.id, previewMessageId));
+      return result;
+    });
     return c.json({ goal, tasks }, 201);
   } catch (err) {
+    if (err instanceof LimitReachedError) {
+      const { status, body } = limitReachedBody(err);
+      return c.json(body, status);
+    }
     const { status, body } = actionErrorResponse(err);
     return c.json(body, status);
   }

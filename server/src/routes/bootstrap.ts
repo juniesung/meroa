@@ -3,6 +3,7 @@ import { Hono } from 'hono';
 
 import { db } from '../db/client.ts';
 import { entitlements, memories, tasks, goals, users } from '../db/schema.ts';
+import { resolvePlan } from '../lib/billing/plan.ts';
 import { getOrCreateAppConversation, getRecentMessages } from '../lib/conversations.ts';
 import { taskStatusOrder } from '../lib/task-order.ts';
 import { materializeRecurringInstances } from '../lib/tasks/recurrence.ts';
@@ -59,9 +60,7 @@ bootstrapRoutes.get('/', async (c) => {
       timezone: user.timezone,
       prefs: user.prefs,
     },
-    entitlement: entitlement
-      ? { plan: entitlement.plan, expiresAt: entitlement.expiresAt }
-      : { plan: 'free', expiresAt: null },
+    entitlement: { plan: resolvePlan(entitlement), expiresAt: entitlement?.expiresAt ?? null },
     conversationId: conversation.id,
     messages: recentMessages,
     memories: memoryRows,
