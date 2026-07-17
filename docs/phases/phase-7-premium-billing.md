@@ -22,7 +22,7 @@ Premium unlocks deeper capability and persistence — **not** a more caring pers
 ## In scope
 - Apple IAP + Google Play Billing, purchase/restore/renewal/expiry/cancel, server-side entitlement checks, and enforcement of free vs premium limits.
 
-## Free vs Premium (target $19.99/mo)
+## Free vs Premium (target $11.99/mo)
 | Capability | Free | Premium |
 |---|---|---|
 | Chat | Limited fair-use | Higher fair-use |
@@ -48,7 +48,7 @@ Premium unlocks deeper capability and persistence — **not** a more caring pers
 
 ### Human prerequisites before the blocked items can close
 1. RevenueCat account + project; iOS app added (bundle `com.meroa.app`).
-2. Entitlement id `plus`; product `meroa_plus_monthly` ($19.99/mo); offering `default` with a `$rc_monthly` package.
+2. Entitlement id `plus`; product `meroa_plus_monthly` ($11.99/mo); offering `default` with a `$rc_monthly` package.
 3. **Test Store** key (`test_…`) → app `.env`'s `EXPO_PUBLIC_REVENUECAT_IOS_KEY`; secret key (`sk_…`) → server `.env`'s `REVENUECAT_SECRET_API_KEY`.
 4. `npx expo install` already ran; still needed: `npx expo run:ios` (or a dev-client build) to actually exercise the paywall and a real purchase — Expo Go can't load native IAP modules.
 5. Optional for now: webhook URL + `REVENUECAT_WEBHOOK_SECRET` (a local tunnel is only needed to test the webhook path itself; `/billing/sync` + `npm run dev:plan` already cover the entitlement loop without one).

@@ -20,9 +20,9 @@ export function useOfferings() {
   });
 }
 
-// The one plan Meroa Premium sells (CLAUDE.md §7 target: $19.99/mo) — the
-// `monthly` accessor is RevenueCat's predefined package type, so this needs
-// no per-product identifier hardcoded here.
+// The one plan Meroa Premium sells (docs/phases/phase-7-premium-billing.md
+// target: $11.99/mo) — the `monthly` accessor is RevenueCat's predefined
+// package type, so this needs no per-product identifier hardcoded here.
 export function monthlyPackage(offering: Awaited<ReturnType<typeof Purchases.getOfferings>>['current']): PurchasesPackage | null {
   return offering?.monthly ?? null;
 }
