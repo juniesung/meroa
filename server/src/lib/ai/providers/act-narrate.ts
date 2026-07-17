@@ -1,4 +1,5 @@
 import type OpenAI from 'openai';
+import * as Sentry from '@sentry/node';
 
 import { logger } from '../../../logger.ts';
 import { executeAiToolCall } from '../actions.ts';
@@ -737,6 +738,7 @@ export async function* streamChatReplyActNarrate(
     logTurn();
     yield { type: 'stream_end' };
   } catch (err) {
+    Sentry.captureException(err);
     logger.error(
       { err, userId: actionCtx.userId, sourceMessageId: actionCtx.sourceMessageId },
       'act/narrate chat stream threw',

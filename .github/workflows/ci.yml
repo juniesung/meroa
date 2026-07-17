@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  server:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    env:
+      # Placeholders, not real secrets — env.ts's zod schema parses
+      # process.env at import time (dotenv/config finds no .env file on a
+      # fresh CI checkout, since it's gitignored), and at least one test file
+      # (goals/consistency.test.ts) transitively imports db/client.ts ->
+      # env.ts. Without these three set, `npm run test` fails before a
+      # single test runs, even though none of the unit tests touch a real DB.
+      DATABASE_URL: postgresql://user:pass@localhost:5432/db
+      JWT_SECRET: ci-placeholder-ci-placeholder-32ch
+      ANTHROPIC_API_KEY: ci-placeholder
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: server/.nvmrc
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run test
+
+  app:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint

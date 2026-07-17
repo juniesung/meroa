@@ -1,4 +1,5 @@
 import { zValidator } from '@hono/zod-validator';
+import * as Sentry from '@sentry/node';
 import { and, eq, gt, isNull } from 'drizzle-orm';
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
@@ -31,6 +32,7 @@ import { computeAllowance, withUserChatLock } from '../lib/usage.ts';
 import { logger } from '../logger.ts';
 import { isToolCallMarkupLeak } from '../lib/ai/providers/shared.ts';
 import { requireAuth, type AuthVariables } from '../middleware/auth.ts';
+import { rateLimit } from '../middleware/rate-limit.ts';
 
 export const messageRoutes = new Hono<{ Variables: AuthVariables }>();
 messageRoutes.use('*', requireAuth);
@@ -171,7 +173,7 @@ function historyContentFor(m: { content: string; meta: unknown }): string {
 //   stream_end    — the whole reply is done; no further segments
 //   error         — { retryable, message } — the in-flight segment was not persisted;
 //                   any earlier segments in this turn already were
-messageRoutes.post('/', zValidator('json', sendSchema), async (c) => {
+messageRoutes.post('/', rateLimit({ windowMs: 60_000, max: 20 }), zValidator('json', sendSchema), async (c) => {
   const userId = c.get('userId');
   const { text } = c.req.valid('json');
 
@@ -635,9 +637,10 @@ messageRoutes.post('/', zValidator('json', sendSchema), async (c) => {
           // this call can add latency to it or surface as a chat error
           // (memory-extractor.ts already catches everything internally;
           // this .catch is a second backstop against a truly unexpected throw).
-          void maybeExtractMemories(userId).catch((err) =>
-            logger.error({ err, userId }, 'memory extraction trigger failed'),
-          );
+          void maybeExtractMemories(userId).catch((err) => {
+            Sentry.captureException(err);
+            logger.error({ err, userId }, 'memory extraction trigger failed');
+          });
         } else {
           await stream.writeSSE({
             event: 'error',
@@ -646,6 +649,7 @@ messageRoutes.post('/', zValidator('json', sendSchema), async (c) => {
         }
       }
     } catch (err) {
+      Sentry.captureException(err);
       logger.error(err, 'chat stream failed');
       await stream.writeSSE({
         event: 'error',

@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { db } from '../db/client.ts';
 import { conversations, messages, tasks, users } from '../db/schema.ts';
 import { requireAuth, type AuthVariables } from '../middleware/auth.ts';
+import { rateLimit } from '../middleware/rate-limit.ts';
 import { computeTaskCreateAllowance, limitReachedBody, LimitReachedError } from '../lib/limits.ts';
 import { taskStatusOrder } from '../lib/task-order.ts';
 import { materializeRecurringInstances } from '../lib/tasks/recurrence.ts';
@@ -74,7 +75,7 @@ const createFromPreviewSchema = z.object({ previewMessageId: z.string().uuid() }
 // createTaskInputSchema's discriminated union (no `type`) and vice versa.
 const createTaskBodySchema = z.union([createFromPreviewSchema, createTaskInputSchema]);
 
-taskRoutes.post('/', zValidator('json', createTaskBodySchema), async (c) => {
+taskRoutes.post('/', rateLimit({ windowMs: 60_000, max: 20 }), zValidator('json', createTaskBodySchema), async (c) => {
   const userId = c.get('userId');
   const body = c.req.valid('json');
   const timezone = await getUserTimezone(userId);

@@ -27,8 +27,8 @@ const schema = z.object({
   // Override for local testing (e.g. forcing the fair-use limit down to
   // exercise the 429 path) without hand-editing usage.ts and having to
   // remember to revert it.
-  FREE_DAILY_MESSAGES: z.coerce.number().int().positive().default(50),
-  PLUS_DAILY_MESSAGES: z.coerce.number().int().positive().default(1000),
+  FREE_DAILY_MESSAGES: z.coerce.number().int().positive().default(20),
+  PLUS_DAILY_MESSAGES: z.coerce.number().int().positive().default(100),
   // Phase 7 billing: RevenueCat is the receipt-verification layer; the
   // `entitlements` table stays the source of truth (lib/billing/entitlement.ts
   // always refetches RC's current subscriber state rather than trusting event
@@ -41,6 +41,10 @@ const schema = z.object({
   // creation only — never completion or progress (lib/limits.ts).
   FREE_DAILY_TASKS: z.coerce.number().int().positive().default(2),
   FREE_MAX_ACTIVE_GOALS: z.coerce.number().int().positive().default(1),
+  // Optional — same graceful-degradation pattern as REVENUECAT_SECRET_API_KEY.
+  // Sentry.init only runs when this is set (index.ts), so the server boots
+  // fine without error reporting configured.
+  SENTRY_DSN: z.string().optional(),
 });
 
 export const env = schema

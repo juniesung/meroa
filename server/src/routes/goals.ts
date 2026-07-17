@@ -34,6 +34,7 @@ import { buildGoalCardSummaries, buildGoalDetail } from '../lib/goals/summary.ts
 import { buildGoalConsistency } from '../lib/goals/consistency.ts';
 import { localDatetimeToUtcIso } from '../lib/tasks/recurrence.ts';
 import { requireAuth, type AuthVariables } from '../middleware/auth.ts';
+import { rateLimit } from '../middleware/rate-limit.ts';
 
 export const goalRoutes = new Hono<{ Variables: AuthVariables }>();
 goalRoutes.use('*', requireAuth);
@@ -142,7 +143,7 @@ const createGoalBodySchema = z.union([createFromPreviewSchema, manualCreateGoalS
 // manual goal route below (editGoal, archiveGoal, logGoalEntry), none of
 // which set one either; the client is responsible for not double-submitting
 // a form, the same as it already is for every other create sheet.
-goalRoutes.post('/', zValidator('json', createGoalBodySchema), async (c) => {
+goalRoutes.post('/', rateLimit({ windowMs: 60_000, max: 20 }), zValidator('json', createGoalBodySchema), async (c) => {
   const userId = c.get('userId');
   const body = c.req.valid('json');
   const timezone = await getUserTimezone(userId);

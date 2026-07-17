@@ -1,4 +1,5 @@
 import OpenAI from 'openai';
+import * as Sentry from '@sentry/node';
 
 import { env } from '../../../env.ts';
 import { logger } from '../../../logger.ts';
@@ -348,6 +349,7 @@ export async function* streamChatReplyOpenai(
     logTurn();
     yield { type: 'stream_end' };
   } catch (err) {
+    Sentry.captureException(err);
     logger.error(
       { err, userId: actionCtx.userId, sourceMessageId: actionCtx.sourceMessageId },
       'openai chat stream threw',
