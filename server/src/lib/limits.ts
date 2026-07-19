@@ -6,11 +6,14 @@ import { env } from '../env.ts';
 import { resolvePlan } from './billing/plan.ts';
 import type { DbOrTx } from './usage.ts';
 
-// Free-plan creation caps (CLAUDE.md §2 / phase-7: meter NEW creation only —
-// never completion, progress, or other updates). Mirrors usage.ts's
-// computeAllowance shape and rolling-24h window for consistency; both
-// counters key off structures that already exclude what shouldn't be
-// metered, rather than filtering it out here:
+// Hard paywall (CLAUDE.md §2 / phase-7): there is no persistent free tier
+// anymore — FREE_DAILY_TASKS/FREE_MAX_ACTIVE_GOALS default to 0, so a user
+// without an active trial or subscription is blocked from the very first
+// creation attempt. The env vars stay overridable (useful for QA/dev), and
+// the counting logic below is otherwise unchanged from when this was a real
+// graduated free-tier cap. Mirrors usage.ts's computeAllowance shape and
+// rolling-24h window for consistency; both counters key off structures that
+// already exclude what shouldn't be metered, rather than filtering it out here:
 //
 // - Task creation counts `records` rows of kind 'task_created'. Recurring
 //   instance materialization (tasks/recurrence.ts) never writes a record,

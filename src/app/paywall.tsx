@@ -3,13 +3,20 @@ import * as WebBrowser from 'expo-web-browser';
 import { useState } from 'react';
 import { ActivityIndicator, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import Purchases from 'react-native-purchases';
+import Purchases, { INTRO_ELIGIBILITY_STATUS } from 'react-native-purchases';
 
 import { Icon } from '@/components/Icon';
 import { MeroaMark } from '@/components/MeroaMark';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { theme } from '@/constants/theme';
-import { monthlyPackage, useOfferings, usePurchase, useRestorePurchases } from '@/features/billing/queries';
+import {
+  monthlyPackage,
+  trialLengthLabel,
+  useOfferings,
+  usePurchase,
+  useRestorePurchases,
+  useTrialEligibility,
+} from '@/features/billing/queries';
 import { isBillingConfigured } from '@/features/billing/purchases';
 import { useMe } from '@/features/profile/queries';
 
@@ -33,10 +40,19 @@ export default function PaywallScreen() {
 
   const isPlus = me?.entitlement.plan === 'plus';
   const pkg = monthlyPackage(offering ?? null);
+  // Only reachable via router.push from within the app (Settings, cap-hit
+  // banners) when there's already a screen underneath to return to. The
+  // mandatory hard-paywall landing screen (_layout.tsx, !hasAccess) is the
+  // base of the stack — nothing to dismiss back to, so no close button there.
+  const canDismiss = router.canGoBack();
+
+  const { data: eligibilityStatus } = useTrialEligibility(pkg?.product.identifier);
+  const trialLength = pkg ? trialLengthLabel(pkg.product) : null;
+  const showTrialCopy = trialLength !== null && eligibilityStatus !== INTRO_ELIGIBILITY_STATUS.INTRO_ELIGIBILITY_STATUS_INELIGIBLE;
 
   const handleSubscribe = () => {
     if (!pkg) return;
-    purchase.mutate(pkg, { onSuccess: (result) => !result.cancelled && router.back() });
+    purchase.mutate(pkg, { onSuccess: (result) => !result.cancelled && canDismiss && router.back() });
   };
 
   const handleRestore = () => {
@@ -63,11 +79,13 @@ export default function PaywallScreen() {
 
       <View style={styles.header}>
         <View style={{ flex: 1 }} />
-        <Pressable onPress={() => router.back()} style={styles.closeButton} hitSlop={8}>
-          <View style={{ transform: [{ rotate: '45deg' }] }}>
-            <Icon name="plus" size={18} color={theme.text} stroke={2.2} />
-          </View>
-        </Pressable>
+        {canDismiss && (
+          <Pressable onPress={() => router.back()} style={styles.closeButton} hitSlop={8}>
+            <View style={{ transform: [{ rotate: '45deg' }] }}>
+              <Icon name="plus" size={18} color={theme.text} stroke={2.2} />
+            </View>
+          </Pressable>
+        )}
       </View>
 
       <ScrollView contentContainerStyle={styles.content}>
@@ -81,9 +99,9 @@ export default function PaywallScreen() {
         ) : (
           <>
             <View style={styles.benefits}>
-              <Benefit label="Higher daily chat allowance" />
-              <Benefit label="Unlimited new tasks (free plan: 2 a day)" />
-              <Benefit label="Multiple active goals (free plan: 1)" />
+              <Benefit label="Unlimited chat" />
+              <Benefit label="Unlimited new tasks" />
+              <Benefit label="Multiple active goals" />
               <Benefit label="Deeper long-term memory" />
               <Benefit label="Longer progress history" />
             </View>
@@ -97,8 +115,9 @@ export default function PaywallScreen() {
             ) : (
               <>
                 <Text style={styles.disclosure}>
-                  {pkg.product.priceString} per month. Renews automatically until cancelled — cancel
-                  anytime in your App Store account settings.
+                  {showTrialCopy
+                    ? `${trialLength} free, then ${pkg.product.priceString} per month. Renews automatically until cancelled — cancel anytime during your trial and you won't be charged.`
+                    : `${pkg.product.priceString} per month. Renews automatically until cancelled — cancel anytime in your App Store account settings.`}
                 </Text>
                 <View style={styles.links}>
                   <Text style={styles.link} onPress={() => WebBrowser.openBrowserAsync(PRIVACY_URL)}>
@@ -111,7 +130,13 @@ export default function PaywallScreen() {
                 </View>
 
                 <PrimaryButton
-                  label={purchase.isPending ? 'Subscribing…' : `Subscribe — ${pkg.product.priceString}/month`}
+                  label={
+                    purchase.isPending
+                      ? 'Starting…'
+                      : showTrialCopy
+                        ? `Start your ${trialLength} free trial`
+                        : `Subscribe — ${pkg.product.priceString}/month`
+                  }
                   onPress={!purchase.isPending ? handleSubscribe : undefined}
                   style={{ marginTop: 20 }}
                 />

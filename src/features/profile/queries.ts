@@ -5,10 +5,11 @@ import type { ApiEntitlement, ApiUser } from '@/lib/api/types';
 
 export const meQueryKey = ['me'] as const;
 
-export function useMe() {
+export function useMe(options?: { enabled?: boolean }) {
   return useQuery({
     queryKey: meQueryKey,
     queryFn: () => api.me(),
+    enabled: options?.enabled,
   });
 }
 

@@ -24,10 +24,12 @@ const schema = z.object({
   // yes/no call that runs on every zero-tool-call turn. Falls back to the
   // regex-only result if DEEPSEEK_API_KEY isn't set.
   CLAIM_CHECK_MODEL: z.string().default('deepseek-v4-flash'),
-  // Override for local testing (e.g. forcing the fair-use limit down to
-  // exercise the 429 path) without hand-editing usage.ts and having to
-  // remember to revert it.
-  FREE_DAILY_MESSAGES: z.coerce.number().int().positive().default(20),
+  // Hard paywall (no persistent free tier): a lapsed/never-started user gets
+  // zero of everything below until they start a trial or subscribe — see
+  // docs/phases/phase-7-premium-billing.md. Overridable for local testing
+  // (e.g. temporarily raising this to exercise a non-zero 429 path) without
+  // hand-editing usage.ts and having to remember to revert it.
+  FREE_DAILY_MESSAGES: z.coerce.number().int().nonnegative().default(0),
   PLUS_DAILY_MESSAGES: z.coerce.number().int().positive().default(100),
   // Phase 7 billing: RevenueCat is the receipt-verification layer; the
   // `entitlements` table stays the source of truth (lib/billing/entitlement.ts
@@ -37,10 +39,9 @@ const schema = z.object({
   REVENUECAT_SECRET_API_KEY: z.string().optional(),
   REVENUECAT_WEBHOOK_SECRET: z.string().optional(),
   REVENUECAT_ENTITLEMENT_ID: z.string().default('plus'),
-  // Free-plan creation caps (core three, CLAUDE.md §2/phase-7): task/goal
-  // creation only — never completion or progress (lib/limits.ts).
-  FREE_DAILY_TASKS: z.coerce.number().int().positive().default(2),
-  FREE_MAX_ACTIVE_GOALS: z.coerce.number().int().positive().default(1),
+  // Same hard-paywall zero-default as FREE_DAILY_MESSAGES above (lib/limits.ts).
+  FREE_DAILY_TASKS: z.coerce.number().int().nonnegative().default(0),
+  FREE_MAX_ACTIVE_GOALS: z.coerce.number().int().nonnegative().default(0),
   // Optional — same graceful-degradation pattern as REVENUECAT_SECRET_API_KEY.
   // Sentry.init only runs when this is set (index.ts), so the server boots
   // fine without error reporting configured.

@@ -41,6 +41,17 @@ const navTheme = {
 
 function RootNavigator() {
   const { status } = useAuth();
+  const { data: me } = useMe({ enabled: status === 'signedIn' });
+  // Hard paywall (docs/phases/phase-7-premium-billing.md): 'plus' covers both
+  // a trialing and a paid subscriber identically (RevenueCat treats a trial
+  // as an active entitlement) — there's no persistent free tier to fall back
+  // to, so anyone without it is routed straight to the paywall below.
+  const hasAccess = me?.entitlement.plan === 'plus';
+  // Absence of prefs.communicationStyle is the first-run signal — it's
+  // server-persisted, so it survives a reinstall (unlike the transient
+  // isNewUser flag from OTP verify, which the client never keeps). Gated
+  // ahead of the paywall: signup → onboarding → paywall → tabs.
+  const needsOnboarding = typeof me?.user.prefs.communicationStyle !== 'string';
 
   useEffect(() => {
     if (status !== 'loading') {
@@ -49,17 +60,28 @@ function RootNavigator() {
   }, [status]);
 
   if (status === 'loading') return null;
+  // Signed in but the entitlement hasn't loaded yet — wait rather than
+  // flashing the paywall for an instant before hasAccess is known.
+  if (status === 'signedIn' && me === undefined) return null;
 
   return (
     <>
       {status === 'signedIn' && <BillingGate />}
       <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: theme.bg } }}>
-        <Stack.Protected guard={status === 'signedIn'}>
+        <Stack.Protected guard={status === 'signedIn' && needsOnboarding}>
+          <Stack.Screen name="onboarding" options={{ gestureEnabled: false }} />
+        </Stack.Protected>
+        <Stack.Protected guard={status === 'signedIn' && !needsOnboarding && hasAccess}>
           <Stack.Screen name="(tabs)" />
           <Stack.Screen name="goal/[id]" options={{ presentation: 'card' }} />
-          <Stack.Screen name="vibe-pick" options={{ presentation: 'modal', gestureEnabled: false }} />
           <Stack.Screen name="memories" options={{ presentation: 'card' }} />
-          <Stack.Screen name="paywall" options={{ presentation: 'modal' }} />
+        </Stack.Protected>
+        <Stack.Protected guard={status === 'signedIn' && !needsOnboarding}>
+          {/* Declared once, always reachable while signed in — 'card' with no
+              tab bar underneath when it's the mandatory hard-paywall landing
+              screen (!hasAccess), 'modal' over the tabs for the existing
+              voluntary upgrade entry points (Settings, cap-hit banners). */}
+          <Stack.Screen name="paywall" options={{ presentation: hasAccess ? 'modal' : 'card' }} />
         </Stack.Protected>
         <Stack.Protected guard={status === 'signedOut'}>
           <Stack.Screen name="(auth)" />

@@ -21,13 +21,13 @@ features (privacy, deletion, permissions, review access), not a last-afternoon s
 - [ ] Deep links open the right task/tool with context attached.
 
 **Subscriptions & store**
-- [ ] Verify purchase/restore/renewal/expiry/cancel + server entitlement checks end-to-end (from Phase 7).
+- [ ] Verify purchase/restore/renewal/expiry/cancel + server entitlement checks end-to-end (from Phase 7). **Still blocked as of this writing** on the same Phase 7 dependency: RevenueCat + Apple App Store Connect sandbox/dashboard setup (product config, sandbox tester, entitlement linking) needs to happen before this can be verified — do this first if it hasn't already.
 - [ ] App icon, screenshots, description, categories, age/content rating, support URL, privacy disclosures.
 - [ ] Complete Apple **App Privacy** and Google **Data safety** forms from an accurate inventory of every SDK and data type collected.
 - [ ] **Reviewer access:** working credentials + instructions to reach Chat, Tasks, Tools, and Premium **without** depending on a live SMS flow.
 
 **Permissions & quality**
-- [ ] Request notifications/mic/photos/location **only when the related feature is used**.
+- [ ] Request notifications/mic/photos/location **only when the related feature is used**. (The composer's mic icon today is a decorative Phase-0 placeholder — no `onPress`, no speech-to-text integration exists. Either build a real voice-input feature first, or drop the icon before store submission so there's no dead-end control in the shipped app.)
 - [ ] Test on physical iOS + Android: keyboard, notifications, billing, account deletion, offline states, accessibility.
 - [ ] Production binaries via **EAS Build**; submit via **EAS Submit** or store portals.
 - [ ] Re-check current store policies and the required Android target API immediately before submitting.

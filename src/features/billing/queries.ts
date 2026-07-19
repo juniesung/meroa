@@ -1,5 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import Purchases, { type PurchasesPackage } from 'react-native-purchases';
+import Purchases, {
+  INTRO_ELIGIBILITY_STATUS,
+  type PurchasesPackage,
+  type PurchasesStoreProduct,
+} from 'react-native-purchases';
 
 import { api } from '@/lib/api/client';
 import { meQueryKey } from '@/features/profile/queries';
@@ -61,6 +65,37 @@ export function useRestorePurchases() {
       await syncAndInvalidate(queryClient);
     },
   });
+}
+
+// iOS-only (Android always reports UNKNOWN — checkTrialOrIntroductoryPriceEligibility's
+// own doc comment). Apple requires the paywall not to promise a free trial to
+// someone who already used one (e.g. a reinstall) — this is what tells the
+// difference. Treated optimistically: only a confirmed INELIGIBLE suppresses
+// trial copy, since UNKNOWN is the common/Android case and isn't evidence of
+// ineligibility.
+export function useTrialEligibility(productId: string | undefined) {
+  return useQuery({
+    queryKey: ['billing', 'trial-eligibility', productId],
+    queryFn: async () => {
+      const result = await Purchases.checkTrialOrIntroductoryPriceEligibility([productId!]);
+      return result[productId!]?.status ?? INTRO_ELIGIBILITY_STATUS.INTRO_ELIGIBILITY_STATUS_UNKNOWN;
+    },
+    enabled: isBillingConfigured() && !!productId,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+// The trial length as configured on the product itself (App Store Connect),
+// never hardcoded — same discipline as monthlyPackage() not hardcoding a
+// product id. `introPrice` is only non-null for a real intro offer, and only
+// a price of exactly 0 is a FREE trial (a nonzero introPrice is a discounted
+// intro price, a different offer type this paywall doesn't claim to be).
+export function trialLengthLabel(product: PurchasesStoreProduct): string | null {
+  const intro = product.introPrice;
+  if (!intro || intro.price !== 0) return null;
+  const n = intro.periodNumberOfUnits;
+  const unit = { DAY: 'day', WEEK: 'week', MONTH: 'month', YEAR: 'year' }[intro.periodUnit] ?? intro.periodUnit.toLowerCase();
+  return `${n} ${unit}${n === 1 ? '' : 's'}`;
 }
 
 // A cheap re-check the paywall can fire on mount — picks up a purchase made

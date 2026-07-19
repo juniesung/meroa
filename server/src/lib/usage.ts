@@ -5,10 +5,13 @@ import { conversations, entitlements, messages } from '../db/schema.ts';
 import { env } from '../env.ts';
 import { resolvePlan } from './billing/plan.ts';
 
-// Free vs premium chat allowances (CLAUDE.md §2: enforced server-side, never
-// client-trusted). Phase 7 wires the real Apple/Google billing gate; this
-// reads the `entitlements` row seeded in Phase 1, so upgrading a user's plan
-// later doesn't require touching this logic. Limits are env-overridable
+// Hard paywall chat allowance (CLAUDE.md §2: enforced server-side, never
+// client-trusted). FREE_DAILY_MESSAGES defaults to 0 — there is no
+// persistent free tier; a user without an active trial or subscription is
+// blocked from their very first message. PLUS_DAILY_MESSAGES remains the
+// sole fair-use/abuse cap for anyone with active access (trialing or paid).
+// This reads the `entitlements` row seeded in Phase 1, so upgrading a user's
+// plan later doesn't require touching this logic. Limits are env-overridable
 // (see env.ts) so testing the 429 path doesn't require editing this file.
 const DAY_MS = 24 * 60 * 60 * 1000;
 
