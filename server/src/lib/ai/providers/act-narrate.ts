@@ -247,6 +247,17 @@ export async function* streamChatReplyActNarrate(
      */
     const newestUserMessage = windowed[windowed.length - 1]?.content ?? '';
     const mayBeConversational = looksPurelyConversational(newestUserMessage);
+    // Grounding for maybeCorrectFabricatedFigure needs more than the newest
+    // message: a number the user stated a turn or two ago (e.g. "3x a week")
+    // and the reply echoes back later ("which 3 days?") is not invented, but
+    // checking only newestUserMessage made it look ungrounded the instant it
+    // wasn't the latest turn anymore — a real false-positive, caught live in
+    // vibe testing. Last few user turns, not just the newest.
+    const recentUserMessages = windowed
+      .filter((m) => m.role === 'user')
+      .slice(-4)
+      .map((m) => m.content)
+      .join('\n');
     // When the user is just talking, the reply pass has no business seeing their
     // task state — and the surest way to stop it narrating a task is not to show
     // it one. Both the CARD turns and the whole state block come out:
@@ -730,10 +741,11 @@ export async function* streamChatReplyActNarrate(
     yield* maybeCorrectConcealedAction(actionFacts);
     // The third guard. Everything the reply was entitled to state a number from:
     // the live state block (task list, goal totals, streaks, the clock), whatever
-    // the server actually did this turn, and the user's own words. A figure that
-    // can't be justified from these was invented.
+    // the server actually did this turn, and the user's own recent words (not just
+    // the newest message — see recentUserMessages above). A figure that can't be
+    // justified from these was invented.
     yield* maybeCorrectFabricatedFigure(
-      [stateFactsText, ...actionFacts, newestUserMessage].filter(Boolean).join('\n'),
+      [stateFactsText, ...actionFacts, recentUserMessages].filter(Boolean).join('\n'),
     );
     logTurn();
     yield { type: 'stream_end' };
