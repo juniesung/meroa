@@ -1,5 +1,6 @@
 import { QueryClientProvider } from '@tanstack/react-query';
-import { DarkTheme, Stack, ThemeProvider } from 'expo-router';
+import * as Notifications from 'expo-notifications';
+import { DarkTheme, router, Stack, ThemeProvider } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect } from 'react';
 import { StatusBar } from 'expo-status-bar';
@@ -24,6 +25,34 @@ function BillingGate() {
   useEffect(() => {
     if (userId) configurePurchases(userId);
   }, [userId]);
+  return null;
+}
+
+// A tapped task reminder (local notification, scheduled with data.taskId in
+// lib/notifications.ts) should land on the Tasks tab — that's the task's surface
+// (there's no separate task-detail route). Custom-scheme only; no
+// associatedDomains, so no Apple-account dependency. Rendered only when the tabs
+// are actually reachable, so a cold-start tap can't fight the onboarding/paywall/
+// consent guards.
+function routeFromNotification(response: Notifications.NotificationResponse | null) {
+  const taskId = response?.notification.request.content.data?.taskId;
+  if (typeof taskId === 'string') router.navigate('/(tabs)/tasks');
+}
+
+function NotificationRouter() {
+  useEffect(() => {
+    let active = true;
+    // Cold start: the app was launched by tapping the notification.
+    Notifications.getLastNotificationResponseAsync().then((response) => {
+      if (active) routeFromNotification(response);
+    });
+    // Warm: tapped while the app was running or backgrounded.
+    const sub = Notifications.addNotificationResponseReceivedListener(routeFromNotification);
+    return () => {
+      active = false;
+      sub.remove();
+    };
+  }, []);
   return null;
 }
 
@@ -61,6 +90,7 @@ function RootNavigator() {
   // in the You tab flips this back and re-shows the screen. The server enforces
   // the same predicate on every send (lib/consent.ts) — this is just the surface.
   const needsAiConsent = !needsOnboarding && hasAccess && !consentGranted(me?.user.prefs);
+  const canUseTabs = status === 'signedIn' && !needsOnboarding && hasAccess && !needsAiConsent;
 
   useEffect(() => {
     if (status !== 'loading') {
@@ -77,6 +107,7 @@ function RootNavigator() {
     <>
       {status === 'signedIn' && <BillingGate />}
       {status === 'signedIn' && <OnboardingDraftFlush />}
+      {canUseTabs && <NotificationRouter />}
       <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: theme.bg } }}>
         <Stack.Protected guard={status === 'signedIn' && needsOnboarding}>
           <Stack.Screen name="onboarding" options={{ gestureEnabled: false }} />
@@ -84,7 +115,7 @@ function RootNavigator() {
         <Stack.Protected guard={status === 'signedIn' && needsAiConsent}>
           <Stack.Screen name="ai-consent" options={{ gestureEnabled: false }} />
         </Stack.Protected>
-        <Stack.Protected guard={status === 'signedIn' && !needsOnboarding && hasAccess && !needsAiConsent}>
+        <Stack.Protected guard={canUseTabs}>
           <Stack.Screen name="(tabs)" />
           <Stack.Screen name="goal/[id]" options={{ presentation: 'card' }} />
           <Stack.Screen name="archived-goals" options={{ presentation: 'card' }} />

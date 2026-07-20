@@ -12,6 +12,7 @@ import { useMe } from '@/features/profile/queries';
 import { useGoals } from '@/features/goals/queries';
 import { radii, theme } from '@/constants/theme';
 import { asLimitReached, limitReachedMessage } from '@/lib/api/limits';
+import { requestNotificationPermission } from '@/lib/notifications';
 import type {
   ApiTask,
   ChecklistConfig,
@@ -530,7 +531,14 @@ function TaskFormBody({ task, onClose }: { task?: ApiTask; onClose: () => void }
       <Pressable
         onPress={() => {
           haptic();
-          setReminder((r) => !r);
+          const next = !reminder;
+          // Ask the OS at point-of-use when turning the reminder ON (CLAUDE.md
+          // §2) — without this the reminder would schedule against a permission
+          // that was never requested and silently never fire. syncTaskReminders
+          // re-checks actual permission before scheduling, so a denial here
+          // doesn't need to flip the toggle back.
+          if (next) void requestNotificationPermission();
+          setReminder(next);
         }}
         style={styles.reminderRow}
       >
