@@ -35,3 +35,14 @@ Read `CLAUDE.md` §3 (version policy), §5 (design system), §8 (reference app) 
 ## Guardrails
 - Rebuild, don't paste. The reference is SDK 52; its versions and imports are stale.
 - No secrets, no network, no placeholder screens or dead buttons that pretend to work.
+
+## Addendum (2026-07-19)
+The app icon, splash image, and Android adaptive-icon layers were never actually
+rebuilt — they were still the literal `create-expo-app` scaffold defaults (a generic
+blue chevron on a construction-guide grid) all the way through Phase 7, missed because
+no task above called them out explicitly as in-scope alongside the component rebuild.
+Fixed: `assets/images/*.png`, `assets/expo.icon/`, and `app.json`'s icon-adjacent
+colors now match `MeroaMark.tsx`'s actual gradient + dots on the real dark theme.
+Verified on the simulator home screen (native icon catalogs only regenerate on
+`expo prebuild`, not incremental `expo run:ios` builds — worth remembering next time
+an asset-only change doesn't seem to take effect).

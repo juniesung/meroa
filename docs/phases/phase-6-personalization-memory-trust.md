@@ -12,7 +12,7 @@ gives the user full control over memory, and honors safety boundaries and quiet 
 - Billing/premium gating of "deeper memory" (Phase 7) — build the capability here; gate it there.
 
 ## Tasks
-- [x] Onboarding vibe pick: Chill / Supportive / Direct / Playful / Balanced — treated as a **starting point**, not a fixed setting.
+- [x] Onboarding vibe pick: Chill / Supportive / Direct / Playful / Balanced — treated as a **starting point**, not a fixed setting. **Superseded (2026-07-19):** the standalone `vibe-pick` screen was folded into a combined pre-paywall onboarding questionnaire (focus areas + this same style pick) — see `docs/phases/phase-7-premium-billing.md`. The style options, behavior, and "changeable any time in You" contract are unchanged; only where/when it's shown moved.
 - [x] Adaptive style: learn from conversation + explicit feedback — message length, directness, formality, humor, emoji, question frequency, and whether encouragement / challenge / a smaller next step actually drives action. Support **topic-specific** tone (e.g., blunt on work, gentle on personal).
 - [x] Memory model: retain useful preferences and goals, **not** every casual detail forever.
 - [x] Memory controls UI (in the You tab): view what's remembered, correct it, delete it, mark items **sensitive**, and "don't bring this up unless I do."
