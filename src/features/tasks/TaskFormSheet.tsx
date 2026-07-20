@@ -1,5 +1,4 @@
 import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
-import { Picker } from '@react-native-picker/picker';
 import { router } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { useState } from 'react';
@@ -24,6 +23,7 @@ import type {
   Weekday,
 } from '@/lib/api/types';
 import { useCreateTask, useEditTask, usePostponeTask } from './queries';
+import { RecurrenceField } from './RecurrenceField';
 import {
   buildDueAtIso,
   buildDueAtPreservingDay,
@@ -56,18 +56,6 @@ const ICON_OPTIONS: IconName[] = [
   'bell',
   'tasks',
 ];
-
-const WEEKDAY_OPTIONS: { key: Weekday; letter: string }[] = [
-  { key: 'mo', letter: 'M' },
-  { key: 'tu', letter: 'T' },
-  { key: 'we', letter: 'W' },
-  { key: 'th', letter: 'T' },
-  { key: 'fr', letter: 'F' },
-  { key: 'sa', letter: 'S' },
-  { key: 'su', letter: 'S' },
-];
-
-const EVERY_N_OPTIONS = Array.from({ length: 29 }, (_, i) => i + 2); // 2-30 days
 
 const REASON_OPTIONS: { key: 'bad_timing' | 'low_energy' | 'avoided'; label: string }[] = [
   { key: 'bad_timing', label: 'Bad timing' },
@@ -198,10 +186,6 @@ function TaskFormBody({ task, onClose }: { task?: ApiTask; onClose: () => void }
 
   function canSubmit() {
     return validTitle() && recurrenceValid() && targetValid() && goalContributionValid();
-  }
-
-  function toggleWeekday(day: Weekday) {
-    setWeekdays((prev) => (prev.includes(day) ? prev.filter((d) => d !== day) : [...prev, day]));
   }
 
   function handleSubmit() {
@@ -532,41 +516,14 @@ function TaskFormBody({ task, onClose }: { task?: ApiTask; onClose: () => void }
       {(!isEdit || isTemplate) && (
         <>
           <FieldLabel>REPEATS</FieldLabel>
-          <View style={styles.chipRow}>
-            <Chip
-              label="Never"
-              selected={recurrenceChoice === 'none'}
-              onPress={() => setRecurrenceChoice('none')}
-            />
-            <Chip
-              label="Daily"
-              selected={recurrenceChoice === 'daily'}
-              onPress={() => setRecurrenceChoice('daily')}
-            />
-            <Chip
-              label="Weekdays"
-              selected={recurrenceChoice === 'weekly'}
-              onPress={() => setRecurrenceChoice('weekly')}
-            />
-            <Chip
-              label="Every N days"
-              selected={recurrenceChoice === 'every_n'}
-              onPress={() => setRecurrenceChoice('every_n')}
-            />
-          </View>
-          {recurrenceChoice === 'weekly' && (
-            <View style={styles.weekdayRow}>
-              {WEEKDAY_OPTIONS.map((d) => (
-                <WeekdayChip
-                  key={d.key}
-                  letter={d.letter}
-                  selected={weekdays.includes(d.key)}
-                  onPress={() => toggleWeekday(d.key)}
-                />
-              ))}
-            </View>
-          )}
-          {recurrenceChoice === 'every_n' && <EveryNField value={everyN} onChange={setEveryN} />}
+          <RecurrenceField
+            choice={recurrenceChoice}
+            weekdays={weekdays}
+            everyN={everyN}
+            onChoiceChange={setRecurrenceChoice}
+            onWeekdaysChange={setWeekdays}
+            onEveryNChange={setEveryN}
+          />
         </>
       )}
 
@@ -639,49 +596,6 @@ function TimeField({ time, onChange }: { time: string; onChange: (hhmm: string) 
   );
 }
 
-function WeekdayChip({ letter, selected, onPress }: { letter: string; selected: boolean; onPress: () => void }) {
-  return (
-    <Pressable
-      onPress={() => {
-        haptic();
-        onPress();
-      }}
-      style={[styles.weekdayChip, selected && styles.weekdayChipSelected]}
-      hitSlop={4}
-    >
-      <Text style={[styles.weekdayChipText, selected && styles.weekdayChipTextSelected]}>{letter}</Text>
-    </Pressable>
-  );
-}
-
-// A native wheel picker for the "every N days" interval — matches the time
-// field's tap-to-reveal pattern instead of a raw number TextInput.
-function EveryNField({ value, onChange }: { value: string; onChange: (n: string) => void }) {
-  const [expanded, setExpanded] = useState(false);
-  const n = Number.parseInt(value, 10) || 2;
-
-  return (
-    <View style={{ marginTop: 14 }}>
-      <Pressable onPress={() => setExpanded((e) => !e)} style={styles.timeRow}>
-        <Icon name="repeat" size={15} color={theme.dim} stroke={2} />
-        <Text style={styles.timeRowText}>Every {n} days</Text>
-        <Icon name="chevron" size={13} color={theme.faint} stroke={2} />
-      </Pressable>
-      {expanded && (
-        <Picker
-          selectedValue={n}
-          onValueChange={(val) => onChange(String(val))}
-          itemStyle={styles.pickerItem}
-        >
-          {EVERY_N_OPTIONS.map((opt) => (
-            <Picker.Item key={opt} label={`${opt} days`} value={opt} />
-          ))}
-        </Picker>
-      )}
-    </View>
-  );
-}
-
 function Chip({
   label,
   icon,
@@ -743,21 +657,6 @@ const styles = StyleSheet.create({
     borderColor: theme.border,
   },
   timeRowText: { color: theme.text, fontSize: 15, fontWeight: '600' },
-  pickerItem: { color: theme.text, fontSize: 20 },
-  weekdayRow: { flexDirection: 'row', gap: 8, marginTop: 14 },
-  weekdayChip: {
-    width: 36,
-    height: 36,
-    borderRadius: radii.pill,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: theme.surface,
-    borderWidth: 1,
-    borderColor: theme.border,
-  },
-  weekdayChipSelected: { backgroundColor: theme.blue, borderColor: theme.blue },
-  weekdayChipText: { color: theme.dim, fontSize: 14, fontWeight: '700' },
-  weekdayChipTextSelected: { color: '#fff' },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: {
     flexDirection: 'row',

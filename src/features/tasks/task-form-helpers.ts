@@ -84,6 +84,25 @@ export function buildRecurrence(
   return undefined;
 }
 
+const WEEKDAY_LABELS: Record<Weekday, string> = {
+  mo: 'Mon',
+  tu: 'Tue',
+  we: 'Wed',
+  th: 'Thu',
+  fr: 'Fri',
+  sa: 'Sat',
+  su: 'Sun',
+};
+
+/** A recurrence in plain words, for summary/recap copy — "Daily", "Mon, Wed, Fri", "Every 3 days". */
+export function describeRecurrence(recurrence: Recurrence): string {
+  if (recurrence.freq === 'daily') return 'Daily';
+  if (recurrence.freq === 'weekly') {
+    return recurrence.byWeekday.map((d) => WEEKDAY_LABELS[d]).join(', ');
+  }
+  return `Every ${recurrence.n} days`;
+}
+
 export function recurrenceChoiceFrom(recurrence: Recurrence | null): {
   choice: RecurrenceChoice;
   weekdays: Weekday[];

@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 
 import { useCreateGoal } from '@/features/goals/queries';
 import { useCreateTask } from '@/features/tasks/queries';
+import type { Recurrence } from '@/lib/api/types';
 import { useMe, useUpdatePrefs } from './queries';
 
 export type OnboardingDraft = {
@@ -11,6 +12,11 @@ export type OnboardingDraft = {
     targetValue?: number; // savings (effectively required by the UI), indirect (optional)
     unit?: string; // indirect only
     checkinTitle?: string; // habit only — its recurring check-in task
+    // habit only — how often that check-in repeats. Optional because drafts
+    // written before the cadence picker existed are still sitting in prefs
+    // waiting on a subscription; those fall back to daily, which is what
+    // they were promised at the time.
+    checkinRecurrence?: Recurrence;
   };
   task?: { title: string }; // savings/indirect/milestone only — habit has no separate task
 };
@@ -53,13 +59,19 @@ export function OnboardingDraftFlush() {
       try {
         if (draft.goal?.type === 'habit') {
           // The check-in task IS the goal's mechanic — created together in
-          // one call, exactly like GoalFormSheet.tsx's manual habit flow
-          // (hardcoded daily recurrence, no frequency picker exposed).
+          // one call, exactly like GoalFormSheet.tsx's manual habit flow.
           await createGoal.mutateAsync({
             type: 'habit',
             name: draft.goal.name,
             ...(draft.goal.checkinTitle
-              ? { starterTasks: [{ title: draft.goal.checkinTitle, recurrence: { freq: 'daily' } }] }
+              ? {
+                  starterTasks: [
+                    {
+                      title: draft.goal.checkinTitle,
+                      recurrence: draft.goal.checkinRecurrence ?? { freq: 'daily' },
+                    },
+                  ],
+                }
               : {}),
           });
         } else if (draft.goal) {

@@ -19,7 +19,14 @@ import { Progress } from '@/components/Progress';
 import { Ring } from '@/components/Ring';
 import { radii, theme } from '@/constants/theme';
 import { useCreateMemory } from '@/features/memory/queries';
+import { RecurrenceField } from '@/features/tasks/RecurrenceField';
+import {
+  buildRecurrence,
+  describeRecurrence,
+  type RecurrenceChoice,
+} from '@/features/tasks/task-form-helpers';
 import { VibeOptionList } from '@/features/profile/VibeOptionList';
+import type { Weekday } from '@/lib/api/types';
 import { useUpdatePrefs } from '@/features/profile/queries';
 import { vibeLabel, type VibePreset } from '@/features/profile/vibes';
 
@@ -161,7 +168,7 @@ const GOAL_FIELDS_COPY: Record<GoalTypeKey, { title: string; subtitle: string; n
   },
   habit: {
     title: "Let's set up your habit.",
-    subtitle: "Name it, then tell me what the daily check-in looks like.",
+    subtitle: 'Name it, then tell me what the check-in looks like and how often.',
     namePlaceholder: 'e.g. Meditation',
   },
   indirect: {
@@ -186,6 +193,13 @@ export default function OnboardingScreen() {
   const [goalTarget, setGoalTarget] = useState('');
   const [goalUnit, setGoalUnit] = useState('');
   const [checkinTitle, setCheckinTitle] = useState('');
+  // Habit cadence, mirroring GoalFormSheet's picker so a habit set up during
+  // onboarding isn't stuck at daily when the real create form offers weekly
+  // and every-N. Defaults to daily — the common case, and what this flow
+  // hardcoded before.
+  const [checkinChoice, setCheckinChoice] = useState<RecurrenceChoice>('daily');
+  const [checkinWeekdays, setCheckinWeekdays] = useState<Weekday[]>([]);
+  const [checkinEveryN, setCheckinEveryN] = useState('2');
   const [taskTitle, setTaskTitle] = useState('');
   const [style, setStyle] = useState<VibePreset | null>(null);
   const createMemory = useCreateMemory();
@@ -197,6 +211,10 @@ export default function OnboardingScreen() {
 
   const parsedTarget = parseFloat(goalTarget);
   const hasValidTarget = Number.isFinite(parsedTarget) && parsedTarget > 0;
+  // undefined when the choice can't yet build one ("Weekdays" with no days
+  // ticked) — a habit's check-in has to repeat, so that blocks Continue
+  // rather than silently defaulting to a cadence nobody picked.
+  const checkinRecurrence = buildRecurrence(checkinChoice, checkinWeekdays, checkinEveryN, '');
 
   // Same requirement each type's real create form enforces (GoalFormSheet.tsx /
   // server/src/lib/goals/schema.ts's refineCreateGoalParams) — used both to
@@ -209,7 +227,7 @@ export default function OnboardingScreen() {
       : goalType === 'indirect'
         ? !!goalUnit.trim()
         : goalType === 'habit'
-          ? !!checkinTitle.trim()
+          ? !!checkinTitle.trim() && checkinRecurrence !== undefined
           : true);
 
   const goalFieldsStep = goalType ? GOAL_FIELDS_COPY[goalType] : null;
@@ -245,7 +263,9 @@ export default function OnboardingScreen() {
                     ...(goalType === 'indirect'
                       ? { unit: trimmedUnit, ...(hasValidTarget ? { targetValue: parsedTarget } : {}) }
                       : {}),
-                    ...(goalType === 'habit' ? { checkinTitle: trimmedCheckin } : {}),
+                    ...(goalType === 'habit'
+                      ? { checkinTitle: trimmedCheckin, checkinRecurrence }
+                      : {}),
                   },
                 }
               : {}),
@@ -448,13 +468,26 @@ export default function OnboardingScreen() {
                   </>
                 )}
                 {goalType === 'habit' && (
-                  <TextInput
-                    value={checkinTitle}
-                    onChangeText={setCheckinTitle}
-                    placeholder="e.g. Meditate for 10 minutes"
-                    placeholderTextColor={theme.faint}
-                    style={[styles.input, styles.inputSpaced]}
-                  />
+                  <>
+                    <TextInput
+                      value={checkinTitle}
+                      onChangeText={setCheckinTitle}
+                      placeholder="e.g. Meditate for 10 minutes"
+                      placeholderTextColor={theme.faint}
+                      style={[styles.input, styles.inputSpaced]}
+                    />
+                    <View style={styles.inputSpaced}>
+                      <RecurrenceField
+                        choice={checkinChoice}
+                        weekdays={checkinWeekdays}
+                        everyN={checkinEveryN}
+                        onChoiceChange={setCheckinChoice}
+                        onWeekdaysChange={setCheckinWeekdays}
+                        onEveryNChange={setCheckinEveryN}
+                        allowNever={false}
+                      />
+                    </View>
+                  </>
                 )}
               </View>
               <PrimaryButton
@@ -527,7 +560,11 @@ export default function OnboardingScreen() {
               <View style={styles.recap}>
                 {goalName.trim() && <RecapRow text={`Goal: ${goalName.trim()}`} />}
                 {goalType === 'habit'
-                  ? checkinTitle.trim() && <RecapRow text={`Daily check-in: ${checkinTitle.trim()}`} />
+                  ? checkinTitle.trim() && (
+                      <RecapRow
+                        text={`${checkinRecurrence ? describeRecurrence(checkinRecurrence) : 'Daily'} check-in: ${checkinTitle.trim()}`}
+                      />
+                    )
                   : taskTitle.trim() && <RecapRow text={`First step: ${taskTitle.trim()}`} />}
                 {focuses.length > 0 ? (
                   FOCUS_OPTIONS.filter((o) => focuses.includes(o.key)).map((o) => (

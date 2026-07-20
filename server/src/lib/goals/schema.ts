@@ -252,7 +252,8 @@ function refineCreateGoalParams(params: CreateGoalParamsInput, ctx: z.Refinement
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['starterTasks'],
-        message: "a habit's check-in task must repeat (recurrence, usually daily) — a one-off task can't carry a streak",
+        message:
+          "a habit's check-in task must repeat — a one-off task can't carry a streak. Use the cadence the user described: daily, weekly with byWeekday (\"3x a week\"), or every_n_days",
       });
     } else if (params.starterTasks.some((s) => s.contribution !== undefined)) {
       // A contribution would make completions write goal_entries — but a

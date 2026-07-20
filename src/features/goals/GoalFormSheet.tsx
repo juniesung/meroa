@@ -8,8 +8,17 @@ import { Sheet } from '@/components/Sheet';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { Icon, type IconName } from '@/components/Icon';
 import { radii, theme } from '@/constants/theme';
-import type { ApiGoal, CreateGoalParams, EditGoalPatch, GoalTemplateKey, PlannedTask } from '@/lib/api/types';
+import type {
+  ApiGoal,
+  CreateGoalParams,
+  EditGoalPatch,
+  GoalTemplateKey,
+  PlannedTask,
+  Weekday,
+} from '@/lib/api/types';
 import { asLimitReached, limitReachedMessage } from '@/lib/api/limits';
+import { RecurrenceField } from '@/features/tasks/RecurrenceField';
+import { buildRecurrence, type RecurrenceChoice } from '@/features/tasks/task-form-helpers';
 import { useCreateGoal, useEditGoal } from './queries';
 
 const TYPE_OPTIONS: { type: GoalTemplateKey; label: string; icon: IconName }[] = [
@@ -123,9 +132,20 @@ function GoalFormBody({ goal, onClose }: { goal?: ApiGoal; onClose: () => void }
   // savings/indirect optional starter task, habit's required check-in task —
   // create-only (an existing goal's tasks are edited as tasks, not reissued
   // through goal edit; the server's editGoalPatchSchema has no field for it).
+  // `starterDaily` is the savings/indirect one-shot "repeats daily" toggle
+  // only; a habit's cadence is the full picker below.
   const [starterTitle, setStarterTitle] = useState('');
-  const [starterDaily, setStarterDaily] = useState(type === 'habit');
+  const [starterDaily, setStarterDaily] = useState(false);
   const [starterContribution, setStarterContribution] = useState('');
+
+  // A habit's check-in cadence. Habits were locked to daily only because this
+  // picker wasn't reachable from here — the server has always accepted any
+  // recurrence for a check-in task, so "gym 3x/week" was representable
+  // everywhere except the form. Defaults to daily, which is both the common
+  // case and exactly what this form used to hardcode.
+  const [checkinChoice, setCheckinChoice] = useState<RecurrenceChoice>('daily');
+  const [checkinWeekdays, setCheckinWeekdays] = useState<Weekday[]>([]);
+  const [checkinEveryN, setCheckinEveryN] = useState('2');
 
   // milestone — stages[0] is the active stage on create; its tasks submit as
   // starterTasks. On edit, stages[0..activeStageIndex] are the lived prefix
@@ -203,7 +223,14 @@ function GoalFormBody({ goal, onClose }: { goal?: ApiGoal; onClose: () => void }
     return type !== 'indirect' || unit.trim().length > 0;
   }
   function checkinValid() {
-    return isEdit || type !== 'habit' || starterTitle.trim().length > 0;
+    if (isEdit || type !== 'habit') return true;
+    // "Weekdays" with nothing ticked can't build a recurrence, and a habit
+    // without one can't carry a streak — block the submit rather than
+    // quietly falling back to a cadence the user didn't choose.
+    return (
+      starterTitle.trim().length > 0 &&
+      buildRecurrence(checkinChoice, checkinWeekdays, checkinEveryN, '') !== undefined
+    );
   }
   function stagesValid() {
     return type !== 'milestone' || stages.length === 0 || stages.length >= 2;
@@ -245,7 +272,18 @@ function GoalFormBody({ goal, onClose }: { goal?: ApiGoal; onClose: () => void }
         ];
       }
     } else if (type === 'habit') {
-      params.starterTasks = [{ title: starterTitle.trim(), recurrence: { freq: 'daily' as const } }];
+      // A habit's check-in MUST repeat — the streak counts that task, and the
+      // server rejects a one-off outright. buildRecurrence returns undefined
+      // for an incomplete choice (e.g. "Weekdays" with nothing ticked), which
+      // canSubmit() already blocks, so the daily fallback here is a
+      // belt-and-braces guard against ever sending a bare task, never a
+      // silent substitution of a cadence the user didn't pick.
+      params.starterTasks = [
+        {
+          title: starterTitle.trim(),
+          recurrence: buildRecurrence(checkinChoice, checkinWeekdays, checkinEveryN, '') ?? { freq: 'daily' },
+        },
+      ];
     } else if (type === 'indirect') {
       params.unit = unit.trim();
       if (targetValue.trim()) {
@@ -408,6 +446,16 @@ function GoalFormBody({ goal, onClose }: { goal?: ApiGoal; onClose: () => void }
             placeholder="Meditate 10 min"
             placeholderTextColor={theme.faint}
             style={styles.input}
+          />
+          <FieldLabel>HOW OFTEN</FieldLabel>
+          <RecurrenceField
+            choice={checkinChoice}
+            weekdays={checkinWeekdays}
+            everyN={checkinEveryN}
+            onChoiceChange={setCheckinChoice}
+            onWeekdaysChange={setCheckinWeekdays}
+            onEveryNChange={setCheckinEveryN}
+            allowNever={false}
           />
         </>
       )}
