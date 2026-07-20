@@ -42,7 +42,11 @@ function TotalView({ detail }: { detail: ApiGoalDetail }) {
           <Text style={styles.viewHeadline}>
             {detail.currency}{formatMoney(detail.total ?? 0)} / {detail.currency}{formatMoney(detail.targetValue ?? 0)}
           </Text>
-          {detail.card.paceLine ? <Text style={styles.viewSub}>{detail.card.paceLine}</Text> : null}
+          {detail.card.paceLine ? (
+            <Text style={[styles.viewSub, detail.card.onTrack === true && { color: theme.success }]}>
+              {detail.card.paceLine}
+            </Text>
+          ) : null}
         </View>
       </View>
       <Progress value={pct} />
@@ -85,7 +89,11 @@ function TrendView({ detail, entries }: { detail: ApiGoalDetail; entries: ApiGoa
 
   return (
     <View style={styles.viewCard}>
-      {detail.card.paceLine ? <Text style={styles.viewSub}>{detail.card.paceLine}</Text> : null}
+      {detail.card.paceLine ? (
+        <Text style={[styles.viewSub, detail.card.onTrack === true && { color: theme.success }]}>
+          {detail.card.paceLine}
+        </Text>
+      ) : null}
       {points.length > 0 ? (
         <View onLayout={(e) => setWidth(e.nativeEvent.layout.width)}>
           <TrendChart entries={points} unit={detail.unit ?? ''} targetValue={detail.targetValue} width={width} />

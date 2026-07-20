@@ -1,14 +1,20 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  computeCardSummary,
   computeHabitCardSummary,
   computeIndirectCardSummary,
   computeIndirectPace,
   computeIndirectProgress,
   computeMilestoneCardSummary,
+  computeOnTrack,
   formatMoney,
 } from './summary.ts';
-import type { IndirectGoalDefinition, MilestoneGoalDefinition } from './schema.ts';
+import type {
+  IndirectGoalDefinition,
+  MilestoneGoalDefinition,
+  SavingsGoalDefinition,
+} from './schema.ts';
 
 // The "$0.5" bug: a fractional amount must always show two decimals, an
 // integer amount never a forced ".00".
@@ -212,5 +218,151 @@ describe('computeIndirectCardSummary', () => {
     const card = computeIndirectCardSummary(def2, entries, 'UTC', now);
     expect(card.paceLine).toBe('Target reached');
     expect(card.progress).toBe(1);
+  });
+});
+
+// The on-track verdict: does the rate SO FAR keep up with the rate the
+// deadline now demands? Every figure here is server-computed and quoted by
+// the model verbatim (docs/chat-architecture.md §9), so an off-by-one in the
+// elapsed-days window is a wrong number in the user's chat, not a cosmetic
+// bug.
+
+describe('computeOnTrack', () => {
+  it('matching the required rate exactly counts as on track', () => {
+    expect(computeOnTrack(5, 5)).toBe(true);
+  });
+
+  it('above and below the required rate', () => {
+    expect(computeOnTrack(7.5, 5)).toBe(true);
+    expect(computeOnTrack(2, 5)).toBe(false);
+  });
+});
+
+describe('computeCardSummary — savings pace verdict', () => {
+  const def: SavingsGoalDefinition = {
+    type: 'savings',
+    currency: '$',
+    targetValue: 300,
+    deadline: '2026-07-31',
+  };
+  const now = new Date('2026-07-11T00:00:00Z');
+  // 10 elapsed days at the point `now` is taken.
+  const createdAt = new Date('2026-07-01T00:00:00Z');
+
+  it('ahead of the required rate reads "on track"', () => {
+    // $200 over 10 days = $20/day; $100 left over 20 days needs $5/day.
+    const entries = [{ entryAt: new Date('2026-07-05T00:00:00Z'), data: { amount: 200 } }];
+    const card = computeCardSummary(def, entries, 'UTC', now, createdAt);
+    expect(card.onTrack).toBe(true);
+    expect(card.paceLine).toContain('— on track');
+  });
+
+  it('below the required rate reads "behind pace"', () => {
+    // $10 over 10 days = $1/day; $290 left over 20 days needs $14.50/day.
+    const entries = [{ entryAt: new Date('2026-07-05T00:00:00Z'), data: { amount: 10 } }];
+    const card = computeCardSummary(def, entries, 'UTC', now, createdAt);
+    expect(card.onTrack).toBe(false);
+    expect(card.paceLine).toContain('— behind pace');
+  });
+
+  it('abstains on day zero rather than calling an untouched goal behind', () => {
+    const card = computeCardSummary(def, [], 'UTC', now, now);
+    expect(card.onTrack).toBeNull();
+    expect(card.paceLine).toContain('/day to hit');
+    expect(card.paceLine).not.toContain('track');
+    expect(card.paceLine).not.toContain('behind');
+  });
+
+  it('no deadline means no pace line and no verdict to give', () => {
+    const noDeadline: SavingsGoalDefinition = { type: 'savings', currency: '$', targetValue: 300 };
+    const card = computeCardSummary(noDeadline, [], 'UTC', now, createdAt);
+    expect(card.paceLine).toBeNull();
+    expect(card.onTrack).toBeNull();
+  });
+
+  it('a reached or overdue goal states that plainly instead of stacking a verdict', () => {
+    const reached = computeCardSummary(
+      def,
+      [{ entryAt: new Date('2026-07-05T00:00:00Z'), data: { amount: 300 } }],
+      'UTC',
+      now,
+      createdAt,
+    );
+    expect(reached.paceLine).toBe('Target reached');
+    expect(reached.onTrack).toBeNull();
+
+    const overdue = computeCardSummary(def, [], 'UTC', new Date('2026-08-05T00:00:00Z'), createdAt);
+    expect(overdue.paceLine).toContain('past the');
+    expect(overdue.onTrack).toBeNull();
+  });
+
+  it('paces from goal creation, not the first entry — a late first log does not inflate the rate', () => {
+    // $100 logged today. From creation (10 days) that's $10/day, under the
+    // $13.33/day the remaining $200 over 15 days demands. Measured from the
+    // first entry instead it would be a same-day $100/day and wrongly "on
+    // track".
+    const entries = [{ entryAt: new Date('2026-07-11T00:00:00Z'), data: { amount: 100 } }];
+    const card = computeCardSummary(
+      { ...def, deadline: '2026-07-26' },
+      entries,
+      'UTC',
+      now,
+      createdAt,
+    );
+    expect(card.onTrack).toBe(false);
+  });
+});
+
+describe('computeIndirectCardSummary — pace verdict', () => {
+  const now = new Date('2026-07-12T00:00:00Z');
+
+  it('is direction-aware: falling toward a target can be on track', () => {
+    // 180 -> 172 is 8lb over 11 days (~0.73/day); 7lb left over 10 days
+    // needs 0.7/day.
+    const def: IndirectGoalDefinition = {
+      type: 'indirect',
+      unit: 'lb',
+      targetValue: 165,
+      deadline: '2026-07-22',
+    };
+    const entries = [
+      { entryAt: new Date('2026-07-01T00:00:00Z'), data: { amount: 180 } },
+      { entryAt: new Date('2026-07-12T00:00:00Z'), data: { amount: 172 } },
+    ];
+    const card = computeIndirectCardSummary(def, entries, 'UTC', now);
+    expect(card.onTrack).toBe(true);
+    expect(card.paceLine).toContain('— on track');
+  });
+
+  it('barely moving against a near deadline reads "behind pace"', () => {
+    const def: IndirectGoalDefinition = {
+      type: 'indirect',
+      unit: 'lb',
+      targetValue: 165,
+      deadline: '2026-07-15',
+    };
+    const entries = [
+      { entryAt: new Date('2026-07-01T00:00:00Z'), data: { amount: 180 } },
+      { entryAt: new Date('2026-07-12T00:00:00Z'), data: { amount: 179 } },
+    ];
+    const card = computeIndirectCardSummary(def, entries, 'UTC', now);
+    expect(card.onTrack).toBe(false);
+    expect(card.paceLine).toContain('— behind pace');
+  });
+
+  it('abstains when every reading landed on the same day', () => {
+    const def: IndirectGoalDefinition = {
+      type: 'indirect',
+      unit: 'lb',
+      targetValue: 165,
+      deadline: '2026-07-22',
+    };
+    const entries = [
+      { entryAt: new Date('2026-07-12T00:00:00Z'), data: { amount: 180 } },
+      { entryAt: new Date('2026-07-12T06:00:00Z'), data: { amount: 179 } },
+    ];
+    const card = computeIndirectCardSummary(def, entries, 'UTC', now);
+    expect(card.onTrack).toBeNull();
+    expect(card.paceLine).not.toContain('track');
   });
 });

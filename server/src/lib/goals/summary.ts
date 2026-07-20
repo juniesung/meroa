@@ -84,6 +84,31 @@ export type Pace = {
 };
 
 /**
+ * Has the user's own historical rate kept up with the rate the deadline now
+ * demands? `null` when there isn't enough elapsed history to judge (a goal
+ * started today), which reads as "no verdict yet" rather than a misleading
+ * "behind" on day zero.
+ *
+ * The comparison is deliberately self-correcting: `requiredPerDay` is
+ * recomputed from what's *still* remaining over the days *still* left, so
+ * falling behind raises the bar and the verdict flips honestly on its own.
+ */
+export function computeOnTrack(actualPerDay: number, requiredPerDay: number): boolean {
+  return actualPerDay >= requiredPerDay;
+}
+
+/**
+ * Elapsed whole days between a start date and now, in the account's tz —
+ * the denominator of every "actual rate so far" figure below. Returns null
+ * under a full day, which is what makes the on-track verdict abstain instead
+ * of dividing by ~0 and reporting a wild rate.
+ */
+function elapsedDaysSince(start: Date, tz: string, now: Date): number | null {
+  const days = daysBetweenYmd(ymdInTz(start, tz), ymdInTz(now, tz));
+  return days >= 1 ? days : null;
+}
+
+/**
  * Money needed per day to hit `targetValue` by `deadline` — the "$5.2/day to
  * hit Dec 15" line on a goal card (docs/goals-redesign-plan.md §2.5). Null
  * when there's no deadline to pace against. `daysLeft` floors at 0 rather
@@ -117,6 +142,13 @@ export type GoalCardSummary = {
   // Habit goals only — the card's whole mechanic (docs/goals-redesign-
   // plan.md §1). Null for savings.
   streak: GoalStreak | null;
+  // Is the actual rate so far keeping up with what the deadline demands?
+  // Null when there's no deadline to pace against, or too little history to
+  // judge. Carried as its own field *as well as* being baked into paceLine's
+  // text so the client can style the line without parsing prose — the model
+  // only ever quotes paceLine (docs/chat-architecture.md §9: it never
+  // computes a figure, and must not derive this verdict either).
+  onTrack: boolean | null;
 };
 
 export function computeCardSummary(
@@ -124,6 +156,7 @@ export function computeCardSummary(
   entries: LiveEntry[],
   tz: string,
   now: Date,
+  createdAt: Date,
 ): GoalCardSummary {
   const total = computeTotal(entries);
   const unit = definition.currency;
@@ -134,18 +167,47 @@ export function computeCardSummary(
   const entryCount = entries.length;
   const sub = entryCount === 0 ? 'No entries yet' : `${entryCount} ${entryCount === 1 ? 'entry' : 'entries'} logged`;
 
+  // Savings paces from the goal's own creation, not its first entry: `total`
+  // sums every entry ever logged, so the window it accumulated over is the
+  // goal's whole lifetime. Starting the clock at the first entry instead
+  // would divide a total that *includes* that entry by a window that
+  // excludes the time before it, inflating the rate — and an untouched goal
+  // would look paceless rather than behind. (Indirect measures a delta from
+  // its first reading, so it starts there instead — see
+  // computeIndirectCardSummary.)
+  const elapsedDays = elapsedDaysSince(createdAt, tz, now);
+  const onTrack =
+    pace && !pace.reached && !pace.overdue && elapsedDays !== null
+      ? computeOnTrack(total / elapsedDays, pace.perDay)
+      : null;
+
   let paceLine: string | null = null;
   if (pace) {
     if (pace.reached) {
       paceLine = 'Target reached';
     } else if (pace.overdue) {
+      // Already past the deadline — "behind" is self-evident and stacking a
+      // second verdict on top just piles on.
       paceLine = `${unit}${formatMoney(pace.remaining)} to go — past the ${formatYmdShort(definition.deadline!)} deadline`;
     } else {
-      paceLine = `needs ${unit}${formatMoney(pace.perDay)}/day to hit ${formatYmdShort(definition.deadline!)}`;
+      paceLine = `needs ${unit}${formatMoney(pace.perDay)}/day to hit ${formatYmdShort(definition.deadline!)}${paceVerdictSuffix(onTrack)}`;
     }
   }
 
-  return { headline, sub, progress, paceLine, streak: null };
+  return { headline, sub, progress, paceLine, streak: null, onTrack };
+}
+
+/**
+ * Appended to an active pace line, never a standalone sentence — the verdict
+ * has to travel *with* the numbers it's about, because the model quotes
+ * paceLine verbatim and would otherwise have to pair the two itself.
+ * Deliberately plain: "behind pace" is a fact, not a scolding
+ * (docs/goals-redesign-plan.md §2.5 — the mechanics are real, the copy stays
+ * matter-of-fact).
+ */
+function paceVerdictSuffix(onTrack: boolean | null): string {
+  if (onTrack === null) return '';
+  return onTrack ? ' — on track' : ' — behind pace';
 }
 
 /**
@@ -161,7 +223,7 @@ export function computeHabitCardSummary(streak: GoalStreak): GoalCardSummary {
     streak.doneCount === 0
       ? 'First check-in starts it'
       : `longest ${streak.longest} · ${streak.doneCount} check-in${streak.doneCount === 1 ? '' : 's'}`;
-  return { headline, sub, progress: null, paceLine: null, streak };
+  return { headline, sub, progress: null, paceLine: null, streak, onTrack: null };
 }
 
 /**
@@ -179,13 +241,13 @@ export function computeMilestoneCardSummary(definition: MilestoneGoalDefinition)
   // the same way a genuinely finished goal is, and without this branch it
   // read as "Complete — all 0 stages" for a goal that hasn't even started.
   if (total === 0) {
-    return { headline: 'No stages yet', sub: 'add them in Goals', progress: 0, paceLine: null, streak: null };
+    return { headline: 'No stages yet', sub: 'add them in Goals', progress: 0, paceLine: null, streak: null, onTrack: null };
   }
   const done = definition.activeStageIndex >= total;
   const headline = done ? `Complete — all ${total} stages` : (definition.stages[definition.activeStageIndex] ?? '');
   const sub = done ? `${total} stage${total === 1 ? '' : 's'} done` : `stage ${definition.activeStageIndex + 1} of ${total}`;
   const progress = Math.min(1, definition.activeStageIndex / total);
-  return { headline, sub, progress, paceLine: null, streak: null };
+  return { headline, sub, progress, paceLine: null, streak: null, onTrack: null };
 }
 
 /**
@@ -247,6 +309,7 @@ export function computeIndirectCardSummary(
       progress: null,
       paceLine: null,
       streak: null,
+      onTrack: null,
     };
   }
 
@@ -265,24 +328,37 @@ export function computeIndirectCardSummary(
 
   let progress: number | null = null;
   let paceLine: string | null = null;
+  let onTrack: boolean | null = null;
   if (definition.targetValue !== undefined) {
     const { fraction, reached } = computeIndirectProgress(start, current, definition.targetValue);
     progress = fraction;
     const pace = computeIndirectPace(start, current, definition.targetValue, definition.deadline, tz, now);
     if (pace) {
+      // Unlike savings, the clock starts at the FIRST READING, not the goal's
+      // creation: `start` is that reading, and the movement being paced is
+      // `current - start`. Numerator and denominator have to span the same
+      // window or the rate is meaningless. Direction-agnostic via abs() —
+      // this works the same whether the number is climbing toward a bench PR
+      // or falling toward a weight target (docs/goals-redesign-plan.md §1.3).
+      const elapsedDays = elapsedDaysSince(sortedAsc[0]!.entryAt, tz, now);
+      onTrack =
+        !pace.reached && !pace.overdue && elapsedDays !== null
+          ? computeOnTrack(Math.abs(current - start) / elapsedDays, pace.perDay)
+          : null;
+
       if (pace.reached) {
         paceLine = 'Target reached';
       } else if (pace.overdue) {
         paceLine = `${formatNumber(pace.remaining)}${definition.unit} to go — past the ${formatYmdShort(definition.deadline!)} deadline`;
       } else {
-        paceLine = `needs ${formatNumber(pace.perDay)}${definition.unit}/day to hit ${formatYmdShort(definition.deadline!)}`;
+        paceLine = `needs ${formatNumber(pace.perDay)}${definition.unit}/day to hit ${formatYmdShort(definition.deadline!)}${paceVerdictSuffix(onTrack)}`;
       }
     } else if (reached) {
       paceLine = 'Target reached';
     }
   }
 
-  return { headline, sub, progress, paceLine, streak: null };
+  return { headline, sub, progress, paceLine, streak: null, onTrack };
 }
 
 // --- I/O-backed entry points ---------------------------------------------
@@ -382,7 +458,7 @@ export async function buildGoalDetail(goal: GoalRow, timezone: string | null): P
 
   return {
     type: 'savings',
-    card: computeCardSummary(definition, entries, tz, now),
+    card: computeCardSummary(definition, entries, tz, now, goal.createdAt),
     total,
     targetValue: definition.targetValue,
     currency: definition.currency,
@@ -418,7 +494,7 @@ export async function buildGoalCardSummaries(
   const result = new Map<string, GoalCardSummary & { entryCount: number; lastEntryAt: Date | null }>();
   for (const goal of savingsGoals) {
     const entries = entriesByGoal.get(goal.id) ?? [];
-    const card = computeCardSummary(goal.definition as SavingsGoalDefinition, entries, tz, now);
+    const card = computeCardSummary(goal.definition as SavingsGoalDefinition, entries, tz, now, goal.createdAt);
     result.set(goal.id, { ...card, entryCount: entries.length, lastEntryAt: entries[0]?.entryAt ?? null });
   }
   for (const goal of habitGoals) {

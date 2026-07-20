@@ -43,6 +43,22 @@ function CardShell({
   );
 }
 
+/**
+ * The server-computed pace line, e.g. "needs $5.20/day to hit Dec 15 — on
+ * track". Being on pace is worth showing off, so it reads in the success
+ * color; being behind deliberately does NOT turn red. The text already says
+ * "behind pace" plainly — dressing that in an alarm color would be the app
+ * scolding someone for a number it's supposed to state matter-of-factly
+ * (CLAUDE.md §2: never reinforce harmful self-judgment).
+ */
+function PaceLine({ text, onTrack }: { text: string; onTrack?: boolean | null }) {
+  return (
+    <Text style={[styles.paceLine, onTrack === true && { color: theme.success }]} numberOfLines={1}>
+      {text}
+    </Text>
+  );
+}
+
 export function GoalCard({
   type,
   icon,
@@ -50,6 +66,7 @@ export function GoalCard({
   subtitle,
   progress,
   paceLine,
+  onTrack,
   streak,
   accent,
 }: {
@@ -68,6 +85,9 @@ export function GoalCard({
   // a deadline, e.g. "needs $5.2/day to hit Dec 15"
   // (docs/goals-redesign-plan.md §2.5).
   paceLine?: string | null;
+  // The same on-track/behind verdict already stated inside `paceLine`, as a
+  // boolean so this component can style it without parsing the sentence.
+  onTrack?: boolean | null;
   // Habit goals only.
   streak?: GoalStreak | null;
   accent?: string;
@@ -95,11 +115,7 @@ export function GoalCard({
     return (
       <CardShell icon={icon} title={title} subtitle={subtitle} accent={accent}>
         {progress != null && <Progress value={progress} />}
-        {paceLine ? (
-          <Text style={styles.paceLine} numberOfLines={1}>
-            {paceLine}
-          </Text>
-        ) : null}
+        {paceLine ? <PaceLine text={paceLine} onTrack={onTrack} /> : null}
       </CardShell>
     );
   }
@@ -128,11 +144,7 @@ export function GoalCard({
       right={<Ring value={pct} size={38} stroke={3.5} label={`${pct}`} />}
     >
       <Progress value={pct} />
-      {paceLine ? (
-        <Text style={styles.paceLine} numberOfLines={1}>
-          {paceLine}
-        </Text>
-      ) : null}
+      {paceLine ? <PaceLine text={paceLine} onTrack={onTrack} /> : null}
     </CardShell>
   );
 }

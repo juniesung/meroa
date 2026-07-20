@@ -249,6 +249,11 @@ export type ApiGoal = {
   sub?: string;
   progress?: number | null;
   paceLine?: string | null;
+  // Is the rate so far keeping up with what the deadline demands? Already
+  // stated in words inside `paceLine`; this is the same verdict as a plain
+  // boolean so the UI can style the line without parsing it. Null when
+  // there's no deadline, or too little history to judge yet.
+  onTrack?: boolean | null;
   // Habit goals only — null/absent for savings/indirect.
   streak?: GoalStreak | null;
   lastEntryAt?: string | null;
@@ -267,7 +272,13 @@ export type ApiGoalEntry = {
 
 export type ApiGoalDetail = {
   type: 'savings' | 'habit' | 'indirect' | 'milestone';
-  card: { headline: string; sub: string; progress: number | null; paceLine: string | null };
+  card: {
+    headline: string;
+    sub: string;
+    progress: number | null;
+    paceLine: string | null;
+    onTrack: boolean | null;
+  };
   // Savings fields — null on a habit/indirect detail. targetValue and
   // deadline are shared with indirect.
   total: number | null;
