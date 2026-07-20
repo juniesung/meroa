@@ -116,8 +116,36 @@ the App Store or Google Play.
 - **Withdraw AI consent.** You can withdraw permission for AI processing at any time in
   Settings.
 
-Depending on where you live, you may have additional rights under laws such as the GDPR or
-CCPA/CPRA. [REVIEW: add jurisdiction-specific rights language as advised by counsel.]
+### California privacy rights (CCPA/CPRA)
+
+If you are a California resident, you have the following rights over your personal
+information:
+
+- **Right to know / access** — request the categories and specific pieces of personal
+  information we have collected about you, the sources we collected it from, the business
+  purpose for collecting it, and the categories of third parties we share it with.
+- **Right to delete** — request deletion of the personal information we hold about you. You
+  can do this yourself at any time by deleting your account (above); deletion is immediate
+  and permanent.
+- **Right to correct** — request that we correct inaccurate personal information about you.
+- **Right to opt out of sale or sharing** — we do **not** sell your personal information and
+  do **not** share it for cross-context behavioral advertising, so there is nothing to opt
+  out of.
+- **Right to limit the use of sensitive personal information** — your messages may contain
+  sensitive information. We use it only to provide the service to you (to reply, and to
+  create and update the tasks, goals, and memories you ask for); we do not use it to infer
+  characteristics about you, and we do not sell or share it.
+- **Right to non-discrimination** — we will not discriminate against you for exercising any
+  of these rights.
+
+To exercise these rights, email us at meroa.app@gmail.com or use the in-app controls (data
+export, memory management, and account deletion). We verify requests using your account
+(your verified phone number), and you may use an authorized agent to submit a request on
+your behalf. If you live outside California, you may have other rights under your local law
+— contact us and we will do our best to help.
+
+<!-- REVIEW: CCPA/CPRA section drafted from what the app actually does; still requires counsel review before publishing (not legal advice). -->
+
 
 ## 7. Children
 

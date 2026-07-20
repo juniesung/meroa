@@ -149,7 +149,17 @@ const PRIVACY_BODY = `
     <li><strong>Delete your account</strong> in the app or at <a href="/account/delete">our web deletion page</a> — immediate and permanent.</li>
     <li><strong>Withdraw AI consent</strong> anytime in Settings.</li>
   </ul>
-  <p class="muted">Depending on where you live, you may have additional rights (e.g. GDPR, CCPA/CPRA). [REVIEW: add jurisdiction-specific rights with counsel.]</p>
+  <h3>California privacy rights (CCPA/CPRA)</h3>
+  <p>If you are a California resident, you have the following rights over your personal information:</p>
+  <ul>
+    <li><strong>Right to know / access</strong> — request the categories and specific pieces of personal information we have collected, the sources we collected it from, the business purpose, and the categories of third parties we share it with.</li>
+    <li><strong>Right to delete</strong> — request deletion of the personal information we hold about you. You can do this yourself at any time by deleting your account (above); deletion is immediate and permanent.</li>
+    <li><strong>Right to correct</strong> — request that we correct inaccurate personal information about you.</li>
+    <li><strong>Right to opt out of sale or sharing</strong> — we do <strong>not</strong> sell your personal information and do <strong>not</strong> share it for cross-context behavioral advertising, so there is nothing to opt out of.</li>
+    <li><strong>Right to limit the use of sensitive personal information</strong> — your messages may contain sensitive information. We use it only to provide the service to you (to reply, and to create and update the tasks, goals, and memories you ask for); we do not use it to infer characteristics about you, and we do not sell or share it.</li>
+    <li><strong>Right to non-discrimination</strong> — we will not discriminate against you for exercising any of these rights.</li>
+  </ul>
+  <p>To exercise these rights, email <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a> or use the in-app controls (data export, memory management, and account deletion). We verify requests using your account (your verified phone number), and you may use an authorized agent to submit a request on your behalf. If you live outside California, you may have other rights under your local law — contact us and we will do our best to help.</p>
 
   <h2>7. Children</h2>
   <p>Meroa is not directed to children under 13, and we do not knowingly collect their information. [REVIEW: confirm minimum age.]</p>
