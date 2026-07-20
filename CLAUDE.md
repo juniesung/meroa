@@ -223,7 +223,7 @@ success          #30D158     danger      #FF453A
 **Chat rules (iMessage feel)**
 
 - User bubbles: blue gradient, right-aligned, subtle blue glow, bottom-right corner tightened. AI bubbles: flat `#1C1F25`, left-aligned, bottom-left corner tightened.
-- `maxWidth ~78%`, compact vertical grouping, rounded composer with attach + mic↔send swap.
+- `maxWidth ~78%`, compact vertical grouping, rounded composer. (The reference's attach + mic↔send swap was dropped in Phase 8: they were dead-end controls — no voice or attachment feature exists server-side — and Apple rejects on those. The composer is now text + a send button that appears only when there's text.)
 
 **Components to rebuild:** `MeroaMark` (gradient "M" logo + 3 chat dots), `Icon` (stroke SVG set: chat, tasks, tools, you, plus, send, mic, paperclip, ellipsis, check, droplet, clock, briefcase, dumbbell, wallet, book, chevron, bell, moon, lock, crown, logout, sparkle, flame), `Bubble`, `Progress` (gradient bar), `Ring` (SVG meter), `TaskCard`, `ToolCard`, `Row`, `PrimaryButton`, and the blurred tab bar.
 

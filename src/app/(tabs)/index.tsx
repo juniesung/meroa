@@ -736,8 +736,7 @@ export default function ChatScreen() {
   const communicationStyle = vibeLabel(me?.user.prefs.communicationStyle);
   const scrollRef = useRef<ScrollView>(null);
   const ellipsisFeedback = useTapFeedback();
-  const attachFeedback = useTapFeedback();
-  const micSendFeedback = useTapFeedback(0.9);
+  const sendFeedback = useTapFeedback(0.9);
   const tabBarHeight = useTabBarHeight();
   // Mascot-lite reacts here too, not just the Goals tab header
   // (docs/goals-redesign-plan.md §1) — same mood derivation as goals.tsx.
@@ -898,13 +897,6 @@ export default function ChatScreen() {
         )}
 
         <View style={[styles.composer, { paddingBottom: tabBarHeight + 16 }]}>
-          <AnimatedPressable
-            onPressIn={attachFeedback.onPressIn}
-            onPressOut={attachFeedback.onPressOut}
-            style={[styles.composerIcon, attachFeedback.animatedStyle]}
-          >
-            <Icon name="paperclip" size={20} color={theme.dim} />
-          </AnimatedPressable>
           <TextInput
             value={draft}
             onChangeText={setDraft}
@@ -915,24 +907,18 @@ export default function ChatScreen() {
             maxLength={MAX_MESSAGE_LENGTH}
             onSubmitEditing={sendDraft}
           />
+          {/* Send appears only when there's text — no dead-end mic/attach
+              controls (neither voice nor attachments exist server-side). */}
           {draft.trim() ? (
             <AnimatedPressable
               onPress={sendDraft}
-              onPressIn={micSendFeedback.onPressIn}
-              onPressOut={micSendFeedback.onPressOut}
-              style={[styles.composerIcon, styles.sendBtn, micSendFeedback.animatedStyle]}
+              onPressIn={sendFeedback.onPressIn}
+              onPressOut={sendFeedback.onPressOut}
+              style={[styles.composerIcon, styles.sendBtn, sendFeedback.animatedStyle]}
             >
               <Icon name="send" size={18} color="#fff" stroke={2} />
             </AnimatedPressable>
-          ) : (
-            <AnimatedPressable
-              onPressIn={micSendFeedback.onPressIn}
-              onPressOut={micSendFeedback.onPressOut}
-              style={[styles.composerIcon, micSendFeedback.animatedStyle]}
-            >
-              <Icon name="mic" size={20} color={theme.dim} />
-            </AnimatedPressable>
-          )}
+          ) : null}
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
