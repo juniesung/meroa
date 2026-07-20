@@ -200,6 +200,11 @@ export const api = {
       body: JSON.stringify({ timezone }),
     }),
 
+  // Immediate hard delete — the server erases the account and all its data in
+  // one transaction (routes/me.ts). Follow a success with the AuthProvider
+  // sign-out terminal path (clearTokens → logOutPurchases → auth stack).
+  deleteAccount: () => request<{ ok: true }>('/me', { method: 'DELETE' }),
+
   bootstrap: () => request<BootstrapResponse>('/bootstrap'),
 
   getMessages: (cursor?: string) =>

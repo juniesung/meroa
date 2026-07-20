@@ -8,6 +8,7 @@ import { Row } from '@/components/Row';
 import { theme } from '@/constants/theme';
 import { consentGranted } from '@/features/profile/ai-consent';
 import { useMe, useUpdatePrefs } from '@/features/profile/queries';
+import { api } from '@/lib/api/client';
 import { QuietHoursSheet } from '@/features/profile/QuietHoursSheet';
 import { formatHhmmDisplay } from '@/features/tasks/task-form-helpers';
 import { readQuietHours } from '@/features/profile/quiet-hours';
@@ -24,6 +25,7 @@ export default function YouScreen() {
   const updatePrefs = useUpdatePrefs();
   const [vibeSheetOpen, setVibeSheetOpen] = useState(false);
   const [quietHoursSheetOpen, setQuietHoursSheetOpen] = useState(false);
+  const [deletingAccount, setDeletingAccount] = useState(false);
 
   const communicationStyle = vibeLabel(data?.user.prefs.communicationStyle);
   const proactiveCheckins = data?.user.prefs.proactiveCheckins === true;
@@ -58,6 +60,48 @@ export default function YouScreen() {
           text: 'Turn off',
           style: 'destructive',
           onPress: () => updatePrefs.mutate({ aiConsent: { granted: false } }),
+        },
+      ],
+    );
+  };
+
+  const doDeleteAccount = async () => {
+    setDeletingAccount(true);
+    try {
+      await api.deleteAccount();
+    } catch {
+      setDeletingAccount(false);
+      Alert.alert('Something went wrong', "We couldn't delete your account. Please try again.");
+      return;
+    }
+    // The account is gone server-side; run the normal terminal path (logout
+    // fails silently — its session is already cascaded away — then clears
+    // tokens, logs out of RevenueCat, and routes to the auth stack).
+    await signOut();
+  };
+
+  const handleDeleteAccount = () => {
+    if (deletingAccount) return;
+    // Two-step confirm: destructive and irreversible, so a single stray tap
+    // must not do it. The copy is explicit that billing is separate (deleting
+    // the account does NOT cancel the store subscription — only the store can).
+    Alert.alert(
+      'Delete account?',
+      "This permanently deletes your account and everything in it — your messages, tasks, goals, and memories. It can't be undone.\n\nDeleting your account does not cancel your subscription. To stop billing, cancel it in the App Store.",
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () =>
+            Alert.alert(
+              'Are you absolutely sure?',
+              'Your data will be erased immediately and cannot be recovered.',
+              [
+                { text: 'Cancel', style: 'cancel' },
+                { text: 'Delete forever', style: 'destructive', onPress: doDeleteAccount },
+              ],
+            ),
         },
       ],
     );
@@ -135,6 +179,12 @@ export default function YouScreen() {
             onPress={() => router.push('/paywall')}
           />
           <Row icon="logout" label="Sign out" danger onPress={() => signOut()} />
+          <Row
+            icon="lock"
+            label={deletingAccount ? 'Deleting…' : 'Delete account'}
+            danger
+            onPress={handleDeleteAccount}
+          />
         </Section>
 
         <Text style={styles.footer}>Meroa · v1.0.0</Text>

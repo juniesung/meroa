@@ -37,3 +37,25 @@ export async function fetchSubscriberEntitlement(appUserId: string): Promise<Rev
   const active = !expiresAt || expiresAt.getTime() > Date.now();
   return { active, expiresAt };
 }
+
+// Best-effort teardown of the RevenueCat subscriber on account deletion. This
+// does NOT cancel the store subscription (only Apple/Google can — the user is
+// told to do that in the delete confirmation copy); it removes RC's record so a
+// later webhook can't resurrect an `entitlements` row for a user we've deleted.
+// Deliberately throws on failure so the caller can log it, but the caller MUST
+// wrap this so a RC outage never blocks the local hard delete. Returns false
+// (no-op) when billing isn't configured.
+export async function deleteSubscriber(appUserId: string): Promise<boolean> {
+  if (!env.REVENUECAT_SECRET_API_KEY) return false;
+
+  const res = await fetch(
+    `https://api.revenuecat.com/v1/subscribers/${encodeURIComponent(appUserId)}`,
+    { method: 'DELETE', headers: { Authorization: `Bearer ${env.REVENUECAT_SECRET_API_KEY}` } },
+  );
+  // 404 means there was no subscriber record to begin with — that's success for
+  // our purposes (nothing left to resurrect us).
+  if (!res.ok && res.status !== 404) {
+    throw new Error(`revenuecat subscriber delete failed: ${res.status}`);
+  }
+  return true;
+}
