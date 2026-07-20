@@ -1,4 +1,5 @@
 import { router } from 'expo-router';
+import * as WebBrowser from 'expo-web-browser';
 import { useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -9,6 +10,7 @@ import { theme } from '@/constants/theme';
 import { consentGranted } from '@/features/profile/ai-consent';
 import { useMe, useUpdatePrefs } from '@/features/profile/queries';
 import { api } from '@/lib/api/client';
+import { privacyUrl, supportUrl, termsUrl } from '@/lib/legal-urls';
 import { QuietHoursSheet } from '@/features/profile/QuietHoursSheet';
 import { formatHhmmDisplay } from '@/features/tasks/task-form-helpers';
 import { readQuietHours } from '@/features/profile/quiet-hours';
@@ -184,6 +186,24 @@ export default function YouScreen() {
             label={deletingAccount ? 'Deleting…' : 'Delete account'}
             danger
             onPress={handleDeleteAccount}
+          />
+        </Section>
+
+        <Section title="ABOUT">
+          <Row
+            icon="lock"
+            label="Privacy Policy"
+            onPress={() => WebBrowser.openBrowserAsync(privacyUrl())}
+          />
+          <Row
+            icon="book"
+            label="Terms of Use"
+            onPress={() => WebBrowser.openBrowserAsync(termsUrl())}
+          />
+          <Row
+            icon="chat"
+            label="Support"
+            onPress={() => WebBrowser.openBrowserAsync(supportUrl())}
           />
         </Section>
 

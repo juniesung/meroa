@@ -20,12 +20,8 @@ import {
 import { isBillingConfigured } from '@/features/billing/purchases';
 import type { OnboardingDraft } from '@/features/profile/OnboardingDraftFlush';
 import { useMe } from '@/features/profile/queries';
+import { privacyUrl, termsUrl } from '@/lib/legal-urls';
 
-// Placeholder until Phase 8 (release readiness) ships real policy pages —
-// the disclosure ROW below must still render before any purchase, per the
-// phase-7 DoD; only the destination URL is a stand-in.
-const PRIVACY_URL = 'https://meroa.app/privacy';
-const TERMS_URL = 'https://meroa.app/terms';
 
 function formatExpiry(iso: string | null): string | null {
   if (!iso) return null;
@@ -141,11 +137,11 @@ export default function PaywallScreen() {
                     : `${pkg.product.priceString} per month. Renews automatically until cancelled — cancel anytime in your App Store account settings.`}
                 </Text>
                 <View style={styles.links}>
-                  <Text style={styles.link} onPress={() => WebBrowser.openBrowserAsync(PRIVACY_URL)}>
+                  <Text style={styles.link} onPress={() => WebBrowser.openBrowserAsync(privacyUrl())}>
                     Privacy Policy
                   </Text>
                   <Text style={styles.linkSep}>·</Text>
-                  <Text style={styles.link} onPress={() => WebBrowser.openBrowserAsync(TERMS_URL)}>
+                  <Text style={styles.link} onPress={() => WebBrowser.openBrowserAsync(termsUrl())}>
                     Terms of Use
                   </Text>
                 </View>

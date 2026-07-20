@@ -8,6 +8,7 @@ import { logger } from './logger.ts';
 import { authRoutes } from './routes/auth.ts';
 import { billingRoutes } from './routes/billing.ts';
 import { bootstrapRoutes } from './routes/bootstrap.ts';
+import { legalRoutes } from './routes/legal.ts';
 import { meRoutes } from './routes/me.ts';
 import { memoryRoutes } from './routes/memories.ts';
 import { messageRoutes } from './routes/messages.ts';
@@ -28,6 +29,11 @@ const app = new Hono();
 app.use('*', cors());
 
 app.get('/health', (c) => c.json({ ok: true }));
+
+// Public legal/support pages + the web account-deletion flow, mounted at the
+// root (GET /privacy, /terms, /support, /account/delete). See routes/legal.ts's
+// review gate before deploying the copy publicly.
+app.route('/', legalRoutes);
 
 // Backstop for anything that reaches here uncaught — most AI-provider
 // errors never do (they're caught internally and turned into SSE error

@@ -4,13 +4,11 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 
 import { db } from '../db/client.ts';
-import { entitlements, otpCodes, users } from '../db/schema.ts';
-import { deleteSubscriber } from '../lib/billing/revenuecat.ts';
+import { entitlements, users } from '../db/schema.ts';
+import { hardDeleteUser } from '../lib/account-deletion.ts';
 import { resolvePlan } from '../lib/billing/plan.ts';
 import { AI_CONSENT_VERSION } from '../lib/constants.ts';
 import { ianaTimezoneSchema } from '../lib/timezone.ts';
-import { withUserLock } from '../lib/usage.ts';
-import { logger } from '../logger.ts';
 import { requireAuth, type AuthVariables } from '../middleware/auth.ts';
 
 export const meRoutes = new Hono<{ Variables: AuthVariables }>();
@@ -155,52 +153,12 @@ meRoutes.patch('/prefs', zValidator('json', prefsPatchSchema), async (c) => {
   return c.json({ prefs: updated.prefs });
 });
 
-// Immediate hard delete (Apple + Google in-app deletion requirement). One
-// transaction under the same per-user advisory lock the chat/task/goal writes
-// take, so a delete can't interleave with an in-flight send/create.
-//
-// Deleting the users row cascades to 10 of the 12 tables via their FKs
-// (sessions, conversations, messages, records, goals, tasks, goal_entries,
-// memories, memory_extraction_state, entitlements — plus message_reports once
-// Item 2 lands, via its own userId FK). otp_codes is the exception: it has NO
-// FK (it's keyed by phone, the identity key, and must survive across signups),
-// so a stale code for this phone would otherwise outlive the account and be
-// valid on a re-signup — delete it explicitly.
-//
-// Stale access token: TTL is 15 min and refresh tokens die with the sessions
-// cascade, so the JWT self-expires fast and can't be renewed. We accept that
-// window rather than adding a per-request existence check — the row is gone, so
-// any handler that loads it fails closed anyway.
+// Immediate hard delete (Apple + Google in-app deletion requirement). The whole
+// transaction — and the stale-token reasoning — lives in hardDeleteUser
+// (lib/account-deletion.ts), shared verbatim with the web-deletion flow.
 meRoutes.delete('/', async (c) => {
   const userId = c.get('userId');
-
-  const deleted = await withUserLock(userId, async (tx) => {
-    const [user] = await tx
-      .select({ phoneE164: users.phoneE164 })
-      .from(users)
-      .where(eq(users.id, userId))
-      .limit(1);
-    if (!user) return false;
-
-    // No FK — must be cleared by phone explicitly (see the note above).
-    await tx.delete(otpCodes).where(eq(otpCodes.phoneE164, user.phoneE164));
-    await tx.delete(users).where(eq(users.id, userId));
-    return true;
-  });
-
+  const deleted = await hardDeleteUser(userId);
   if (!deleted) return c.json({ error: 'not_found' }, 404);
-
-  // Best-effort, and deliberately AFTER the local delete has committed: removing
-  // RC's subscriber record stops a later webhook from resurrecting an
-  // entitlements row, but a RC outage must never block or fail the user's
-  // deletion. Deleting our entitlements row does NOT cancel the store
-  // subscription — the client copy tells the user to cancel in the App Store /
-  // Play Store to stop billing.
-  try {
-    await deleteSubscriber(userId);
-  } catch (err) {
-    logger.error({ err, userId }, 'revenuecat subscriber delete failed after account deletion');
-  }
-
   return c.json({ ok: true });
 });
