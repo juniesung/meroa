@@ -6,6 +6,7 @@ import { Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } fr
 
 import { Sheet } from '@/components/Sheet';
 import { PrimaryButton } from '@/components/PrimaryButton';
+import { GoalTypeOption } from '@/components/GoalTypeOption';
 import { Icon, type IconName } from '@/components/Icon';
 import { radii, theme } from '@/constants/theme';
 import type {
@@ -17,16 +18,10 @@ import type {
   Weekday,
 } from '@/lib/api/types';
 import { asLimitReached, limitReachedMessage } from '@/lib/api/limits';
+import { GOAL_TYPE_OPTIONS } from './goal-type-options';
 import { RecurrenceField } from '@/features/tasks/RecurrenceField';
 import { buildRecurrence, type RecurrenceChoice } from '@/features/tasks/task-form-helpers';
 import { useCreateGoal, useEditGoal } from './queries';
-
-const TYPE_OPTIONS: { type: GoalTemplateKey; label: string; icon: IconName }[] = [
-  { type: 'savings', label: 'Savings', icon: 'wallet' },
-  { type: 'habit', label: 'Habit', icon: 'flame' },
-  { type: 'indirect', label: 'Tracked', icon: 'dumbbell' },
-  { type: 'milestone', label: 'Milestone', icon: 'briefcase' },
-];
 
 const ICON_OPTIONS: IconName[] = [
   'sparkle',
@@ -332,11 +327,17 @@ function GoalFormBody({ goal, onClose }: { goal?: ApiGoal; onClose: () => void }
       {!isEdit && (
         <>
           <FieldLabel>TYPE</FieldLabel>
-          <View style={styles.chipRow}>
-            {TYPE_OPTIONS.map((opt) => (
-              <Chip key={opt.type} label={opt.label} icon={opt.icon} selected={type === opt.type} onPress={() => setType(opt.type)} />
-            ))}
-          </View>
+          {GOAL_TYPE_OPTIONS.map((opt) => (
+            <GoalTypeOption
+              key={opt.key}
+              icon={opt.icon}
+              label={opt.label}
+              description={opt.description}
+              example={opt.example}
+              isSelected={type === opt.key}
+              onPress={() => setType(opt.key)}
+            />
+          ))}
         </>
       )}
 

@@ -12,13 +12,15 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AnimatedPressable, useTapFeedback } from '@/components/AnimatedPressable';
 import { Bubble } from '@/components/Bubble';
-import { Icon, type IconName } from '@/components/Icon';
+import { Icon } from '@/components/Icon';
 import { MeroaMark } from '@/components/MeroaMark';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { Progress } from '@/components/Progress';
 import { Ring } from '@/components/Ring';
 import { radii, theme } from '@/constants/theme';
+import { GoalTypeOption } from '@/components/GoalTypeOption';
 import { useCreateMemory } from '@/features/memory/queries';
+import { GOAL_TYPE_OPTIONS } from '@/features/goals/goal-type-options';
 import { RecurrenceField } from '@/features/tasks/RecurrenceField';
 import {
   buildRecurrence,
@@ -26,7 +28,7 @@ import {
   type RecurrenceChoice,
 } from '@/features/tasks/task-form-helpers';
 import { VibeOptionList } from '@/features/profile/VibeOptionList';
-import type { Weekday } from '@/lib/api/types';
+import type { GoalTemplateKey, Weekday } from '@/lib/api/types';
 import { useUpdatePrefs } from '@/features/profile/queries';
 import { vibeLabel, type VibePreset } from '@/features/profile/vibes';
 
@@ -118,47 +120,10 @@ function reflectionSentence(keys: FocusKey[]): string {
   return `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
 }
 
-type GoalTypeKey = 'savings' | 'habit' | 'indirect' | 'milestone';
-
-// Icons/labels match GoalFormSheet.tsx's TYPE_OPTIONS exactly (wallet/flame/
-// dumbbell/briefcase, "Tracked" not "Indirect") so the same type reads the
-// same way here and in the real Goals tab.
-const GOAL_TYPE_OPTIONS: {
-  key: GoalTypeKey;
-  icon: IconName;
-  label: string;
-  description: string;
-  example: string;
-}[] = [
-  {
-    key: 'savings',
-    icon: 'wallet',
-    label: 'Savings',
-    description: 'Save toward a dollar amount',
-    example: 'e.g. "Emergency fund" — save $1,000',
-  },
-  {
-    key: 'habit',
-    icon: 'flame',
-    label: 'Habit',
-    description: 'Build a habit, keep a streak',
-    example: 'e.g. "Meditate every day"',
-  },
-  {
-    key: 'indirect',
-    icon: 'dumbbell',
-    label: 'Tracked',
-    description: 'Track a number over time',
-    example: 'e.g. "Weight" — track lbs, no target needed',
-  },
-  {
-    key: 'milestone',
-    icon: 'briefcase',
-    label: 'Milestone',
-    description: 'A big goal, done in stages',
-    example: 'e.g. "Land a new job"',
-  },
-];
+// The type list and its row rendering are shared with the Goals-tab create
+// sheet (features/goals/goal-type-options.ts, components/GoalTypeOption.tsx)
+// so a goal type reads the same wherever it's picked.
+type GoalTypeKey = GoalTemplateKey;
 
 const GOAL_FIELDS_COPY: Record<GoalTypeKey, { title: string; subtitle: string; namePlaceholder: string }> = {
   savings: {
@@ -725,48 +690,6 @@ function FocusOption({
   );
 }
 
-// Same row anatomy again, plus a leading icon chip and an example line — the
-// picker doubles as a "here's what this looks like" moment.
-function GoalTypeOption({
-  icon,
-  label,
-  description,
-  example,
-  isSelected,
-  onPress,
-}: {
-  icon: IconName;
-  label: string;
-  description: string;
-  example: string;
-  isSelected: boolean;
-  onPress: () => void;
-}) {
-  const { animatedStyle, onPressIn, onPressOut } = useTapFeedback(0.98);
-
-  return (
-    <AnimatedPressable
-      onPress={() => {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-        onPress();
-      }}
-      onPressIn={onPressIn}
-      onPressOut={onPressOut}
-      style={[styles.option, isSelected && styles.optionSelected, animatedStyle]}
-    >
-      <View style={[styles.typeIconChip, isSelected && styles.typeIconChipSelected]}>
-        <Icon name={icon} size={17} color={isSelected ? theme.blue : theme.dim} stroke={2.2} />
-      </View>
-      <View style={{ flex: 1 }}>
-        <Text style={[styles.optionLabel, isSelected && styles.optionLabelSelected]}>{label}</Text>
-        <Text style={styles.optionDescription}>{description}</Text>
-        <Text style={styles.optionExample}>{example}</Text>
-      </View>
-      {isSelected && <Icon name="check" size={18} color={theme.blue} stroke={2.4} />}
-    </AnimatedPressable>
-  );
-}
-
 function RecapRow({ text }: { text: string }) {
   return (
     <View style={styles.recapRow}>
@@ -977,16 +900,6 @@ const styles = StyleSheet.create({
   optionLabel: { color: theme.text, fontSize: 15, fontWeight: '600' },
   optionLabelSelected: { color: theme.blue },
   optionDescription: { color: theme.dim, fontSize: 13, marginTop: 2 },
-  optionExample: { color: theme.faint, fontSize: 12, marginTop: 4 },
-  typeIconChip: {
-    width: 34,
-    height: 34,
-    borderRadius: 10,
-    backgroundColor: theme.card,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  typeIconChipSelected: { backgroundColor: 'rgba(10,132,255,0.14)' },
   inputBlock: { alignSelf: 'stretch', marginTop: 18 },
   input: {
     color: theme.text,
