@@ -4,7 +4,20 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 
 import { db } from '../db/client.ts';
-import { entitlements, users } from '../db/schema.ts';
+import {
+  conversations,
+  entitlements,
+  goalEntries,
+  goals,
+  memories,
+  memoryExtractionState,
+  messageReports,
+  messages,
+  records,
+  sessions,
+  tasks,
+  users,
+} from '../db/schema.ts';
 import { hardDeleteUser } from '../lib/account-deletion.ts';
 import { resolvePlan } from '../lib/billing/plan.ts';
 import { AI_CONSENT_VERSION } from '../lib/constants.ts';
@@ -151,6 +164,83 @@ meRoutes.patch('/prefs', zValidator('json', prefsPatchSchema), async (c) => {
   if (!updated) throw new Error('user_update_failed');
 
   return c.json({ prefs: updated.prefs });
+});
+
+// Data export (Phase 8). A faithful, UNFILTERED, UNPAGINATED dump of every row
+// the user owns across all tables — deliberately NOT via /bootstrap (which caps
+// at 50 and has the materializeRecurringInstances side effect). Soft-deleted /
+// reverted / archived / suppressed rows are included with their flags, so the
+// export is complete rather than "what the app currently shows".
+//
+// The joins an id-only query would miss (per the schema audit): messages hang
+// off conversations, and goal_entries off goals — both queried through the
+// owning parent. Redacted: session refresh-token hashes and OTP codes are
+// security material, not user content, and are omitted; everything the user
+// actually authored is included in full.
+meRoutes.get('/export', async (c) => {
+  const userId = c.get('userId');
+
+  const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+  if (!user) return c.json({ error: 'not_found' }, 404);
+
+  const [
+    entitlementRows,
+    sessionRows,
+    conversationRows,
+    messageRows,
+    recordRows,
+    goalRows,
+    taskRows,
+    goalEntryRows,
+    memoryRows,
+    extractionStateRows,
+    reportRows,
+  ] = await Promise.all([
+    db.select().from(entitlements).where(eq(entitlements.userId, userId)),
+    // Session metadata only — the refresh-token hash is redacted below.
+    db.select().from(sessions).where(eq(sessions.userId, userId)),
+    db.select().from(conversations).where(eq(conversations.userId, userId)),
+    db
+      .select({ m: messages })
+      .from(messages)
+      .innerJoin(conversations, eq(messages.conversationId, conversations.id))
+      .where(eq(conversations.userId, userId)),
+    db.select().from(records).where(eq(records.userId, userId)),
+    db.select().from(goals).where(eq(goals.userId, userId)),
+    db.select().from(tasks).where(eq(tasks.userId, userId)),
+    db
+      .select({ e: goalEntries })
+      .from(goalEntries)
+      .innerJoin(goals, eq(goalEntries.goalId, goals.id))
+      .where(eq(goals.userId, userId)),
+    db.select().from(memories).where(eq(memories.userId, userId)),
+    db.select().from(memoryExtractionState).where(eq(memoryExtractionState.userId, userId)),
+    db.select().from(messageReports).where(eq(messageReports.userId, userId)),
+  ]);
+
+  return c.json({
+    exportedAt: new Date().toISOString(),
+    format: 'meroa.export.v1',
+    user: {
+      id: user.id,
+      phoneE164: user.phoneE164,
+      displayName: user.displayName,
+      timezone: user.timezone,
+      prefs: user.prefs,
+      createdAt: user.createdAt,
+    },
+    entitlements: entitlementRows,
+    sessions: sessionRows.map(({ refreshTokenHash: _redacted, ...rest }) => rest),
+    conversations: conversationRows,
+    messages: messageRows.map((r) => r.m),
+    records: recordRows,
+    goals: goalRows,
+    tasks: taskRows,
+    goalEntries: goalEntryRows.map((r) => r.e),
+    memories: memoryRows,
+    memoryExtractionState: extractionStateRows,
+    messageReports: reportRows,
+  });
 });
 
 // Immediate hard delete (Apple + Google in-app deletion requirement). The whole

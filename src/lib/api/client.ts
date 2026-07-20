@@ -200,6 +200,9 @@ export const api = {
       body: JSON.stringify({ timezone }),
     }),
 
+  // A faithful, unpaginated dump of every row the user owns (routes/me.ts).
+  exportData: () => request<Record<string, unknown>>('/me/export'),
+
   // Immediate hard delete — the server erases the account and all its data in
   // one transaction (routes/me.ts). Follow a success with the AuthProvider
   // sign-out terminal path (clearTokens → logOutPurchases → auth stack).

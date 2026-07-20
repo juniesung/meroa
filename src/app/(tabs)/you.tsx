@@ -1,4 +1,6 @@
+import { File, Paths } from 'expo-file-system';
 import { router } from 'expo-router';
+import * as Sharing from 'expo-sharing';
 import * as WebBrowser from 'expo-web-browser';
 import { useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
@@ -28,6 +30,7 @@ export default function YouScreen() {
   const [vibeSheetOpen, setVibeSheetOpen] = useState(false);
   const [quietHoursSheetOpen, setQuietHoursSheetOpen] = useState(false);
   const [deletingAccount, setDeletingAccount] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   const communicationStyle = vibeLabel(data?.user.prefs.communicationStyle);
   const proactiveCheckins = data?.user.prefs.proactiveCheckins === true;
@@ -65,6 +68,29 @@ export default function YouScreen() {
         },
       ],
     );
+  };
+
+  const handleExport = async () => {
+    if (exporting) return;
+    setExporting(true);
+    try {
+      const data = await api.exportData();
+      // Cache dir — this is a transient handoff file for the share sheet, not
+      // something to keep. Overwrite any prior export.
+      const file = new File(Paths.cache, 'meroa-export.json');
+      if (file.exists) file.delete();
+      file.create();
+      file.write(JSON.stringify(data, null, 2));
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(file.uri, { mimeType: 'application/json', UTI: 'public.json' });
+      } else {
+        Alert.alert('Export ready', "Your data was saved, but sharing isn't available on this device.");
+      }
+    } catch {
+      Alert.alert('Export failed', "Couldn't export your data. Please try again.");
+    } finally {
+      setExporting(false);
+    }
   };
 
   const doDeleteAccount = async () => {
@@ -179,6 +205,11 @@ export default function YouScreen() {
             icon="crown"
             label={data?.entitlement.plan === 'plus' ? 'Manage subscription' : 'Upgrade to Meroa Plus'}
             onPress={() => router.push('/paywall')}
+          />
+          <Row
+            icon="book"
+            label={exporting ? 'Preparing export…' : 'Export my data'}
+            onPress={handleExport}
           />
           <Row icon="logout" label="Sign out" danger onPress={() => signOut()} />
           <Row
