@@ -150,7 +150,7 @@ export function Heatmap({ calendar }: { calendar: DayBucket[] }) {
 }
 
 const styles = StyleSheet.create({
-  wrap: { gap: 10 },
+  wrap: { gap: 10, alignItems: 'center' },
   headerRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   monthTitle: { color: theme.text, fontSize: 13, fontWeight: '600', minWidth: 110, textAlign: 'center' },
   row: { flexDirection: 'row', gap: GAP },
