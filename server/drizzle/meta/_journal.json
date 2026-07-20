@@ -43,6 +43,13 @@
       "when": 1784061179853,
       "tag": "0005_curly_jean_grey",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1784575755631,
+      "tag": "0006_familiar_solo",
+      "breakpoints": true
     }
   ]
 }

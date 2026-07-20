@@ -293,6 +293,33 @@ export const entitlements = pgTable(
   (t) => [check('entitlements_plan_check', sql`${t.plan} in ('free','plus')`)],
 );
 
+// --- message_reports ------------------------------------------------------
+// Google Play AI-Generated Content policy: a chatbot must offer an in-app way
+// to report an offensive AI response. One row per (user, reported assistant
+// message); `reason` is the optional free-text the user adds. No model call is
+// ever made on a report — this is a plain record for review. Unique on
+// (userId, messageId) so re-reporting the same message is a no-op, not a pile
+// of duplicate rows. Both FKs cascade, so an account deletion (and a message
+// deletion) clears reports with no extra bookkeeping.
+export const messageReports = pgTable(
+  'message_reports',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    messageId: uuid('message_id')
+      .notNull()
+      .references(() => messages.id, { onDelete: 'cascade' }),
+    reason: text('reason'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('message_reports_user_idx').on(t.userId),
+    uniqueIndex('message_reports_user_message_unique').on(t.userId, t.messageId),
+  ],
+);
+
 // --- relations ---------------------------------------------------------
 
 export const usersRelations = relations(users, ({ many, one }) => ({
@@ -370,4 +397,9 @@ export const memoryExtractionStateRelations = relations(memoryExtractionState, (
 
 export const entitlementsRelations = relations(entitlements, ({ one }) => ({
   user: one(users, { fields: [entitlements.userId], references: [users.id] }),
+}));
+
+export const messageReportsRelations = relations(messageReports, ({ one }) => ({
+  user: one(users, { fields: [messageReports.userId], references: [users.id] }),
+  message: one(messages, { fields: [messageReports.messageId], references: [messages.id] }),
 }));

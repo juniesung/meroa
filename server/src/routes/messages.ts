@@ -6,7 +6,7 @@ import { streamSSE } from 'hono/streaming';
 import { z } from 'zod';
 
 import { db } from '../db/client.ts';
-import { messages, records, users } from '../db/schema.ts';
+import { conversations, messageReports, messages, records, users } from '../db/schema.ts';
 import { streamChatReply, type ChatHistoryMessage } from '../lib/ai/chat.ts';
 import { maybeExtractMemories } from '../lib/ai/memory-extractor.ts';
 import { pickTaskCreatedQuip } from '../lib/ai/quips.ts';
@@ -53,6 +53,34 @@ messageRoutes.get('/', zValidator('query', listQuerySchema), async (c) => {
   const { cursor, limit } = c.req.valid('query');
   const rows = await getRecentMessages(userId, limit ?? 50, cursor ? new Date(cursor) : undefined);
   return c.json({ messages: rows });
+});
+
+// Google Play AI-Generated Content policy: an in-app way to flag an offensive
+// AI response. Plain record, NO model call. You can only report an assistant
+// message (Meroa's own reply, never your own) in one of your OWN conversations,
+// and re-reporting the same message is a no-op (unique on (userId, messageId)).
+const reportSchema = z.object({ reason: z.string().trim().max(1000).optional() });
+
+messageRoutes.post('/:id/report', zValidator('json', reportSchema), async (c) => {
+  const userId = c.get('userId');
+  const messageId = c.req.param('id');
+  const { reason } = c.req.valid('json');
+
+  const [target] = await db
+    .select({ role: messages.role })
+    .from(messages)
+    .innerJoin(conversations, eq(messages.conversationId, conversations.id))
+    .where(and(eq(messages.id, messageId), eq(conversations.userId, userId)))
+    .limit(1);
+  if (!target) return c.json({ error: 'not_found' }, 404);
+  if (target.role !== 'assistant') return c.json({ error: 'not_reportable' }, 400);
+
+  await db
+    .insert(messageReports)
+    .values({ userId, messageId, reason: reason ?? null })
+    .onConflictDoNothing({ target: [messageReports.userId, messageReports.messageId] });
+
+  return c.json({ ok: true });
 });
 
 const sendSchema = z.object({ text: z.string().trim().min(1).max(4000) });

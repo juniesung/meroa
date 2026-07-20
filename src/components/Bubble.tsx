@@ -1,5 +1,5 @@
 import { LinearGradient } from 'expo-linear-gradient';
-import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { radii, theme } from '@/constants/theme';
 
@@ -14,11 +14,16 @@ export function Bubble({
   from,
   isFirstInGroup = true,
   isLastInGroup = true,
+  onLongPress,
   children,
 }: {
   from: 'me' | 'ai';
   isFirstInGroup?: boolean;
   isLastInGroup?: boolean;
+  // When set, long-pressing the bubble surface fires this (used to report an
+  // assistant reply). Scoped to the surface, not the full row, so a press in
+  // the empty space beside a bubble does nothing.
+  onLongPress?: () => void;
   children: React.ReactNode;
 }) {
   const me = from === 'me';
@@ -28,21 +33,28 @@ export function Bubble({
     marginTop: isFirstInGroup ? 3 : 1,
     marginBottom: isLastInGroup ? 3 : 1,
   };
+  const surface = me ? (
+    <LinearGradient
+      colors={theme.gradient}
+      start={{ x: 0, y: 0 }}
+      end={{ x: 0, y: 1 }}
+      style={[styles.bubble, styles.bubbleMeShadow, isLastInGroup && styles.bubbleMeTail]}
+    >
+      <Text style={styles.bubbleText}>{children}</Text>
+    </LinearGradient>
+  ) : (
+    <View style={[styles.bubble, styles.bubbleAI, isLastInGroup && styles.bubbleAITail]}>
+      <Text style={styles.bubbleText}>{children}</Text>
+    </View>
+  );
   return (
     <View style={rowStyle}>
-      {me ? (
-        <LinearGradient
-          colors={theme.gradient}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 0, y: 1 }}
-          style={[styles.bubble, styles.bubbleMeShadow, isLastInGroup && styles.bubbleMeTail]}
-        >
-          <Text style={styles.bubbleText}>{children}</Text>
-        </LinearGradient>
+      {onLongPress ? (
+        <Pressable onLongPress={onLongPress} delayLongPress={350}>
+          {surface}
+        </Pressable>
       ) : (
-        <View style={[styles.bubble, styles.bubbleAI, isLastInGroup && styles.bubbleAITail]}>
-          <Text style={styles.bubbleText}>{children}</Text>
-        </View>
+        surface
       )}
     </View>
   );

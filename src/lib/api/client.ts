@@ -214,6 +214,14 @@ export const api = {
 
   // Sending a message streams via SSE — see lib/api/stream.ts's `streamMessage`.
 
+  // Flag an assistant reply as offensive (Google AI-content policy). No model
+  // call; idempotent per message server-side.
+  reportMessage: (id: string, reason?: string) =>
+    request<{ ok: true }>(`/conversations/current/messages/${id}/report`, {
+      method: 'POST',
+      body: JSON.stringify(reason ? { reason } : {}),
+    }),
+
   getTasks: () => request<{ tasks: ApiTask[] }>('/tasks'),
 
   createTask: (input: CreateTaskInput) =>

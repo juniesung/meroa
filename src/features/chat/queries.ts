@@ -1,4 +1,4 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback } from 'react';
 
 import { tasksQueryKey } from '@/features/tasks/queries';
@@ -38,6 +38,16 @@ function placeholderAssistantMessage(id: string): ChatMessage {
     createdAt: new Date().toISOString(),
     status: 'streaming',
   };
+}
+
+// Report an assistant reply as offensive (Google AI-content policy). No cache
+// to touch — the report is write-only and nothing on screen changes (the
+// confirmation is a toast/alert, consistent with the card-is-the-confirmation
+// ethos).
+export function useReportMessage() {
+  return useMutation({
+    mutationFn: ({ id, reason }: { id: string; reason?: string }) => api.reportMessage(id, reason),
+  });
 }
 
 export function useSendMessage() {

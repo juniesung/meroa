@@ -3,6 +3,7 @@ import { router } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -29,7 +30,7 @@ import { ANIM_DURATION } from '@/components/Sheet';
 import { TaskCard } from '@/components/TaskCard';
 import { radii, theme } from '@/constants/theme';
 import { ChatMenuSheet } from '@/features/chat/ChatMenuSheet';
-import { type ChatMessage, useMessages, useSendMessage } from '@/features/chat/queries';
+import { type ChatMessage, useMessages, useReportMessage, useSendMessage } from '@/features/chat/queries';
 import {
   useBulkDeleteTasks,
   useCompleteTask,
@@ -650,11 +651,13 @@ function GoalAdvanceConfirmCard({ message }: { message: ChatMessage }) {
 function MessageRow({
   message,
   onRetry,
+  onReport,
   isFirstInGroup = true,
   isLastInGroup = true,
 }: {
   message: ChatMessage;
   onRetry: (m: ChatMessage) => void;
+  onReport: (m: ChatMessage) => void;
   isFirstInGroup?: boolean;
   isLastInGroup?: boolean;
 }) {
@@ -687,12 +690,17 @@ function MessageRow({
     return <MemoryActionCard message={message} />;
   }
 
+  // Long-press to report is offered only on a settled assistant reply (not the
+  // user's own bubbles, not a still-streaming/failed placeholder) — matching the
+  // server rule that only an assistant message is reportable.
+  const canReport = message.role === 'assistant' && !message.status;
   return (
     <View>
       <Bubble
         from={message.role === 'user' ? 'me' : 'ai'}
         isFirstInGroup={isFirstInGroup}
         isLastInGroup={isLastInGroup}
+        onLongPress={canReport ? () => onReport(message) : undefined}
       >
         {message.content}
       </Bubble>
@@ -772,6 +780,31 @@ export default function ChatScreen() {
     setTimeout(() => {
       isSubmittingRef.current = false;
     }, 0);
+  };
+
+  const reportMessage = useReportMessage();
+  const handleReport = (message: ChatMessage) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    Alert.alert(
+      'Report this response?',
+      'Let us know if this reply was offensive or inappropriate. We review reports to make Meroa better.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Report',
+          style: 'destructive',
+          onPress: () =>
+            reportMessage.mutate(
+              { id: message.id },
+              {
+                onSuccess: () => Alert.alert('Thanks', "We'll take a look at this response."),
+                onError: () =>
+                  Alert.alert('Something went wrong', "Couldn't send that report. Please try again."),
+              },
+            ),
+        },
+      ],
+    );
   };
 
   const handleRetry = (message: ChatMessage) => {
@@ -855,6 +888,7 @@ export default function ChatScreen() {
                   key={m.id}
                   message={m}
                   onRetry={handleRetry}
+                  onReport={handleReport}
                   isFirstInGroup={flags?.isFirst}
                   isLastInGroup={flags?.isLast}
                 />
