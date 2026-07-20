@@ -77,6 +77,23 @@ export class ApiError extends Error {
 
 export class SessionExpiredError extends Error {}
 
+// The request never reached the server (or timed out): no HTTP status exists, so
+// this is distinct from ApiError (server responded with a non-2xx) and
+// SessionExpiredError (auth). UI can key a retry affordance off it. `timeout` is
+// true when we aborted the request ourselves rather than the network refusing.
+export class NetworkError extends Error {
+  timeout: boolean;
+  constructor(timeout = false) {
+    super(timeout ? 'request timed out' : 'network request failed');
+    this.timeout = timeout;
+  }
+}
+
+// A slow or dead connection otherwise hangs a query forever (fetch has no
+// default timeout) — long enough for a legitimately slow response, short enough
+// that "offline" surfaces as an error instead of a permanent spinner.
+const REQUEST_TIMEOUT_MS = 15_000;
+
 let onSessionExpired: (() => void) | null = null;
 export function setSessionExpiredHandler(handler: () => void) {
   onSessionExpired = handler;
@@ -136,14 +153,27 @@ async function request<T>(path: string, options: RequestInit = {}, isRetry = fal
   await loadTokens();
   const accessToken = getCachedAccessToken();
 
-  const res = await fetch(`${BASE_URL}${path}`, {
-    ...options,
-    headers: {
-      'content-type': 'application/json',
-      ...(accessToken ? { authorization: `Bearer ${accessToken}` } : {}),
-      ...options.headers,
-    },
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  let res: Response;
+  try {
+    res = await fetch(`${BASE_URL}${path}`, {
+      ...options,
+      signal: controller.signal,
+      headers: {
+        'content-type': 'application/json',
+        ...(accessToken ? { authorization: `Bearer ${accessToken}` } : {}),
+        ...options.headers,
+      },
+    });
+  } catch (err) {
+    // fetch rejects on a network failure OR on our own abort (timeout) — both
+    // mean "couldn't complete the request", surfaced as one typed error.
+    const isAbort = err instanceof Error && err.name === 'AbortError';
+    throw new NetworkError(isAbort);
+  } finally {
+    clearTimeout(timeoutId);
+  }
   updateClockOffset(res);
 
   if (res.status === 401 && !isRetry && !path.startsWith('/auth/')) {

@@ -15,6 +15,7 @@ import { AnimatedPressable, useTapFeedback } from '@/components/AnimatedPressabl
 import { GoalCard } from '@/components/GoalCard';
 import { Heatmap } from '@/components/Heatmap';
 import { Icon } from '@/components/Icon';
+import { LoadError } from '@/components/LoadError';
 import { MeroaMark, type MeroaMood } from '@/components/MeroaMark';
 import { Ring } from '@/components/Ring';
 import { taskProgressFraction } from '@/components/TaskCard';
@@ -119,7 +120,7 @@ function EmptyState() {
 }
 
 export default function GoalsScreen() {
-  const { data: goals = [], isLoading } = useGoals();
+  const { data: goals = [], isLoading, isError, refetch } = useGoals();
   const { data: archivedGoals = [] } = useArchivedGoals();
   const { data: consistency } = useGoalConsistency();
   const { data: tasks = [] } = useTasks();
@@ -210,7 +211,9 @@ export default function GoalsScreen() {
           </View>
         )}
 
-        {isLoading ? (
+        {isError ? (
+          <LoadError onRetry={() => refetch()} />
+        ) : isLoading ? (
           <View style={styles.loading}>
             <ActivityIndicator color={theme.dim} />
           </View>

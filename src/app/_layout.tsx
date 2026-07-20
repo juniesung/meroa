@@ -6,6 +6,9 @@ import { useEffect } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
+import type { ErrorBoundaryProps } from 'expo-router';
+
+import { AppErrorFallback } from '@/components/AppErrorFallback';
 import { configurePurchases } from '@/features/billing/purchases';
 import { consentGranted } from '@/features/profile/ai-consent';
 import { OnboardingDraftFlush } from '@/features/profile/OnboardingDraftFlush';
@@ -54,6 +57,12 @@ function NotificationRouter() {
     };
   }, []);
   return null;
+}
+
+// Expo Router picks up a root ErrorBoundary export from this layout file — a
+// render crash anywhere below degrades to a recoverable screen, not a white one.
+export function ErrorBoundary(props: ErrorBoundaryProps) {
+  return <AppErrorFallback {...props} />;
 }
 
 SplashScreen.preventAutoHideAsync();

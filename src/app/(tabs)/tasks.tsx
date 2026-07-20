@@ -7,6 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AnimatedPressable, useRimHighlight, useTapFeedback } from '@/components/AnimatedPressable';
 import { Icon } from '@/components/Icon';
+import { LoadError } from '@/components/LoadError';
 import { Ring } from '@/components/Ring';
 import { SwipeToDelete } from '@/components/SwipeToDelete';
 import { isOverdue, isUpcoming, TaskCard, taskProgressFraction } from '@/components/TaskCard';
@@ -25,7 +26,7 @@ function haptic() {
 }
 
 export default function TasksScreen() {
-  const { data: tasks = [], isLoading } = useTasks();
+  const { data: tasks = [], isLoading, isError, refetch } = useTasks();
   const { data: goals = [] } = useGoals();
   const { data: me } = useMe();
   const timezone = me?.user.timezone;
@@ -180,7 +181,9 @@ export default function TasksScreen() {
           </AnimatedPressable>
         </View>
 
-        {isLoading ? (
+        {isError ? (
+          <LoadError onRetry={() => refetch()} />
+        ) : isLoading ? (
           <View style={styles.loading}>
             <ActivityIndicator color={theme.dim} />
           </View>

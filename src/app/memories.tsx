@@ -6,6 +6,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { AnimatedPressable, useTapFeedback } from '@/components/AnimatedPressable';
 import { Icon } from '@/components/Icon';
+import { LoadError } from '@/components/LoadError';
 import { SwipeToDelete } from '@/components/SwipeToDelete';
 import { radii, theme } from '@/constants/theme';
 import { useDeleteMemory, useMemories } from '@/features/memory/queries';
@@ -31,7 +32,7 @@ function formatDate(iso: string): string {
 }
 
 export default function MemoriesScreen() {
-  const { data: memories = [], isLoading } = useMemories();
+  const { data: memories = [], isLoading, isError, refetch } = useMemories();
   const deleteMemory = useDeleteMemory();
   const [formVisible, setFormVisible] = useState(false);
   const [editing, setEditing] = useState<ApiMemory | null>(null);
@@ -74,7 +75,9 @@ export default function MemoriesScreen() {
         <View style={styles.headerSpacer} />
       </View>
 
-      {isLoading ? (
+      {isError ? (
+        <LoadError onRetry={() => refetch()} />
+      ) : isLoading ? (
         <View style={styles.loading}>
           <ActivityIndicator color={theme.dim} />
         </View>
