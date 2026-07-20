@@ -987,3 +987,100 @@ untouched and the simulator is unaffected. Every dependency is an Expo SDK or co
 library, so **Expo Go runs the whole app today** — no Xcode, no signing, no Apple
 Developer account. That stops being true at Phase 7 (billing), which needs a real dev
 build.
+
+---
+
+## Session: Goals-tab gaps — pace, cadence, grace, restore, type copy (2026-07-20)
+
+Five items from a user audit that separated "already built but rough" from "actually
+missing." Deliberately **out of scope**: wiring `proactiveCheckins` into reminders or a
+weekly review — the app has no server-side scheduling or push infrastructure at all
+(every existing notification is a locally-scheduled on-device alarm, recomputed client-
+side on foreground), so that needs its own design pass and the user deferred it.
+
+**1. Pace now says whether you're on track.** `computePace`/`computeIndirectPace` only
+ever answered "what rate does this deadline demand?" — the deadline and dated entries
+needed to answer "and have you kept up?" were already stored, just never compared. New
+`computeOnTrack` + an elapsed-days helper, appended to the active pace line ("needs
+$5.20/day to hit Dec 15 — on track"); `onTrack` also rides on `GoalCardSummary` as a
+boolean so the client styles without parsing prose. Appended rather than restructured,
+so existing pace copy and its tests are untouched; the reached/overdue branches are left
+alone (an overdue goal is self-evidently behind). Two deliberate asymmetries: **savings
+paces from goal creation, indirect from its first reading** (savings sums every entry, so
+the window is the goal's whole life — starting at the first entry divides a total that
+includes it by a window excluding the time before it, inflating the rate and making an
+untouched goal look paceless rather than behind; indirect measures a delta from its first
+reading, so numerator and denominator must start together), and **on-track renders in the
+success color while behind stays neutral** — the text already says "behind pace", and an
+alarm color would be the app scolding over a figure it should state matter-of-factly.
+Abstains (null) under a day of history. No AI-layer change: `goal-context.ts` and
+`actions.ts` already interpolate `paceLine` verbatim.
+
+**2. Habits are no longer locked to daily.** "Gym 3x/week" was unrepresentable — not
+because anything rejected it, but because no form asked. The server always accepted any
+recurrence for a check-in task (the validator only requires one exists; the consistency
+engine buckets by whatever due-dates the task produces, with no daily assumption). The
+constraint was three UI hardcodes: `GoalFormSheet`'s habit branch (no cadence UI at all),
+onboarding's habit step, and `OnboardingDraftFlush`'s replay. The picker already existed
+for ordinary tasks — extracted from `TaskFormSheet` into a shared `RecurrenceField` and
+used in all three. "Never" is hidden rather than offered-and-rejected, and a half-finished
+choice ("Weekdays", no days ticked) blocks submit instead of silently defaulting. Also
+widened `create_goal`'s tool description, which only ever exampled daily and so biased the
+model. **Out of scope, deliberately:** the milestone stage-task daily toggle, a documented
+cut in `goal-manual-editing-plan.md` §3.6.
+
+**3. One missed day a week no longer resets the streak.** A single slip took a 40-day run
+to zero — mechanically true, motivationally brutal, and against this app's own "mechanics
+real, copy warm" rule. `applyWeeklyGrace` marks a week's first missed day `forgiven`; a
+forgiven day then behaves like a rest day in both streak functions. Grace is a decoration
+on `verdict`, not a fourth verdict value — the day really was missed and `bucketTasksByDay`
+stays honest. Derived fresh every call, no stored "graces remaining". Two properties make
+that safe, both pinned by tests: the scan is **oldest-first** (so within a week the first
+miss is the forgiven one, not whichever the map yields first), and **today can never spend
+the grace** (today reads missed only because the day isn't over; spending the allowance
+there would burn it on a day that may still end perfect and leave a real later miss
+unprotected). Existing streak tests feed un-graced buckets, so they still pin the strict
+reading. Surfaced honestly: a calendar dot + "streak kept" in the day summary, and a chat
+context clause when a miss was actually forgiven — same reason the streak sentence is
+never empty, since a streak surviving a visible miss with no explanation is a question the
+model would answer by inventing a mechanic.
+
+**4. Archiving is no longer one-way.** Removal was reversible only while it was still the
+newest action; there was no restore route and no surface listing archived goals. Adds
+`GET /goals/archived`, `POST /goals/:id/restore`, and an Archived screen (shown only once
+something is in it). Restore logic already existed inline in `undoGoalRecord`'s
+`goal_archived` case — extracted as `restoreGoalCascadeInTx` and shared so a deliberate
+restore and an undo can't drift. The Archived screen is its own flat list rather than a
+route into `goal/[id]`, whose `getGoal` filters archived rows out server-side.
+
+**Two bugs found by live testing that tsc and the unit suite could not see** — the same
+lesson as the `.strict()` intersection bug:
+
+- Restore picked the newest `goal_archived` record and *then* checked whether it belonged
+  to this goal. Archive A, archive B, restore A → the lookup landed on B's record and A
+  came back with its linked tasks silently left deleted. Now matched on
+  `payload->>'goalId'` in SQL.
+- Marking the archive record reverted (reasoned as necessary to avoid two records
+  describing contradictory state) **erased that step from the undo chain**: after
+  archive → restore → undo, a further undo skipped past the archive to `goal_created` and
+  removed the goal outright. Undo walks newest-first, so leaving the archive live gives the
+  correct walk-back — restore, then archive — and a stale archive reached later is
+  harmless, since un-archiving a live goal is an idempotent no-op.
+
+**5. The create sheet explains the goal types.** Onboarding sold each type (icon,
+description, concrete example); the Goals-tab "+" flow — where goals are actually created
+from then on — showed four bare chips, so the only place explaining "Savings" vs "Tracked"
+was a flow you see once. The two lists were hand-duplicated (onboarding's own comment said
+so) and had drifted. Extracted to `features/goals/goal-type-options.ts` +
+`components/GoalTypeOption.tsx`, used in both.
+
+**Verification.** Server suite **237/237** (up from 226 — 11 grace tests plus the on-track
+matrix incl. the paces-from-creation case); both packages typecheck clean; client lint
+clean; `expo export --platform ios` clean. Live-driven against the dev server on a
+dev-token account: the full archive → restore → undo → undo chain returns to live with
+both linked tasks (and the interleaved two-goal case restores the right goal's tasks); a
+Mon/Wed/Fri habit and an every-2-days habit both store the cadence on the template and
+materialize on the correct `occurrenceDate`; a savings goal shows "— behind pace" with
+`onTrack: false`; and `/goals/consistency` shows past misses `forgiven: true` while
+**today's** miss is `forgiven: false`, i.e. the today-never-spends-grace rule holding on
+real data.
