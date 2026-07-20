@@ -6,6 +6,7 @@ import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import { configurePurchases } from '@/features/billing/purchases';
+import { OnboardingDraftFlush } from '@/features/profile/OnboardingDraftFlush';
 import { useMe } from '@/features/profile/queries';
 import { theme } from '@/constants/theme';
 import { AuthProvider, useAuth } from '@/lib/auth/AuthProvider';
@@ -67,6 +68,7 @@ function RootNavigator() {
   return (
     <>
       {status === 'signedIn' && <BillingGate />}
+      {status === 'signedIn' && <OnboardingDraftFlush />}
       <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: theme.bg } }}>
         <Stack.Protected guard={status === 'signedIn' && needsOnboarding}>
           <Stack.Screen name="onboarding" options={{ gestureEnabled: false }} />

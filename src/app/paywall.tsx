@@ -1,6 +1,6 @@
 import { router, Stack } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ActivityIndicator, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Purchases, { INTRO_ELIGIBILITY_STATUS } from 'react-native-purchases';
@@ -18,6 +18,7 @@ import {
   useTrialEligibility,
 } from '@/features/billing/queries';
 import { isBillingConfigured } from '@/features/billing/purchases';
+import type { OnboardingDraft } from '@/features/profile/OnboardingDraftFlush';
 import { useMe } from '@/features/profile/queries';
 
 // Placeholder until Phase 8 (release readiness) ships real policy pages —
@@ -40,6 +41,8 @@ export default function PaywallScreen() {
 
   const isPlus = me?.entitlement.plan === 'plus';
   const pkg = monthlyPackage(offering ?? null);
+  const onboardingDraft = me?.user.prefs.onboardingDraft as OnboardingDraft | null | undefined;
+  const waitingGoalName = onboardingDraft?.goal?.name;
   // Only reachable via router.push from within the app (Settings, cap-hit
   // banners) when there's already a screen underneath to return to. The
   // mandatory hard-paywall landing screen (_layout.tsx, !hasAccess) is the
@@ -49,6 +52,19 @@ export default function PaywallScreen() {
   const { data: eligibilityStatus } = useTrialEligibility(pkg?.product.identifier);
   const trialLength = pkg ? trialLengthLabel(pkg.product) : null;
   const showTrialCopy = trialLength !== null && eligibilityStatus !== INTRO_ELIGIBILITY_STATUS.INTRO_ELIGIBILITY_STATUS_INELIGIBLE;
+
+  // The mandatory hard-paywall landing screen (!canDismiss) has nowhere to
+  // router.back() to — Stack.Protected making (tabs) newly reachable doesn't
+  // by itself move the user off whatever screen they're already sitting on,
+  // so without this they're left stranded here showing "You're on Meroa
+  // Plus" after a real purchase/restore instead of landing in the app. The
+  // voluntary, dismissible entry points (Settings, cap-hit banners) are
+  // unaffected — canDismiss is already true there, so this never fires.
+  useEffect(() => {
+    if (isPlus && !canDismiss) {
+      router.replace('/(tabs)');
+    }
+  }, [isPlus, canDismiss]);
 
   const handleSubscribe = () => {
     if (!pkg) return;
@@ -98,6 +114,11 @@ export default function PaywallScreen() {
           <PlusState expiresAt={me?.entitlement.expiresAt ?? null} onManage={handleManage} />
         ) : (
           <>
+            {waitingGoalName && (
+              <Text style={styles.waiting}>
+                Your goal &quot;{waitingGoalName}&quot; is set up and waiting.
+              </Text>
+            )}
             <View style={styles.benefits}>
               <Benefit label="Unlimited chat" />
               <Benefit label="Unlimited new tasks" />
@@ -193,6 +214,13 @@ const styles = StyleSheet.create({
   content: { padding: 24, paddingBottom: 48 },
   hero: { alignItems: 'center', gap: 10, marginBottom: 28 },
   title: { color: theme.text, fontSize: 26, fontWeight: '700', letterSpacing: -0.5 },
+  waiting: {
+    color: theme.blue,
+    fontSize: 14,
+    fontWeight: '600',
+    textAlign: 'center',
+    marginBottom: 20,
+  },
   benefits: { gap: 14, marginBottom: 8 },
   benefitRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   benefitLabel: { color: theme.text, fontSize: 15, flex: 1 },

@@ -41,6 +41,37 @@ meRoutes.get('/', async (c) => {
 // timezone, so this is deliberately just two wall-clock strings.
 const timeSchema = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'time must be HH:mm (24h, local)');
 
+// Captured at the end of onboarding (still on the free plan, before the
+// paywall) and consumed by OnboardingDraftFlush the instant the user
+// subscribes — creating a goal/task directly during onboarding would 429
+// against the hard-paywall's zero free-tier limits (lib/limits.ts), so the
+// draft holds the user's intent in prefs (ungated) until there's an active
+// entitlement to create against. Cleared (set to null) once flushed.
+// `type` drives which fields OnboardingDraftFlush actually uses — this schema
+// stays lenient (no cross-field refine, unlike lib/goals/schema.ts's real
+// createGoalParamsBaseSchema) since it only holds intent; the real validation
+// happens when the flush calls the actual create endpoints.
+const onboardingDraftSchema = z
+  .object({
+    // Independently optional — a user can fill in one and skip the other.
+    goal: z
+      .object({
+        type: z.enum(['savings', 'habit', 'indirect', 'milestone']),
+        name: z.string().trim().min(1).max(60),
+        targetValue: z.number().min(0.01).optional(),
+        unit: z.string().trim().min(1).max(20).optional(),
+        checkinTitle: z.string().trim().min(1).max(200).optional(),
+      })
+      .optional(),
+    task: z
+      .object({
+        title: z.string().trim().min(1).max(200),
+      })
+      .optional(),
+  })
+  .nullable()
+  .optional();
+
 // Merge-only patch — never replaces the whole prefs blob, so unrelated keys
 // (e.g. communicationStyle) survive a reminders-toggle update untouched.
 const prefsPatchSchema = z.object({
@@ -61,6 +92,7 @@ const prefsPatchSchema = z.object({
       end: timeSchema,
     })
     .optional(),
+  onboardingDraft: onboardingDraftSchema,
 });
 
 // Captured once at OTP verify, but a device's timezone can drift from that
