@@ -23,7 +23,12 @@ import { computeActiveGoalAllowance, computeTaskCreateAllowance } from '../lib/l
 import { listMemories } from '../lib/memories/executor.ts';
 import { buildTaskContext } from '../lib/ai/task-context.ts';
 import { buildGoalContext } from '../lib/ai/goal-context.ts';
-import { findPendingPreview, hasPendingTaskPreview, renderPendingPreview } from '../lib/ai/pending-preview.ts';
+import {
+  findPendingPreview,
+  hasPendingTaskPreview,
+  renderPendingPreview,
+  renderPendingTaskPreview,
+} from '../lib/ai/pending-preview.ts';
 import { buildGoalConsistency } from '../lib/goals/consistency.ts';
 import { getOrCreateAppConversation, getRecentMessages } from '../lib/conversations.ts';
 import { peekUndoTarget } from '../lib/tasks/executor.ts';
@@ -346,14 +351,16 @@ messageRoutes.post('/', rateLimit({ windowMs: 60_000, max: 20 }), zValidator('js
   // this: it sees only a tiny recent-turn window, so "make it $120 instead"
   // must resolve against state rather than deep history.
   const pendingPreview = findPendingPreview(history);
-  const pendingPreviewText = renderPendingPreview(pendingPreview);
-  // A pending TASK preview carries no extra context text of its own (its
-  // contents already reached the model via create_task's tool result, and
-  // the task list only ever reflects real, saved rows) — but the claim-check
-  // guard still needs to know ONE EXISTS, or it force-corrects an honest
-  // mention of a still-pending task card as a false claim (see
-  // hasPendingTaskPreview's comment in pending-preview.ts).
+  // A pending TASK preview carries no extra descriptive content of its own
+  // (its contents already reached the model via create_task's tool result,
+  // and the task list only ever reflects real, saved rows) — but the
+  // claim-check guard still needs a stated FACT that one exists, or it has
+  // nothing to weigh an honest "still waiting on you to tap Create" against
+  // (see renderPendingTaskPreview and CLASSIFIER_SYSTEM_PROMPT in
+  // claim-check.ts). Falls back to it only when there's no goal preview,
+  // same "newest wins" precedence findPendingPreview already uses.
   const hasPendingTask = hasPendingTaskPreview(history);
+  const pendingPreviewText = renderPendingPreview(pendingPreview) || renderPendingTaskPreview(hasPendingTask);
 
   // "undo that" must work even when the thing to undo happened in the app,
   // not in chat — state it as a fact rather than leaving the model to infer

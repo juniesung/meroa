@@ -48,16 +48,29 @@ const CLASSIFIER_MAX_TOKENS = 800;
 // merely describes something in that state is honest by construction, however
 // confidently it is phrased. Only a reply that asserts something the state
 // contradicts is a lie. Hand the classifier the state and it stops guessing.
-const CLASSIFIER_SYSTEM_PROMPT = `You will be shown (1) the user's CURRENT tasks and goals, and (2) a message an AI assistant just sent them.
+// PATCHED for a blind spot an edge-case pass found live: the "no card was shown
+// this turn" line below used to be an unconditional assumption, true only because
+// this function is never called on a turn with a pending SUCCESS this same turn
+// (see hadPendingSuccess in providers/shared.ts). It said nothing about a preview
+// shown in an EARLIER turn that is still sitting on screen, un-tapped — the exact
+// state providers/shared.ts's regex gate already carries as actionCtx.hasPendingPreview
+// (fixed in the "silent non-creation" commit) but never threaded through to this
+// classifier. Result: an honest "it won't save until you tap Create — not saved
+// yet" about a genuinely pending card got YES'd anyway, because the prompt told the
+// model such a card categorically can't exist. The facts block now states plainly
+// when one does; the two bullets below that mention "preview" or "card" tell the
+// model to check that stated fact instead of assuming it's always false.
+const CLASSIFIER_SYSTEM_PROMPT = `You will be shown (1) the user's CURRENT tasks and goals — including whether a preview/confirmation card is still pending from an earlier turn, un-tapped — and (2) a message an AI assistant just sent them.
 
-The assistant made ZERO tool calls this turn — nothing was created, completed, edited, removed, postponed, logged, saved, or shown as a card. Because nothing changed, the state below is ALSO exactly what the state was before the assistant replied.
+The assistant made ZERO tool calls this turn — nothing was created, completed, edited, removed, postponed, logged, saved, or newly shown as a card. Because nothing changed, the state below is ALSO exactly what the state was before the assistant replied (except for a preview card already pending from before — that part of the state can be older than this turn).
 
 Answer with exactly YES or NO: does the reply tell the user something FALSE about their tasks or goals?
 
 YES — the reply asserts something the state contradicts. That is the only thing you are looking for. Examples:
 - claims a change it did not make ("Added your task", "Marked it done", "Removed it", "Logged that", "Moved it to Friday") when the state shows otherwise: the task isn't there, is still open, is still on its old date.
 - presents a task or goal as EXISTING — already set up, already on their list, already tracked — when it does not appear in the state at all. (Merely TALKING about one that isn't there yet is not this: see below.)
-- claims a preview or card was just shown ("Preview's up — tap Create", "Here's the card"). No card was shown this turn, so this is always false.
+- claims a preview or card was just shown or saved THIS turn ("Preview's up — tap Create", "Here's the card", "that's saved now") when the state does NOT list a pending preview at all. No card was created this turn, so a brand-new one is always false.
+- claims a pending preview already went through or was saved ("that's all set now", "saved it") while the state still lists it as pending, un-tapped.
 - gets a fact wrong: says a task is due at 5pm when the state says 7pm; says a goal is at $50 when it is at $10.
 
 NO — everything else. Crucially:
@@ -66,6 +79,7 @@ NO — everything else. Crucially:
 - Recapping what the USER did themselves — totals, streaks, what is done today — is honest.
 - Offers and questions about the future ("I can remove it if you want") are honest.
 - NAMING something is not CLAIMING it exists. The assistant BUILDS things with the user across several turns, asking questions before anything is saved — so a reply routinely discusses a goal, a stage, or a task that is not in the state yet, precisely BECAUSE it hasn't been created. That is the design, not a lie. All of these are NO even when the state is empty: "what are the milestones for that?", "what'll get you through the Applying stage?", "how much do you want to save?". It is only YES if the reply tells them it EXISTS or is DONE ("your internship goal is all set", "that's on your list now").
+- A preview/card the state lists as pending is honest to describe as PENDING, however it's phrased: "that preview's still up, tap Create to confirm", "it won't save until you hit Create", "still waiting on you for that one" are all NO whenever the state shows one pending. This is the mirror of the YES rule above — describing a real pending card as pending is not the same lie as claiming a new one appeared or that it already saved.
 - Asking about a milestone stage they have NOT reached yet is honest. The stages are all listed in the state, and the assistant deliberately asks what they want to do for the NEXT stage BEFORE advancing. "What's the plan for the Interviewing stage?", "congrats — what'll get you through Offer negotiation?" are questions: NO. Agreeing that they finished something in real life ("sounds like Applying is done") is also NO — that is about their life, not about what the app did. Only an assertion that the app ITSELF moved them ("moved you to Interviewing", "advanced your goal", "you're now on stage 2") is YES, and only while the state still shows the old stage.
 - Ordinary conversation making no factual claim about their tasks is honest.
 

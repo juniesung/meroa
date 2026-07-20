@@ -18,6 +18,7 @@ import {
 import { generateOtpCode, generateRefreshToken, hashWithPepper } from '../lib/crypto.ts';
 import { signAccessToken } from '../lib/jwt.ts';
 import { normalizePhone } from '../lib/phone.ts';
+import { ianaTimezoneSchema } from '../lib/timezone.ts';
 import { smsSender } from '../sms/sender.ts';
 
 export const authRoutes = new Hono();
@@ -83,7 +84,7 @@ const verifySchema = z.object({
   // Every task's "due today at 6am" reasoning — both the AI's and the
   // recurrence materializer's — depends on this being right, so it's
   // refreshed on every login below, not just captured once at signup.
-  timezone: z.string().min(1).max(100).optional(),
+  timezone: ianaTimezoneSchema.optional(),
 });
 
 authRoutes.post('/otp/verify', zValidator('json', verifySchema), async (c) => {

@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { db } from '../db/client.ts';
 import { entitlements, users } from '../db/schema.ts';
 import { resolvePlan } from '../lib/billing/plan.ts';
+import { ianaTimezoneSchema } from '../lib/timezone.ts';
 import { requireAuth, type AuthVariables } from '../middleware/auth.ts';
 
 export const meRoutes = new Hono<{ Variables: AuthVariables }>();
@@ -100,7 +101,7 @@ const prefsPatchSchema = z.object({
 // letting the app resend its current one keeps server-side time math
 // (overdue, recurrence anchors, end-of-day defaults) in sync with where the
 // user actually is, rather than where they signed up.
-const timezonePatchSchema = z.object({ timezone: z.string().min(1).max(100) });
+const timezonePatchSchema = z.object({ timezone: ianaTimezoneSchema });
 
 meRoutes.patch('/timezone', zValidator('json', timezonePatchSchema), async (c) => {
   const userId = c.get('userId');

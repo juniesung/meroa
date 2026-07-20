@@ -120,6 +120,21 @@ export function renderPendingPreview(preview: GoalPreview | null): string {
 }
 
 /**
+ * Same "still pending, not yet saved" fact as renderPendingPreview, for a
+ * create_task preview — no contents to describe (see hasPendingTaskPreview's
+ * comment: they already reached the model via the tool result), just the
+ * plain existence of one. Without this, the claim-check classifier
+ * (claim-check.ts's CLASSIFIER_SYSTEM_PROMPT) had no fact to weigh an honest
+ * "still waiting on you to tap Create" against and force-corrected it as a
+ * false claim — the classifier's own equivalent of the gap
+ * actionCtx.hasPendingPreview already closed for the regex gate.
+ */
+export function renderPendingTaskPreview(hasPendingTask: boolean): string {
+  if (!hasPendingTask) return '';
+  return "A create_task preview is showing but NOT saved yet (the user hasn't tapped Create). If they ask to change it, call create_task again with the revised version; if they ask about it, this is the one they mean.";
+}
+
+/**
  * What actually got shown on the just-rendered preview card, for the
  * create_goal tool-result summary (lib/ai/actions.ts) — the narrate pass
  * only ever sees this summary string, never the raw preview object, so
