@@ -81,9 +81,21 @@ from within the app.
 
 ## 8. Disclaimers
 
-Meroa is provided **"as is" and "as available", without warranties of any kind**, to the
-maximum extent permitted by law. We do not warrant that the service will be uninterrupted,
-error-free, or that AI output will be accurate. [REVIEW with counsel.]
+Meroa is provided **"as is" and "as available", without warranties of any kind**, whether
+express, implied, or statutory, to the maximum extent permitted by law. This includes any
+implied warranties of merchantability, fitness for a particular purpose, title, and
+non-infringement.
+
+We do not warrant that the service will be uninterrupted, timely, secure, or error-free;
+that defects will be corrected; or that any AI-generated output will be accurate, complete,
+reliable, or suitable for your purposes. AI output may be wrong and is not professional
+advice (see Section 1). Reminders and notifications are provided on a best-effort basis and
+may be delayed or not delivered.
+
+Some jurisdictions do not allow the exclusion of certain warranties, so some of the above
+exclusions may not apply to you.
+
+<!-- REVIEW: disclaimers drafted; still requires counsel review before publishing (not legal advice). -->
 
 ## 9. Limitation of liability
 

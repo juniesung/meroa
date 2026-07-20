@@ -152,10 +152,22 @@ your behalf. If you live outside California, you may have other rights under you
 Meroa is not directed to children under 13, and we do not knowingly collect information
 from them. [REVIEW: confirm the minimum age with counsel and match the store age rating.]
 
-## 8. International users
+## 8. International users and data transfers
 
-Your information may be processed in the United States (US West region) and other countries where our service
-providers operate. [REVIEW: confirm data-transfer basis with counsel.]
+Meroa is operated from the United States, and your information is stored and processed in
+the **United States** (our servers and database are hosted in a US-West region). We do not
+store your information outside the United States, though some of our service providers — for
+example, the third-party AI service that generates replies — may process the data they
+receive in other locations.
+
+If you access Meroa from outside the United States, you understand that your information
+will be transferred to, stored, and processed in the United States, where data-protection
+laws may differ from those in your country. Where a transfer of personal information is
+subject to laws requiring a specific safeguard, we will take steps to provide an appropriate
+one.
+
+<!-- REVIEW: international/data-transfer clause drafted; still requires counsel review (not legal advice). Note the AI provider may process message content outside the US — confirm this is acceptable for your target markets. -->
+
 
 ## 9. Changes to this policy
 

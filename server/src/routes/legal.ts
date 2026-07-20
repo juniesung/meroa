@@ -164,8 +164,9 @@ const PRIVACY_BODY = `
   <h2>7. Children</h2>
   <p>Meroa is not directed to children under 13, and we do not knowingly collect their information. [REVIEW: confirm minimum age.]</p>
 
-  <h2>8. International users</h2>
-  <p>Your information may be processed in the United States (US West region) and other countries where our providers operate. [REVIEW: confirm transfer basis.]</p>
+  <h2>8. International users and data transfers</h2>
+  <p>Meroa is operated from the United States, and your information is stored and processed in the <strong>United States</strong> (our servers and database are hosted in a US-West region). We do not store your information outside the United States, though some of our service providers — for example, the third-party AI service that generates replies — may process the data they receive in other locations.</p>
+  <p>If you access Meroa from outside the United States, you understand that your information will be transferred to, stored, and processed in the United States, where data-protection laws may differ from those in your country. Where a transfer of personal information is subject to laws requiring a specific safeguard, we will take steps to provide an appropriate one.</p>
 
   <h2>9. Changes</h2>
   <p>We may update this policy. If we materially change how your data is shared with the AI service, we will ask for your consent again first.</p>
@@ -210,7 +211,9 @@ const TERMS_BODY = `
   <p>Meroa's replies are AI-generated and <strong>may be inaccurate or incomplete</strong>. You are responsible for how you use them, and should not treat them as professional advice (Section 1). You can report an offensive response from within the app.</p>
 
   <h2>8. Disclaimers</h2>
-  <p>Meroa is provided <strong>"as is" and "as available", without warranties of any kind</strong>, to the maximum extent permitted by law. [REVIEW with counsel.]</p>
+  <p>Meroa is provided <strong>"as is" and "as available", without warranties of any kind</strong>, whether express, implied, or statutory, to the maximum extent permitted by law. This includes any implied warranties of merchantability, fitness for a particular purpose, title, and non-infringement.</p>
+  <p>We do not warrant that the service will be uninterrupted, timely, secure, or error-free; that defects will be corrected; or that any AI-generated output will be accurate, complete, reliable, or suitable for your purposes. AI output may be wrong and is not professional advice (see Section 1). Reminders and notifications are provided on a best-effort basis and may be delayed or not delivered.</p>
+  <p>Some jurisdictions do not allow the exclusion of certain warranties, so some of the above exclusions may not apply to you.</p>
 
   <h2>9. Limitation of liability</h2>
   <p>To the maximum extent permitted by law, Jun Kwon will not be liable for indirect, incidental, special, consequential, or punitive damages, or loss of data, arising from your use of Meroa. [REVIEW with counsel.]</p>
