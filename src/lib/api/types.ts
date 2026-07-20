@@ -308,6 +308,9 @@ export type DayBucket = {
   doneCount: number;
   verdict: DayVerdict;
   level: 0 | 1 | 2 | 3;
+  // Missed, but covered by the week's one grace, so it didn't break the
+  // streak (server/src/lib/goals/consistency.ts's applyWeeklyGrace).
+  forgiven: boolean;
 };
 
 export type ApiGoalConsistency = {

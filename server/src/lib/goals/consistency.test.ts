@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  applyWeeklyGrace,
   bucketTasksByDay,
   buildCalendar,
   computeCurrentStreak,
@@ -103,6 +104,135 @@ describe('computeLongestStreak', () => {
       row('2026-07-04', 'done'),
     ]);
     expect(computeLongestStreak(buckets)).toBe(3);
+  });
+});
+
+// Weekly streak grace: one missed day per calendar week doesn't break the
+// run. Monday-start weeks — in these fixtures 2026-07-06 (Mon) through
+// 2026-07-12 (Sun) is one week, and 2026-07-13 (Mon) starts the next.
+//
+// Note every test above this point feeds bucketTasksByDay's output straight
+// to the streak functions, i.e. UN-graced buckets — so they still pin the
+// strict "any miss breaks it" reading, and grace can't silently weaken them.
+
+describe('applyWeeklyGrace', () => {
+  it("forgives a week's first missed day", () => {
+    const buckets = applyWeeklyGrace(
+      bucketTasksByDay([row('2026-07-08', 'open')]),
+      '2026-07-12',
+    );
+    expect(buckets.get('2026-07-08')).toMatchObject({ verdict: 'missed', forgiven: true });
+  });
+
+  it('forgives only the first miss of a week — a second the same week is a real break', () => {
+    const buckets = applyWeeklyGrace(
+      bucketTasksByDay([row('2026-07-08', 'open'), row('2026-07-10', 'open')]),
+      '2026-07-12',
+    );
+    expect(buckets.get('2026-07-08')?.forgiven).toBe(true);
+    expect(buckets.get('2026-07-10')?.forgiven).toBe(false);
+  });
+
+  it('forgives chronologically, not in map-insertion order', () => {
+    // Rows arrive newest-first; the later day must still be the unforgiven
+    // one. This is the property that makes the result deterministic.
+    const buckets = applyWeeklyGrace(
+      bucketTasksByDay([row('2026-07-10', 'open'), row('2026-07-08', 'open')]),
+      '2026-07-12',
+    );
+    expect(buckets.get('2026-07-08')?.forgiven).toBe(true);
+    expect(buckets.get('2026-07-10')?.forgiven).toBe(false);
+  });
+
+  it('gives each calendar week its own grace', () => {
+    const buckets = applyWeeklyGrace(
+      bucketTasksByDay([row('2026-07-10', 'open'), row('2026-07-14', 'open')]),
+      '2026-07-15',
+    );
+    expect(buckets.get('2026-07-10')?.forgiven).toBe(true);
+    expect(buckets.get('2026-07-14')?.forgiven).toBe(true);
+  });
+
+  it("never spends the week's grace on today, which only reads missed because the day isn't over", () => {
+    const buckets = applyWeeklyGrace(
+      bucketTasksByDay([row('2026-07-10', 'open')]),
+      '2026-07-10',
+    );
+    expect(buckets.get('2026-07-10')?.forgiven).toBe(false);
+  });
+
+  it('leaves the grace available for a real miss earlier in the same week as today', () => {
+    // If today ate the allowance, the genuine 07-08 miss would break the run.
+    const buckets = applyWeeklyGrace(
+      bucketTasksByDay([row('2026-07-08', 'open'), row('2026-07-10', 'open')]),
+      '2026-07-10',
+    );
+    expect(buckets.get('2026-07-08')?.forgiven).toBe(true);
+    expect(buckets.get('2026-07-10')?.forgiven).toBe(false);
+  });
+
+  it('never marks a perfect or neutral day forgiven', () => {
+    const buckets = applyWeeklyGrace(
+      bucketTasksByDay([row('2026-07-08', 'done'), row('2026-07-09', 'open')]),
+      '2026-07-12',
+    );
+    expect(buckets.get('2026-07-08')?.forgiven).toBe(false);
+    expect(buckets.get('2026-07-09')?.forgiven).toBe(true);
+  });
+});
+
+describe('streaks with weekly grace', () => {
+  it('a single missed day no longer resets the run', () => {
+    const rows = [
+      row('2026-07-07', 'done'),
+      row('2026-07-08', 'open'), // the one slip
+      row('2026-07-09', 'done'),
+      row('2026-07-10', 'done'),
+    ];
+    // Strict reading (un-graced) breaks at the miss...
+    expect(computeCurrentStreak(bucketTasksByDay(rows), '2026-07-10')).toBe(2);
+    // ...with grace, the run survives — the forgiven day carries through
+    // without counting as a perfect day itself.
+    const graced = applyWeeklyGrace(bucketTasksByDay(rows), '2026-07-10');
+    expect(computeCurrentStreak(graced, '2026-07-10')).toBe(3);
+  });
+
+  it('a second miss in the same week still breaks it — grace is one day, not amnesty', () => {
+    const rows = [
+      row('2026-07-07', 'done'),
+      row('2026-07-08', 'open'),
+      row('2026-07-09', 'open'),
+      row('2026-07-10', 'done'),
+      row('2026-07-11', 'done'),
+    ];
+    const graced = applyWeeklyGrace(bucketTasksByDay(rows), '2026-07-11');
+    expect(computeCurrentStreak(graced, '2026-07-11')).toBe(2);
+  });
+
+  it('longest streak spans a forgiven miss too', () => {
+    const rows = [
+      row('2026-07-07', 'done'),
+      row('2026-07-08', 'open'), // forgiven
+      row('2026-07-09', 'done'),
+      row('2026-07-10', 'done'),
+    ];
+    const graced = applyWeeklyGrace(bucketTasksByDay(rows), '2026-07-12');
+    expect(computeLongestStreak(graced)).toBe(3);
+  });
+
+  it('longest still survives a genuine reset, and diverges from current', () => {
+    const rows = [
+      row('2026-07-06', 'done'),
+      row('2026-07-07', 'done'),
+      row('2026-07-08', 'done'),
+      row('2026-07-09', 'open'), // forgiven (first of that week)
+      row('2026-07-10', 'done'), // 4-day run so far
+      row('2026-07-11', 'open'), // second miss that week — real break
+      row('2026-07-12', 'done'),
+    ];
+    const graced = applyWeeklyGrace(bucketTasksByDay(rows), '2026-07-12');
+    expect(computeLongestStreak(graced)).toBe(4);
+    expect(computeCurrentStreak(graced, '2026-07-12')).toBe(1);
   });
 });
 

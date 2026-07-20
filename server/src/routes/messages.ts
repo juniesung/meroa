@@ -327,9 +327,17 @@ messageRoutes.post('/', rateLimit({ windowMs: 60_000, max: 20 }), zValidator('js
   // Always a concrete sentence, never '' — with nothing here, "do I have a
   // streak?" left the model to invent an explanation (observed live:
   // "none of your tasks are set up for it", which isn't how streaks work).
+  // One missed day per week doesn't break a run (lib/goals/consistency.ts's
+  // applyWeeklyGrace). Stated only when it actually happened in the last
+  // week, so it's a fact about their streak rather than boilerplate on every
+  // turn — without it, "wait, why didn't my streak reset?" is exactly the
+  // kind of question the model would answer by inventing a mechanic.
+  const graceClause = consistency.calendar.slice(-7).some((d) => d.forgiven)
+    ? ' A missed day this week was forgiven — one miss a week is, so the run held.'
+    : '';
   const streakText =
     consistency.current > 0
-      ? `${consistency.current}-day perfect streak (longest: ${consistency.longest}).`
+      ? `${consistency.current}-day perfect streak (longest: ${consistency.longest}).${graceClause}`
       : consistency.longest > 0
         ? `No streak right now (longest: ${consistency.longest}) — it resumes the next day every due task gets done.`
         : 'No completion streak yet — one starts automatically the first day every due task gets done.';

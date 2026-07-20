@@ -41,7 +41,12 @@ function monthTitle(monthKey: string): string {
 function summaryFor(day: DayBucket): string {
   if (day.verdict === 'neutral') return `${formatDayLabel(day.ymd)} · nothing due`;
   if (day.verdict === 'perfect') return `${formatDayLabel(day.ymd)} · all ${day.dueCount} done`;
-  return `${formatDayLabel(day.ymd)} · ${day.doneCount}/${day.dueCount} done`;
+  const done = `${day.doneCount}/${day.dueCount} done`;
+  // Say what actually happened AND that it cost nothing — the cell still
+  // reads as an incomplete day, so the streak surviving needs explaining or
+  // it just looks like a bug.
+  if (day.forgiven) return `${formatDayLabel(day.ymd)} · ${done} · streak kept`;
+  return `${formatDayLabel(day.ymd)} · ${done}`;
 }
 
 export function Heatmap({ calendar }: { calendar: DayBucket[] }) {
@@ -135,6 +140,10 @@ export function Heatmap({ calendar }: { calendar: DayBucket[] }) {
                   <Text style={[styles.dayNum, brightFill && styles.dayNumOnAccent]}>
                     {Number(day.ymd.slice(8))}
                   </Text>
+                  {/* A missed day the week's grace covered. Marked, not hidden
+                      — the day really was missed, and the dot is what explains
+                      why the streak survived it. */}
+                  {day.forgiven && <View style={styles.forgivenDot} />}
                 </Pressable>
               );
             })}
@@ -168,6 +177,14 @@ const styles = StyleSheet.create({
   },
   cellToday: { borderWidth: 1, borderColor: theme.blueLight },
   cellSelected: { borderWidth: 1.5, borderColor: theme.text },
+  forgivenDot: {
+    position: 'absolute',
+    bottom: 4,
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: theme.blueLight,
+  },
   dayNum: { color: theme.faint, fontSize: 10, fontWeight: '600' },
   dayNumOnAccent: { color: '#fff' },
   dayNumFuture: { color: theme.faint, fontSize: 10, opacity: 0.5 },

@@ -2,7 +2,12 @@ import { and, eq, gte, isNull } from 'drizzle-orm';
 
 import { db } from '../../db/client.ts';
 import { tasks } from '../../db/schema.ts';
-import { addDaysToYmd, ymdInTz } from '../tasks/recurrence.ts';
+import { ymdInTz, weekStartYmd } from '../tasks/recurrence.ts';
+
+// weekStartYmd moved to lib/tasks/recurrence.ts (beside the other ymd-string
+// helpers) once lib/goals/consistency.ts needed it too. Re-exported here so
+// this module's existing importers — and its test — keep their path.
+export { weekStartYmd };
 
 // Phase 5's history-aware replies ("that's your 4th workout this week"). The
 // count is *always* computed here, server-side, from real instance rows — the
@@ -12,20 +17,6 @@ import { addDaysToYmd, ymdInTz } from '../tasks/recurrence.ts';
 // lib/goals/consistency.ts.
 
 // --- pure computation (no I/O — testable in isolation) --------------------
-
-/**
- * The Monday of `todayYmd`'s week. Monday-start, matching the heatmap's week
- * rows. Anchored at UTC noon like every other ymd-string helper here, so no
- * local offset can shift the date onto an adjacent day — the ymd is already a
- * resolved calendar date in the account's timezone by the time it gets here,
- * so this math is deliberately timezone-free.
- */
-export function weekStartYmd(todayYmd: string): string {
-  const [y, m, d] = todayYmd.split('-').map(Number) as [number, number, number];
-  const dow = new Date(Date.UTC(y, m - 1, d, 12)).getUTCDay(); // 0 = Sunday
-  const sinceMonday = (dow + 6) % 7;
-  return addDaysToYmd(todayYmd, -sinceMonday);
-}
 
 export function isSameWeek(aYmd: string, bYmd: string): boolean {
   return weekStartYmd(aYmd) === weekStartYmd(bYmd);

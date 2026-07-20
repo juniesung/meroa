@@ -42,6 +42,25 @@ export function addDaysToYmd(ymd: string, days: number): string {
   return dt.toISOString().slice(0, 10);
 }
 
+/**
+ * The Monday of `todayYmd`'s week. Monday-start, matching the heatmap's week
+ * rows. Anchored at UTC noon like every other ymd-string helper here, so no
+ * local offset can shift the date onto an adjacent day — the ymd is already a
+ * resolved calendar date in the account's timezone by the time it gets here,
+ * so this math is deliberately timezone-free.
+ *
+ * Lives here rather than in lib/ai/history.ts (its original home, which still
+ * re-exports it) because lib/goals/consistency.ts needs it for weekly streak
+ * grace, and lib/ai already imports *from* lib/goals — the reverse edge would
+ * point the wrong way.
+ */
+export function weekStartYmd(todayYmd: string): string {
+  const [y, m, d] = todayYmd.split('-').map(Number) as [number, number, number];
+  const dow = new Date(Date.UTC(y, m - 1, d, 12)).getUTCDay(); // 0 = Sunday
+  const sinceMonday = (dow + 6) % 7;
+  return addDaysToYmd(todayYmd, -sinceMonday);
+}
+
 // Exported for reuse by lib/goals/summary.ts's deadline pace math (days
 // remaining until a goal's target date) — same "no date library, just
 // UTC-noon-anchored ymd strings" approach applies there as it does here.
