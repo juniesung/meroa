@@ -89,15 +89,15 @@ function page(title: string, bodyHtml: string): string {
 </html>`;
 }
 
-const SUPPORT_EMAIL = 'leejunseong1211@gmail.com';
+const SUPPORT_EMAIL = 'meroa.app@gmail.com';
 
 // ── Privacy ──────────────────────────────────────────────────────────────────
 const PRIVACY_BODY = `
   <span class="eyebrow">Meroa</span>
   <h1>Privacy Policy</h1>
-  <p class="muted">Effective: [PUBLISH DATE] · Last updated: [PUBLISH DATE]</p>
+  <p class="muted">Effective: July 20, 2026 · Last updated: July 20, 2026</p>
   <p>This Privacy Policy explains what information Meroa ("Meroa", "we", "us") collects, how we use it, and the choices you have. Meroa is a relationship-first AI companion app.</p>
-  <p><strong>Who we are.</strong> Meroa is operated by [LEGAL ENTITY NAME], [LEGAL ENTITY ADDRESS], [JURISDICTION]. Contact: <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a>.</p>
+  <p><strong>Who we are.</strong> Meroa is operated by Jun Kwon, California. Contact: <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a>.</p>
 
   <div class="card">
     <h3>The short version</h3>
@@ -152,10 +152,10 @@ const PRIVACY_BODY = `
   <p class="muted">Depending on where you live, you may have additional rights (e.g. GDPR, CCPA/CPRA). [REVIEW: add jurisdiction-specific rights with counsel.]</p>
 
   <h2>7. Children</h2>
-  <p>Meroa is not directed to children under [AGE], and we do not knowingly collect their information. [REVIEW: confirm minimum age.]</p>
+  <p>Meroa is not directed to children under 13, and we do not knowingly collect their information. [REVIEW: confirm minimum age.]</p>
 
   <h2>8. International users</h2>
-  <p>Your information may be processed in [COUNTRY/REGION] and other countries where our providers operate. [REVIEW: confirm transfer basis.]</p>
+  <p>Your information may be processed in the United States (US West region) and other countries where our providers operate. [REVIEW: confirm transfer basis.]</p>
 
   <h2>9. Changes</h2>
   <p>We may update this policy. If we materially change how your data is shared with the AI service, we will ask for your consent again first.</p>
@@ -168,15 +168,15 @@ const PRIVACY_BODY = `
 const TERMS_BODY = `
   <span class="eyebrow">Meroa</span>
   <h1>Terms of Use</h1>
-  <p class="muted">Effective: [PUBLISH DATE] · Last updated: [PUBLISH DATE]</p>
-  <p>These Terms are an agreement between you and [LEGAL ENTITY NAME] ("Meroa", "we", "us") governing your use of the Meroa app. By using Meroa, you agree to these Terms.</p>
+  <p class="muted">Effective: July 20, 2026 · Last updated: July 20, 2026</p>
+  <p>These Terms are an agreement between you and Jun Kwon ("Meroa", "we", "us") governing your use of the Meroa app. By using Meroa, you agree to these Terms.</p>
 
   <h2>1. What Meroa is</h2>
   <p>Meroa is a relationship-first AI companion that helps you turn intentions into tasks and track goals through conversation. <strong>Meroa is an AI service — not a human</strong>, and is clearly identified as AI throughout.</p>
   <p><strong>Meroa is not a professional service.</strong> It is not a therapist, doctor, financial adviser, lawyer, or emergency service, and does not provide medical, mental-health, financial, or legal advice. <strong>If you are in crisis or have an emergency, contact your local emergency services or a qualified professional.</strong></p>
 
   <h2>2. Eligibility</h2>
-  <p>You must be at least [AGE] years old and able to form a binding contract. [REVIEW: confirm minimum age.]</p>
+  <p>You must be at least 13 years old and able to form a binding contract. [REVIEW: confirm minimum age.]</p>
 
   <h2>3. Your account</h2>
   <p>You sign in with your phone number and are responsible for keeping it and your account secure. Contact <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a> if your account may be compromised.</p>
@@ -203,7 +203,7 @@ const TERMS_BODY = `
   <p>Meroa is provided <strong>"as is" and "as available", without warranties of any kind</strong>, to the maximum extent permitted by law. [REVIEW with counsel.]</p>
 
   <h2>9. Limitation of liability</h2>
-  <p>To the maximum extent permitted by law, [LEGAL ENTITY NAME] will not be liable for indirect, incidental, special, consequential, or punitive damages, or loss of data, arising from your use of Meroa. [REVIEW with counsel.]</p>
+  <p>To the maximum extent permitted by law, Jun Kwon will not be liable for indirect, incidental, special, consequential, or punitive damages, or loss of data, arising from your use of Meroa. [REVIEW with counsel.]</p>
 
   <h2>10. Termination</h2>
   <p>You may stop using Meroa and delete your account anytime. We may suspend or terminate access for a violation of these Terms or where required by law.</p>
@@ -212,7 +212,7 @@ const TERMS_BODY = `
   <p>We may update these Terms; continued use after an update means you accept the revised Terms.</p>
 
   <h2>12. Governing law</h2>
-  <p>These Terms are governed by the laws of [JURISDICTION], without regard to conflict-of-law rules. [REVIEW with counsel.]</p>
+  <p>These Terms are governed by the laws of California, without regard to conflict-of-law rules. [REVIEW with counsel.]</p>
 
   <h2>13. Contact</h2>
   <p><a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a></p>
@@ -228,7 +228,7 @@ const SUPPORT_BODY = `
     <h3>Contact us</h3>
     <p>The fastest way to reach us is by email:</p>
     <p><a href="mailto:${SUPPORT_EMAIL}"><strong>${SUPPORT_EMAIL}</strong></a></p>
-    <p class="muted">We aim to respond within [RESPONSE TIME]. Please include your device type (iPhone / Android), the app version, and a short description of what happened.</p>
+    <p class="muted">We read every message. We can't promise a specific response time, but including your device type (iPhone / Android), the app version, and a short description of what happened helps us help you faster.</p>
   </div>
 
   <h2>Common questions</h2>

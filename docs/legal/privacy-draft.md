@@ -10,15 +10,15 @@ server). Fill every [PLACEHOLDER] before publishing.
 
 # Privacy Policy
 
-**Effective date:** [PUBLISH DATE]
-**Last updated:** [PUBLISH DATE]
+**Effective date:** July 20, 2026
+**Last updated:** July 20, 2026
 
 This Privacy Policy explains what information Meroa ("Meroa", "we", "us") collects,
 how we use it, and the choices you have. Meroa is a relationship-first AI companion
 app. If you do not agree with this policy, please do not use Meroa.
 
-**Who we are.** Meroa is operated by [LEGAL ENTITY NAME], [LEGAL ENTITY ADDRESS],
-[JURISDICTION]. You can reach us at leejunseong1211@gmail.com.
+**Who we are.** Meroa is operated by Jun Kwon,
+California. You can reach us at meroa.app@gmail.com.
 
 ---
 
@@ -121,12 +121,12 @@ CCPA/CPRA. [REVIEW: add jurisdiction-specific rights language as advised by coun
 
 ## 7. Children
 
-Meroa is not directed to children under [AGE], and we do not knowingly collect information
+Meroa is not directed to children under 13, and we do not knowingly collect information
 from them. [REVIEW: confirm the minimum age with counsel and match the store age rating.]
 
 ## 8. International users
 
-Your information may be processed in [COUNTRY/REGION] and other countries where our service
+Your information may be processed in the United States (US West region) and other countries where our service
 providers operate. [REVIEW: confirm data-transfer basis with counsel.]
 
 ## 9. Changes to this policy
@@ -136,4 +136,4 @@ AI service, we will ask for your consent again before continuing.
 
 ## 10. Contact
 
-Questions about this policy or your data: leejunseong1211@gmail.com.
+Questions about this policy or your data: meroa.app@gmail.com.

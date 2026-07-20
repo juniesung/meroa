@@ -15,11 +15,11 @@ Need help with Meroa? You're in the right place.
 
 The fastest way to reach us is by email:
 
-**leejunseong1211@gmail.com**
+**meroa.app@gmail.com**
 
-We aim to respond within [RESPONSE TIME, e.g. "2–3 business days"]. When you write, it
-helps to include your device type (iPhone / Android), the app version, and a short
-description of what happened.
+We read every message. We can't promise a specific response time, but including your
+device type (iPhone / Android), the app version, and a short description of what happened
+helps us help you faster.
 
 ## Common questions
 

@@ -9,10 +9,10 @@ page (Phase 8, Item 5). Have counsel review before publishing. Fill every
 
 # Terms of Use
 
-**Effective date:** [PUBLISH DATE]
-**Last updated:** [PUBLISH DATE]
+**Effective date:** July 20, 2026
+**Last updated:** July 20, 2026
 
-These Terms of Use ("Terms") are a legal agreement between you and [LEGAL ENTITY NAME]
+These Terms of Use ("Terms") are a legal agreement between you and Jun Kwon
 ("Meroa", "we", "us") governing your use of the Meroa app. By using Meroa, you agree to
 these Terms. If you do not agree, do not use Meroa.
 
@@ -30,13 +30,13 @@ professional.**
 
 ## 2. Eligibility
 
-You must be at least [AGE] years old and able to form a binding contract to use Meroa.
+You must be at least 13 years old and able to form a binding contract to use Meroa.
 [REVIEW: confirm the minimum age with counsel and match the store age rating.]
 
 ## 3. Your account
 
 You sign in with your phone number. You are responsible for keeping access to your phone
-number and account secure. Notify us at leejunseong1211@gmail.com if you believe your
+number and account secure. Notify us at meroa.app@gmail.com if you believe your
 account has been compromised.
 
 ## 4. Subscriptions and billing
@@ -87,7 +87,7 @@ error-free, or that AI output will be accurate. [REVIEW with counsel.]
 
 ## 9. Limitation of liability
 
-To the maximum extent permitted by law, [LEGAL ENTITY NAME] will not be liable for any
+To the maximum extent permitted by law, Jun Kwon will not be liable for any
 indirect, incidental, special, consequential, or punitive damages, or any loss of data,
 arising from your use of Meroa. [REVIEW with counsel — this clause and any liability cap
 must be tailored to your jurisdiction.]
@@ -103,9 +103,9 @@ We may update these Terms. Continued use after an update means you accept the re
 
 ## 12. Governing law
 
-These Terms are governed by the laws of [JURISDICTION], without regard to conflict-of-law
+These Terms are governed by the laws of California, without regard to conflict-of-law
 rules. [REVIEW with counsel.]
 
 ## 13. Contact
 
-Questions about these Terms: leejunseong1211@gmail.com.
+Questions about these Terms: meroa.app@gmail.com.
