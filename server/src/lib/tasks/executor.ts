@@ -919,6 +919,35 @@ export async function archiveGoalCascadeInTx(
   return { goal: updated, cascadedTaskIds, cascadedTaskTitles };
 }
 
+/**
+ * The exact inverse of archiveGoalCascadeInTx: un-archives the goal and
+ * brings back precisely the tasks that removing it took away.
+ *
+ * Shared by undoGoalRecord's 'goal_archived' case (where it has always lived)
+ * and lib/goals/executor.ts's restoreGoal, so a deliberate restore and an
+ * undo can't drift into two subtly different definitions of "put it back".
+ * The task ids come from the archive record's own payload rather than a fresh
+ * query — the point is to restore what THAT removal deleted, not everything
+ * that happens to be soft-deleted and linked now.
+ */
+export async function restoreGoalCascadeInTx(
+  tx: Tx,
+  goalId: string,
+  cascadedTaskIds: string[],
+): Promise<GoalRow> {
+  const [updated] = await tx
+    .update(goals)
+    .set({ archivedAt: null })
+    .where(eq(goals.id, goalId))
+    .returning();
+  if (!updated) throw new Error('goal_update_failed');
+
+  if (cascadedTaskIds.length) {
+    await tx.update(tasks).set({ deletedAt: null }).where(inArray(tasks.id, cascadedTaskIds));
+  }
+  return updated;
+}
+
 // A repeating task that powers a goal doesn't outlive it: removing the
 // TEMPLATE removes the goal too, with exactly remove_goal's semantics (the
 // cascade above deletes the template alongside everything else linked and
@@ -1258,15 +1287,28 @@ async function undoGoalRecord(
       break;
     }
     case 'goal_archived': {
-      const [g] = await tx.update(goals).set({ archivedAt: null }).where(eq(goals.id, goal.id)).returning();
-      if (!g) throw new Error('goal_update_failed');
-      updated = g;
       // Removing the goal cascaded its linked tasks away (archiveGoal) —
       // bringing the goal back brings exactly that set back with it.
+      updated = await restoreGoalCascadeInTx(tx, goal.id, payload.cascadedTaskIds ?? []);
+      break;
+    }
+    case 'goal_restored': {
+      // The inverse of the restore route: put the goal back in the archive
+      // and re-remove exactly the tasks the restore brought back. No
+      // goal_archived record is written — undoing one direction never
+      // synthesizes the other direction's record (same precedent as
+      // undoing goal_archived, which doesn't reinsert a goal_created).
+      const [g] = await tx
+        .update(goals)
+        .set({ archivedAt: new Date() })
+        .where(eq(goals.id, goal.id))
+        .returning();
+      if (!g) throw new Error('goal_update_failed');
+      updated = g;
       if (payload.cascadedTaskIds?.length) {
         await tx
           .update(tasks)
-          .set({ deletedAt: null })
+          .set({ deletedAt: new Date() })
           .where(inArray(tasks.id, payload.cascadedTaskIds));
       }
       break;

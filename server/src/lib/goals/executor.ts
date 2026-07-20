@@ -1,8 +1,14 @@
-import { and, desc, eq, inArray, isNull, lt } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, lt, sql } from 'drizzle-orm';
 
 import { db } from '../../db/client.ts';
 import { records, goalEntries, goals, tasks } from '../../db/schema.ts';
-import { archiveGoalCascadeInTx, createTaskInTx, type ActionSource, type TaskRow } from '../tasks/executor.ts';
+import {
+  archiveGoalCascadeInTx,
+  createTaskInTx,
+  restoreGoalCascadeInTx,
+  type ActionSource,
+  type TaskRow,
+} from '../tasks/executor.ts';
 import {
   applyStageOps,
   goalDefinitionSchema,
@@ -568,6 +574,93 @@ export async function archiveGoal(
     // tasks/executor's archiveGoalCascadeInTx.
     const { goal: updated, cascadedTaskTitles } = await archiveGoalCascadeInTx(tx, userId, goal, opts);
     return { goal: updated, cascadedTaskTitles };
+  });
+}
+
+/**
+ * Brings an archived goal back, with the tasks its removal cascaded away.
+ *
+ * Archiving used to be one-way: undo_last_action could reverse it, but only
+ * while it was still the most recent action, so anything archived a few
+ * actions ago was unreachable. This is the deliberate counterpart, callable
+ * whenever.
+ *
+ * Deliberately does NOT use loadGoal/loadGoalForUpdate — both filter on
+ * `isNull(archivedAt)`, and an archived row is the only kind this can act on
+ * (the same reason undoGoalRecord's goal_archived case does its own
+ * unfiltered select).
+ */
+export async function restoreGoal(
+  userId: string,
+  goalId: string,
+  opts: ActionSource,
+): Promise<{ goal: GoalRow }> {
+  return db.transaction(async (tx) => {
+    const idempotent = await findIdempotentGoalRecord(tx, userId, opts, 'goal_restored', goalId);
+    if (idempotent) {
+      const [existing] = await tx
+        .select()
+        .from(goals)
+        .where(and(eq(goals.id, goalId), eq(goals.userId, userId)))
+        .limit(1);
+      if (!existing) throw new GoalActionError('not_found', 'goal not found');
+      return { goal: existing };
+    }
+
+    const [goal] = await tx
+      .select()
+      .from(goals)
+      .where(and(eq(goals.id, goalId), eq(goals.userId, userId)))
+      .for('update')
+      .limit(1);
+    if (!goal) throw new GoalActionError('not_found', 'goal not found');
+    if (!goal.archivedAt) throw new GoalActionError('invalid_input', 'that goal is not archived');
+
+    // Restore exactly what THAT removal took, not everything currently
+    // soft-deleted and linked — a task deleted separately before the goal
+    // was archived isn't part of this unit and shouldn't ride back in.
+    //
+    // Matched on payload->>'goalId' in SQL, not by taking the newest archive
+    // record and checking it afterwards: archiving goal B after goal A would
+    // make A's newest-record lookup miss, and A would come back with its
+    // tasks silently left deleted. Caught in live testing, invisible to tsc.
+    const [archiveRecord] = await tx
+      .select()
+      .from(records)
+      .where(
+        and(
+          eq(records.userId, userId),
+          eq(records.kind, 'goal_archived'),
+          isNull(records.revertedAt),
+          sql`${records.payload}->>'goalId' = ${goalId}`,
+        ),
+      )
+      .orderBy(desc(records.createdAt))
+      .limit(1);
+    const archivePayload = archiveRecord?.payload as { cascadedTaskIds?: string[] } | undefined;
+    const cascadedTaskIds = archivePayload?.cascadedTaskIds ?? [];
+
+    const updated = await restoreGoalCascadeInTx(tx, goalId, cascadedTaskIds);
+
+    // The goal_archived record is deliberately left un-reverted. Undo walks
+    // records newest-first, so it reaches goal_restored first and re-archives;
+    // a further undo then finds the archive and un-archives — the walk-back
+    // reads exactly as the history happened. Marking the archive reverted here
+    // instead erased that step, and a second undo skipped past it to
+    // goal_created and removed the goal outright (found in live testing).
+    // A stale archive record reached later is harmless: un-archiving an
+    // already-live goal is an idempotent no-op.
+
+    await tx.insert(records).values({
+      userId,
+      kind: 'goal_restored',
+      payload: { goalId, name: updated.name, cascadedTaskIds },
+      source: opts.source,
+      sourceMessageId: opts.sourceMessageId ?? null,
+      toolCallId: opts.toolCallId ?? null,
+    });
+
+    return { goal: updated };
   });
 }
 

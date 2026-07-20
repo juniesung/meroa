@@ -27,6 +27,8 @@ function describeChange(kind: string, title: string): string {
       return `an entry was logged to "${title}"`;
     case 'goal_archived':
       return `the "${title}" goal was removed`;
+    case 'goal_restored':
+      return `the "${title}" goal was restored from the archive`;
     case 'goal_stage_advanced':
       return `the "${title}" goal advanced to its next stage`;
     default:
@@ -55,6 +57,8 @@ function describeUndo(undidKind: string, title: string): string {
       return `the "${title}" goal was removed (you undid creating it)`;
     case 'goal_archived':
       return `the "${title}" goal was brought back (you undid removing it)`;
+    case 'goal_restored':
+      return `the "${title}" goal went back to the archive (you undid restoring it)`;
     case 'goal_edited':
       return `the "${title}" goal was reverted to its previous version (you undid the edit)`;
     case 'goal_entry':
@@ -91,6 +95,8 @@ function describeUndoable(kind: string, title: string): string {
       return `the last entry logged to "${title}"`;
     case 'goal_archived':
       return `removing goal "${title}" (restores the goal AND its linked tasks)`;
+    case 'goal_restored':
+      return `restoring goal "${title}" (re-archives the goal AND its linked tasks)`;
     case 'goal_stage_advanced':
       return `advancing goal "${title}" to its next stage`;
     default:

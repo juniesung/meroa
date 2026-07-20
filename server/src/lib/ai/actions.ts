@@ -304,6 +304,8 @@ async function summarizeGoalUndo(
       return `Removed the "${goal.name}" goal.`;
     case 'goal_archived':
       return `Brought back "${goal.name}"${headline ? ` — ${headline}` : ''}.`;
+    case 'goal_restored':
+      return `Put "${goal.name}" back in the archive, along with its linked tasks.`;
     case 'goal_edited':
       return `Undid the last edit to "${goal.name}"${headline ? ` — ${headline}` : ''}.`;
     case 'goal_entry': {

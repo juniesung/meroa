@@ -297,6 +297,12 @@ export const api = {
 
   archiveGoal: (id: string) => request<{ goal: ApiGoal }>(`/goals/${id}`, { method: 'DELETE' }),
 
+  // Archived goals are excluded from listGoals — this is the only way to see
+  // them, and the only route that can reach restoreGoal.
+  listArchivedGoals: () => request<{ goals: ApiGoal[] }>('/goals/archived'),
+
+  restoreGoal: (id: string) => request<{ goal: ApiGoal }>(`/goals/${id}/restore`, { method: 'POST' }),
+
   // includeSuppressed is always on server-side for this route — the memory-
   // controls screen has to be able to find and un-suppress a row that chat
   // itself never sees (server/src/routes/memories.ts).

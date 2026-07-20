@@ -20,7 +20,7 @@ import { Ring } from '@/components/Ring';
 import { taskProgressFraction } from '@/components/TaskCard';
 import { radii, theme } from '@/constants/theme';
 import { GoalFormSheet } from '@/features/goals/GoalFormSheet';
-import { useGoalConsistency, useGoals } from '@/features/goals/queries';
+import { useArchivedGoals, useGoalConsistency, useGoals } from '@/features/goals/queries';
 import { useMe } from '@/features/profile/queries';
 import { useTasks } from '@/features/tasks/queries';
 import { useTabBarHeight } from '@/hooks/use-tab-bar-inset';
@@ -120,6 +120,7 @@ function EmptyState() {
 
 export default function GoalsScreen() {
   const { data: goals = [], isLoading } = useGoals();
+  const { data: archivedGoals = [] } = useArchivedGoals();
   const { data: consistency } = useGoalConsistency();
   const { data: tasks = [] } = useTasks();
   const { data: me } = useMe();
@@ -156,6 +157,9 @@ export default function GoalsScreen() {
     ? consistency.calendar.filter((d) => d.ymd.startsWith(thisMonthPrefix) && d.verdict === 'perfect').length
     : 0;
   const hasAnyDueDay = consistency?.calendar.some((d) => d.dueCount > 0) ?? false;
+  // Only advertised once there's something in it — an "Archived (0)" link is
+  // just clutter for anyone who's never removed a goal.
+  const hasArchived = archivedGoals.length > 0;
   const wins = consistency ? buildWins(goals, consistency) : [];
 
   return (
@@ -245,6 +249,22 @@ export default function GoalsScreen() {
           </View>
         )}
 
+        {hasArchived && (
+          <Pressable
+            onPress={() => {
+              haptic();
+              router.push('/archived-goals');
+            }}
+            style={styles.archivedLink}
+            hitSlop={6}
+          >
+            <Icon name="chevron" size={13} color={theme.dim} stroke={2} />
+            <Text style={styles.archivedLinkText}>
+              Archived ({archivedGoals.length})
+            </Text>
+          </Pressable>
+        )}
+
         {wins.length > 0 && (
           <View style={{ gap: 8 }}>
             <Text style={styles.sectionTitle}>Recent wins</Text>
@@ -312,6 +332,8 @@ const styles = StyleSheet.create({
   },
   statValue: { color: theme.text, fontSize: 18, fontWeight: '700' },
   statLabel: { color: theme.dim, fontSize: 10.5, textAlign: 'center' },
+  archivedLink: { flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'center', paddingVertical: 4 },
+  archivedLinkText: { color: theme.dim, fontSize: 13, fontWeight: '600' },
   winRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   winText: { color: theme.dim, fontSize: 13, flex: 1 },
   empty: { alignItems: 'center', paddingVertical: 30, paddingHorizontal: 10, gap: 16 },

@@ -8,6 +8,7 @@ export const goalsQueryKey = ['goals'] as const;
 export const goalDetailQueryKey = (id: string) => ['goals', id] as const;
 export const goalEntriesQueryKey = (id: string) => ['goals', id, 'entries'] as const;
 export const goalConsistencyQueryKey = ['goals', 'consistency'] as const;
+export const archivedGoalsQueryKey = ['goals', 'archived'] as const;
 
 export function useGoals() {
   return useQuery({
@@ -21,6 +22,14 @@ export function useGoalConsistency() {
   return useQuery({
     queryKey: goalConsistencyQueryKey,
     queryFn: () => api.getGoalConsistency(),
+  });
+}
+
+export function useArchivedGoals() {
+  return useQuery({
+    queryKey: archivedGoalsQueryKey,
+    queryFn: () => api.listArchivedGoals(),
+    select: (data) => data.goals,
   });
 }
 
@@ -138,6 +147,30 @@ export function useArchiveGoal() {
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: goalsQueryKey });
+      queryClient.invalidateQueries({ queryKey: archivedGoalsQueryKey });
+    },
+  });
+}
+
+export function useRestoreGoal() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.restoreGoal(id),
+    onSuccess: (data) => {
+      queryClient.setQueryData<{ goals: ApiGoal[] }>(goalsQueryKey, (prev) => ({
+        goals: upsertGoal(prev?.goals ?? [], data.goal),
+      }));
+      queryClient.setQueryData<{ goals: ApiGoal[] }>(archivedGoalsQueryKey, (prev) => ({
+        goals: (prev?.goals ?? []).filter((g) => g.id !== data.goal.id),
+      }));
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: goalsQueryKey });
+      queryClient.invalidateQueries({ queryKey: archivedGoalsQueryKey });
+      // Restoring un-deletes the goal's linked tasks, and both the streak
+      // math and the day ring read off live task rows.
+      queryClient.invalidateQueries({ queryKey: tasksQueryKey });
+      queryClient.invalidateQueries({ queryKey: goalConsistencyQueryKey });
     },
   });
 }

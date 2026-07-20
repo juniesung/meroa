@@ -76,6 +76,7 @@ function RootNavigator() {
         <Stack.Protected guard={status === 'signedIn' && !needsOnboarding && hasAccess}>
           <Stack.Screen name="(tabs)" />
           <Stack.Screen name="goal/[id]" options={{ presentation: 'card' }} />
+          <Stack.Screen name="archived-goals" options={{ presentation: 'card' }} />
           <Stack.Screen name="memories" options={{ presentation: 'card' }} />
         </Stack.Protected>
         <Stack.Protected guard={status === 'signedIn' && !needsOnboarding}>

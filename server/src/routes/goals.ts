@@ -1,5 +1,5 @@
 import { zValidator } from '@hono/zod-validator';
-import { and, desc, eq, isNull } from 'drizzle-orm';
+import { and, desc, eq, isNotNull, isNull } from 'drizzle-orm';
 import { Hono } from 'hono';
 import { z } from 'zod';
 
@@ -14,6 +14,7 @@ import {
   isAdvanceProposalStale,
   listGoalEntries,
   logGoalEntry,
+  restoreGoal,
   GoalActionError,
 } from '../lib/goals/executor.ts';
 import { computeActiveGoalAllowance, limitReachedBody, LimitReachedError } from '../lib/limits.ts';
@@ -67,6 +68,23 @@ goalRoutes.get('/', async (c) => {
     .from(goals)
     .where(and(eq(goals.userId, userId), isNull(goals.archivedAt)))
     .orderBy(desc(goals.createdAt));
+
+  const summaries = await buildGoalCardSummaries(rows, timezone);
+  const withSummary = rows.map((goal) => ({ ...goal, ...summaries.get(goal.id)! }));
+  return c.json({ goals: withSummary });
+});
+
+// Registered before /:id (like /consistency) so "archived" is never captured
+// as a goal id. The only way to see archived goals — GET / deliberately shows
+// only live ones — and therefore the only way to reach the restore route.
+goalRoutes.get('/archived', async (c) => {
+  const userId = c.get('userId');
+  const timezone = await getUserTimezone(userId);
+  const rows = await db
+    .select()
+    .from(goals)
+    .where(and(eq(goals.userId, userId), isNotNull(goals.archivedAt)))
+    .orderBy(desc(goals.archivedAt));
 
   const summaries = await buildGoalCardSummaries(rows, timezone);
   const withSummary = rows.map((goal) => ({ ...goal, ...summaries.get(goal.id)! }));
@@ -397,6 +415,21 @@ goalRoutes.delete('/:id', async (c) => {
   const id = c.req.param('id');
   try {
     const { goal } = await archiveGoal(userId, id, { source: 'goal_ui' });
+    return c.json({ goal });
+  } catch (err) {
+    const { status, body } = actionErrorResponse(err);
+    return c.json(body, status);
+  }
+});
+
+// The counterpart to DELETE above. undo_last_action could already reverse an
+// archive, but only while it was still the newest action — this reaches one
+// from any point, and is itself undoable like every other write.
+goalRoutes.post('/:id/restore', async (c) => {
+  const userId = c.get('userId');
+  const id = c.req.param('id');
+  try {
+    const { goal } = await restoreGoal(userId, id, { source: 'goal_ui' });
     return c.json({ goal });
   } catch (err) {
     const { status, body } = actionErrorResponse(err);
