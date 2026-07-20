@@ -1,11 +1,12 @@
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { Alert, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { MeroaMark } from '@/components/MeroaMark';
 import { Row } from '@/components/Row';
 import { theme } from '@/constants/theme';
+import { consentGranted } from '@/features/profile/ai-consent';
 import { useMe, useUpdatePrefs } from '@/features/profile/queries';
 import { QuietHoursSheet } from '@/features/profile/QuietHoursSheet';
 import { formatHhmmDisplay } from '@/features/tasks/task-form-helpers';
@@ -37,6 +38,29 @@ export default function YouScreen() {
     // denial here doesn't need to be reflected back into the toggle.
     if (next) await requestNotificationPermission();
     updatePrefs.mutate({ proactiveCheckins: next });
+  };
+
+  const aiSharingOn = consentGranted(data?.user.prefs);
+  const handleToggleAiSharing = (next: boolean) => {
+    if (next) {
+      updatePrefs.mutate({ aiConsent: { granted: true } });
+      return;
+    }
+    // Revoking blocks chat entirely (the server refuses every send without
+    // consent, and the nav guard re-shows the consent screen) — so confirm the
+    // consequence rather than silently breaking chat on a stray tap.
+    Alert.alert(
+      'Turn off AI data sharing?',
+      "Meroa's chat sends your messages to a third-party AI service to reply. Turn this off and chat stops working until you turn it back on. Nothing you've saved is deleted.",
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Turn off',
+          style: 'destructive',
+          onPress: () => updatePrefs.mutate({ aiConsent: { granted: false } }),
+        },
+      ],
+    );
   };
 
   return (
@@ -90,7 +114,18 @@ export default function YouScreen() {
             label="Dark appearance"
             right={<Text style={styles.hint}>Always</Text>}
           />
-          <Row icon="lock" label="Privacy" />
+          <Row
+            icon="lock"
+            label="AI data sharing"
+            right={
+              <Switch
+                value={aiSharingOn}
+                onValueChange={handleToggleAiSharing}
+                trackColor={{ true: theme.blue, false: theme.border }}
+                thumbColor="#fff"
+              />
+            }
+          />
         </Section>
 
         <Section title="ACCOUNT">

@@ -6,6 +6,7 @@ import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import { configurePurchases } from '@/features/billing/purchases';
+import { consentGranted } from '@/features/profile/ai-consent';
 import { OnboardingDraftFlush } from '@/features/profile/OnboardingDraftFlush';
 import { useMe } from '@/features/profile/queries';
 import { theme } from '@/constants/theme';
@@ -53,6 +54,13 @@ function RootNavigator() {
   // isNewUser flag from OTP verify, which the client never keeps). Gated
   // ahead of the paywall: signup → onboarding → paywall → tabs.
   const needsOnboarding = typeof me?.user.prefs.communicationStyle !== 'string';
+  // Apple 5.1.2(i): after onboarding and the paywall, an entitled user must have
+  // agreed to AI data-sharing before reaching chat. One code path covers both a
+  // brand-new user (onboarding → paywall → consent → tabs) and every existing
+  // account (none has consent yet, so → consent → tabs on next launch). Revoking
+  // in the You tab flips this back and re-shows the screen. The server enforces
+  // the same predicate on every send (lib/consent.ts) — this is just the surface.
+  const needsAiConsent = !needsOnboarding && hasAccess && !consentGranted(me?.user.prefs);
 
   useEffect(() => {
     if (status !== 'loading') {
@@ -73,7 +81,10 @@ function RootNavigator() {
         <Stack.Protected guard={status === 'signedIn' && needsOnboarding}>
           <Stack.Screen name="onboarding" options={{ gestureEnabled: false }} />
         </Stack.Protected>
-        <Stack.Protected guard={status === 'signedIn' && !needsOnboarding && hasAccess}>
+        <Stack.Protected guard={status === 'signedIn' && needsAiConsent}>
+          <Stack.Screen name="ai-consent" options={{ gestureEnabled: false }} />
+        </Stack.Protected>
+        <Stack.Protected guard={status === 'signedIn' && !needsOnboarding && hasAccess && !needsAiConsent}>
           <Stack.Screen name="(tabs)" />
           <Stack.Screen name="goal/[id]" options={{ presentation: 'card' }} />
           <Stack.Screen name="archived-goals" options={{ presentation: 'card' }} />

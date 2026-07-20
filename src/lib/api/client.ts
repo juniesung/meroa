@@ -58,6 +58,13 @@ function resolveBaseUrl(configured: string): string {
 
 const BASE_URL = resolveBaseUrl(CONFIGURED_URL);
 
+// The resolved API origin (loopback-swapped for a physical device). The legal
+// pages are served from this same Hono origin (server/src/routes/legal.ts), so
+// links to /privacy, /terms, /support derive from here — see lib/legal-urls.ts.
+export function getApiBaseUrl(): string {
+  return BASE_URL;
+}
+
 export class ApiError extends Error {
   status: number;
   body: unknown;

@@ -11,6 +11,7 @@ import { streamChatReply, type ChatHistoryMessage } from '../lib/ai/chat.ts';
 import { maybeExtractMemories } from '../lib/ai/memory-extractor.ts';
 import { pickTaskCreatedQuip } from '../lib/ai/quips.ts';
 import { buildRecentChangesFeed, renderUndoTarget } from '../lib/ai/recent-changes.ts';
+import { hasValidAiConsent } from '../lib/consent.ts';
 import {
   applyStyleCasing,
   buildConversationTailBlock,
@@ -181,6 +182,21 @@ function historyContentFor(m: { content: string; meta: unknown }): string {
 messageRoutes.post('/', rateLimit({ windowMs: 60_000, max: 20 }), zValidator('json', sendSchema), async (c) => {
   const userId = c.get('userId');
   const { text } = c.req.valid('json');
+
+  // Apple 5.1.2(i): nothing reaches the third-party AI provider without explicit,
+  // current consent. This is THE compliance boundary — enforced server-side so a
+  // client that bypassed the consent nav guard (or an outdated build) still cannot
+  // reach the model. Checked before the message is persisted, so a blocked send
+  // leaves no orphan user row behind. (lib/consent.ts, docs/data-inventory.md §3.)
+  const [consentUser] = await db
+    .select({ prefs: users.prefs })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+  if (!consentUser) return c.json({ error: 'not_found' }, 404);
+  if (!hasValidAiConsent(consentUser.prefs)) {
+    return c.json({ error: 'ai_consent_required' }, 403);
+  }
 
   const conversation = await getOrCreateAppConversation(userId);
 

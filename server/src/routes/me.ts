@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { db } from '../db/client.ts';
 import { entitlements, users } from '../db/schema.ts';
 import { resolvePlan } from '../lib/billing/plan.ts';
+import { AI_CONSENT_VERSION } from '../lib/constants.ts';
 import { ianaTimezoneSchema } from '../lib/timezone.ts';
 import { requireAuth, type AuthVariables } from '../middleware/auth.ts';
 
@@ -94,6 +95,12 @@ const prefsPatchSchema = z.object({
     })
     .optional(),
   onboardingDraft: onboardingDraftSchema,
+  // Apple 5.1.2(i) AI-sharing consent. The client only asserts `granted`; the
+  // server stamps `at` and `version` below, so a client can neither backdate a
+  // grant nor claim agreement to a disclosure version it never saw. Revoking
+  // (`granted: false`) is a first-class action — the message endpoint blocks
+  // sends whenever consent isn't valid for the current version (lib/consent.ts).
+  aiConsent: z.object({ granted: z.boolean() }).optional(),
 });
 
 // Captured once at OTP verify, but a device's timezone can drift from that
@@ -124,7 +131,17 @@ meRoutes.patch('/prefs', zValidator('json', prefsPatchSchema), async (c) => {
     .limit(1);
   if (!user) return c.json({ error: 'not_found' }, 404);
 
-  const nextPrefs = { ...(user.prefs as Record<string, unknown>), ...patch };
+  const nextPrefs: Record<string, unknown> = { ...(user.prefs as Record<string, unknown>), ...patch };
+  // Server-stamp consent metadata — never trust a client-supplied timestamp or
+  // version (see the schema note above). Both grant and revoke are stamped, so
+  // the recorded `at` is always the moment of the real state change.
+  if (patch.aiConsent) {
+    nextPrefs.aiConsent = {
+      granted: patch.aiConsent.granted,
+      at: new Date().toISOString(),
+      version: AI_CONSENT_VERSION,
+    };
+  }
   const [updated] = await db
     .update(users)
     .set({ prefs: nextPrefs })

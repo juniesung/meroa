@@ -27,7 +27,11 @@ export type ChatStreamEvent =
   | { type: 'action'; message: ApiMessage; task?: ApiTask; tasks?: ApiTask[]; goal?: ApiGoal; preview?: GoalPreview }
   | { type: 'stream_end' }
   | { type: 'error'; retryable: boolean; message: string }
-  | { type: 'limit_reached'; plan: 'free' | 'plus'; limit: number };
+  | { type: 'limit_reached'; plan: 'free' | 'plus'; limit: number }
+  // Apple 5.1.2(i): the server refused because AI consent isn't recorded. The
+  // nav guard normally prevents ever reaching here; this is the belt-and-braces
+  // fallback (e.g. consent revoked on another device mid-session).
+  | { type: 'consent_required' };
 
 /** Parses a `text/event-stream` body into `{event, data}` pairs, one per blank-line-delimited block. */
 async function* parseSSE(
@@ -91,6 +95,14 @@ export async function* streamMessage(
     const body = await res.json().catch(() => undefined);
     yield { type: 'limit_reached', plan: body?.plan ?? 'free', limit: body?.limit ?? 0 };
     return;
+  }
+
+  if (res.status === 403) {
+    const body = await res.json().catch(() => undefined);
+    if (body?.error === 'ai_consent_required') {
+      yield { type: 'consent_required' };
+      return;
+    }
   }
 
   if (!res.ok || !res.body) {

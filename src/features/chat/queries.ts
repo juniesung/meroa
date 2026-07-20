@@ -3,6 +3,7 @@ import { useCallback } from 'react';
 
 import { tasksQueryKey } from '@/features/tasks/queries';
 import { goalsQueryKey } from '@/features/goals/queries';
+import { meQueryKey } from '@/features/profile/queries';
 import { api } from '@/lib/api/client';
 import { streamMessage } from '@/lib/api/stream';
 import type { ApiMessage } from '@/lib/api/types';
@@ -138,6 +139,12 @@ export function useSendMessage() {
             markFailed('failed');
           } else if (event.type === 'limit_reached') {
             markFailed('limit_reached');
+          } else if (event.type === 'consent_required') {
+            // Refetch /me so _layout's nav guard sees consent is missing and
+            // routes to the consent screen (it owns the routing — see the
+            // needsAiConsent guard). Just drop the in-flight bubble here.
+            markFailed('failed');
+            queryClient.invalidateQueries({ queryKey: meQueryKey });
           }
         }
       } catch {

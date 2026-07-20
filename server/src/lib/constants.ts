@@ -6,6 +6,14 @@ export const OTP_MAX_ATTEMPTS = 5;
 export const OTP_RATE_LIMIT_PER_HOUR = 5;
 export const OTP_RESEND_COOLDOWN_SECONDS = 30;
 
+// Apple Guideline 5.1.2(i): explicit consent is required before a user's
+// messages are sent to the third-party AI provider. `prefs.aiConsent.version`
+// records which disclosure the user agreed to; bump this whenever the
+// disclosure materially changes (what's shared / who with) and every existing
+// user is transparently re-prompted (their stored version < the new one).
+// See lib/consent.ts for the enforcement helper and docs/data-inventory.md §3.
+export const AI_CONSENT_VERSION = 1;
+
 // The seeded pre-install relationship used to demonstrate continuity
 // (Phase 1 DoD) without a real SMS provider (that's Phase 9).
 export const DEMO_PHONE_E164 = '+15555550100';
