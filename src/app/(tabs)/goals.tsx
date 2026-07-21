@@ -11,6 +11,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 
+import { AddFab } from '@/components/AddFab';
 import { AnimatedPressable, useTapFeedback } from '@/components/AnimatedPressable';
 import { GoalCard } from '@/components/GoalCard';
 import { Heatmap } from '@/components/Heatmap';
@@ -158,7 +159,6 @@ export default function GoalsScreen() {
   const timezone = me?.user.timezone;
   const tabBarHeight = useTabBarHeight();
   const [createVisible, setCreateVisible] = useState(false);
-  const addFeedback = useTapFeedback(0.9);
   // Goals, consistency, and archived all live under the ['goals'] prefix;
   // tasks feed the "today" ring, so refresh both.
   const { refreshing, onRefresh } = usePullRefresh([['goals'], ['tasks']]);
@@ -210,18 +210,6 @@ export default function GoalsScreen() {
             <Text style={styles.eyebrow}>YOUR GOALS</Text>
             <Text style={styles.h1}>Your progress</Text>
           </View>
-          <AnimatedPressable
-            onPressIn={addFeedback.onPressIn}
-            onPressOut={addFeedback.onPressOut}
-            onPress={() => {
-              haptics.tap();
-              setCreateVisible(true);
-            }}
-            style={[styles.addBtn, addFeedback.animatedStyle]}
-            hitSlop={8}
-          >
-            <Icon name="plus" size={20} color="#fff" stroke={2.2} />
-          </AnimatedPressable>
         </View>
 
         <View style={styles.headerCard}>
@@ -302,6 +290,8 @@ export default function GoalsScreen() {
         )}
       </ScrollView>
 
+      <AddFab onPress={() => setCreateVisible(true)} bottom={tabBarHeight + 16} />
+
       <GoalFormSheet visible={createVisible} onClose={() => setCreateVisible(false)} />
     </SafeAreaView>
   );
@@ -310,17 +300,6 @@ export default function GoalsScreen() {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: theme.bg },
   headerRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  addBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 999,
-    backgroundColor: theme.blue,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: theme.blue,
-    shadowOpacity: 0.5,
-    shadowRadius: 10,
-  },
   eyebrow: { color: theme.dim, fontSize: 11, fontWeight: '700', letterSpacing: 1.2 },
   h1: { color: theme.text, fontSize: 28, fontWeight: '700', letterSpacing: -0.5, marginTop: 4 },
   sectionTitle: { color: theme.text, fontSize: 15, fontWeight: '700' },

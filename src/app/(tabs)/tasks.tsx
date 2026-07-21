@@ -4,7 +4,8 @@ import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } 
 import Animated, { FadeIn, FadeOut, LinearTransition } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { AnimatedPressable, useRimHighlight, useTapFeedback } from '@/components/AnimatedPressable';
+import { useRimHighlight } from '@/components/AnimatedPressable';
+import { AddFab } from '@/components/AddFab';
 import { Icon } from '@/components/Icon';
 import { LoadError } from '@/components/LoadError';
 import { MeroaMark } from '@/components/MeroaMark';
@@ -39,7 +40,6 @@ export default function TasksScreen() {
   const progressTask = useProgressTask();
   const deleteTask = useDeleteTask();
   const tabBarHeight = useTabBarHeight();
-  const addFeedback = useTapFeedback(0.9);
   const isFocused = useIsFocused();
   // A goal-linked task auto-logs a goal entry, so a manual refresh pulls both.
   const { refreshing, onRefresh } = usePullRefresh([['tasks'], ['goals']]);
@@ -183,18 +183,6 @@ export default function TasksScreen() {
             </Text>
           </View>
           <Ring value={pct} size={64} stroke={6} celebrate={isFocused && !isLoading} />
-          <AnimatedPressable
-            onPressIn={addFeedback.onPressIn}
-            onPressOut={addFeedback.onPressOut}
-            onPress={() => {
-              haptics.tap();
-              setCreateVisible(true);
-            }}
-            style={[styles.addBtn, addFeedback.animatedStyle]}
-            hitSlop={8}
-          >
-            <Icon name="plus" size={20} color="#fff" stroke={2.2} />
-          </AnimatedPressable>
         </View>
 
         {isError ? (
@@ -242,6 +230,8 @@ export default function TasksScreen() {
         )}
       </ScrollView>
 
+      <AddFab onPress={() => setCreateVisible(true)} bottom={tabBarHeight + 16} />
+
       <TaskFormSheet visible={createVisible} onClose={() => setCreateVisible(false)} />
       <TaskFormSheet
         visible={!!editingTemplate}
@@ -280,17 +270,6 @@ const styles = StyleSheet.create({
   eyebrow: { color: theme.dim, fontSize: 11, fontWeight: '700', letterSpacing: 1.2 },
   h1: { color: theme.text, fontSize: 26, fontWeight: '700', letterSpacing: -0.5, marginTop: 4 },
   h2: { color: theme.dim, fontSize: 14, marginTop: 4 },
-  addBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 999,
-    backgroundColor: theme.blue,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: theme.blue,
-    shadowOpacity: 0.5,
-    shadowRadius: 10,
-  },
   empty: { alignItems: 'center', marginTop: 60, paddingHorizontal: 20, gap: 16 },
   emptyText: { color: theme.dim, fontSize: 14, textAlign: 'center', lineHeight: 20 },
   sectionTitle: { color: theme.dim, fontSize: 11, fontWeight: '700', letterSpacing: 1.2 },
