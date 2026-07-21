@@ -1,6 +1,6 @@
 import { useIsFocused } from 'expo-router';
 import { useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeIn, FadeOut, LinearTransition } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -19,6 +19,7 @@ import { TaskFormSheet } from '@/features/tasks/TaskFormSheet';
 import { useCompleteTask, useDeleteTask, useProgressTask, useTasks } from '@/features/tasks/queries';
 import { haptics } from '@/lib/haptics';
 import { useLiveNow } from '@/hooks/use-live-now';
+import { usePullRefresh } from '@/hooks/use-pull-refresh';
 import { useTabBarHeight } from '@/hooks/use-tab-bar-inset';
 import type { ApiTask } from '@/lib/api/types';
 import { requestNotificationPermission } from '@/lib/notifications';
@@ -40,6 +41,8 @@ export default function TasksScreen() {
   const tabBarHeight = useTabBarHeight();
   const addFeedback = useTapFeedback(0.9);
   const isFocused = useIsFocused();
+  // A goal-linked task auto-logs a goal entry, so a manual refresh pulls both.
+  const { refreshing, onRefresh } = usePullRefresh([['tasks'], ['goals']]);
 
   // Deleting a goal-linked recurring task is never a silent swipe
   // (user rule): a template takes its goal with it (the server cascade in
@@ -163,6 +166,9 @@ export default function TasksScreen() {
       <ScrollView
         style={{ flex: 1 }}
         contentContainerStyle={{ padding: 20, paddingBottom: tabBarHeight + 40 }}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.dim} colors={[theme.blue]} />
+        }
       >
         <View style={styles.headerRow}>
           <View style={{ flex: 1 }}>

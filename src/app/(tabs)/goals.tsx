@@ -1,6 +1,6 @@
 import { router, useIsFocused } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Animated, {
   Easing,
@@ -26,6 +26,7 @@ import { useArchivedGoals, useGoalConsistency, useGoals } from '@/features/goals
 import { useMe } from '@/features/profile/queries';
 import { useTasks } from '@/features/tasks/queries';
 import { useTabBarHeight } from '@/hooks/use-tab-bar-inset';
+import { usePullRefresh } from '@/hooks/use-pull-refresh';
 import { haptics } from '@/lib/haptics';
 import type { ApiGoal, ApiGoalConsistency, ApiTask } from '@/lib/api/types';
 import { toIconName } from '@/lib/icon';
@@ -158,6 +159,9 @@ export default function GoalsScreen() {
   const tabBarHeight = useTabBarHeight();
   const [createVisible, setCreateVisible] = useState(false);
   const addFeedback = useTapFeedback(0.9);
+  // Goals, consistency, and archived all live under the ['goals'] prefix;
+  // tasks feed the "today" ring, so refresh both.
+  const { refreshing, onRefresh } = usePullRefresh([['goals'], ['tasks']]);
 
   const dueTodayTasks = tasks.filter(
     (t) => t.status !== 'archived' && !t.recurrence && isDueToday(t, timezone),
@@ -197,6 +201,9 @@ export default function GoalsScreen() {
       <ScrollView
         style={{ flex: 1 }}
         contentContainerStyle={{ padding: 20, paddingBottom: tabBarHeight + 40, gap: 20 }}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.dim} colors={[theme.blue]} />
+        }
       >
         <View style={styles.headerRow}>
           <View style={{ flex: 1 }}>
