@@ -11,7 +11,7 @@ import { MeroaMark } from '@/components/MeroaMark';
 import { Ring } from '@/components/Ring';
 import { TaskListSkeleton } from '@/components/Skeleton';
 import { SwipeToDelete } from '@/components/SwipeToDelete';
-import { isOverdue, isUpcoming, TaskCard, taskProgressFraction } from '@/components/TaskCard';
+import { isOverdue, isPastDue, isUpcoming, TaskCard, taskProgressFraction } from '@/components/TaskCard';
 import { theme } from '@/constants/theme';
 import { useGoals } from '@/features/goals/queries';
 import { useMe } from '@/features/profile/queries';
@@ -98,8 +98,12 @@ export default function TasksScreen() {
   const upcomingTasks = nonTemplates
     .filter((t) => isUpcoming(t, timezone))
     .sort((a, b) => (a.dueAt ?? '').localeCompare(b.dueAt ?? ''));
+  // "Today" = not due on a past day (isPastDue, any status) and not upcoming.
+  // Using isPastDue rather than isOverdue (open-only) is what drops a completed
+  // prior-day recurring instance out of today's list — an open past task is
+  // still surfaced separately in the OVERDUE section below.
   const visibleTasks = nonTemplates.filter(
-    (t) => !isOverdue(t, timezone) && !isUpcoming(t, timezone),
+    (t) => !isPastDue(t, timezone) && !isUpcoming(t, timezone),
   );
 
   const hasRunningTimer = visibleTasks.some(

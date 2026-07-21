@@ -64,6 +64,19 @@ export function isOverdue(task: ApiTask, timezone?: string | null): boolean {
 }
 
 /**
+ * Due on an *earlier calendar day* than today, in the account's own timezone —
+ * regardless of status. isOverdue is the open-only subset of this ("past-due
+ * AND still open"); a task completed on a past day is past-due but NOT overdue.
+ * The day list uses this (not isOverdue) to decide what belongs to "today", so
+ * a recurring task's completed prior-day instance drops to history instead of
+ * lingering in today's list (and skewing the day's done-count/ring).
+ */
+export function isPastDue(task: ApiTask, timezone?: string | null): boolean {
+  if (!task.dueAt) return false;
+  return ymdInTz(new Date(task.dueAt), timezone) < ymdInTz(new Date(), timezone);
+}
+
+/**
  * The mirror of isOverdue: due on a *later calendar day* than today, in the
  * account's own timezone. Same whole-day granularity — a task due at 9am
  * tomorrow is upcoming all of today, not "due soon".
