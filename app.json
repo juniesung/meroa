@@ -2,6 +2,7 @@
   "expo": {
     "name": "Meroa",
     "slug": "meroa",
+    "owner": "junsungiee",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -53,6 +54,12 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "a61e780e-65ea-435b-aaf6-6f442cd20300"
+      }
     }
   }
 }
