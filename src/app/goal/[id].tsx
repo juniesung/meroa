@@ -1,8 +1,8 @@
-import { router, Stack, useLocalSearchParams } from 'expo-router';
-import * as Haptics from 'expo-haptics';
+import { router, Stack, useIsFocused, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import Animated, { FadeInDown, LinearTransition } from 'react-native-reanimated';
 
 import { Icon } from '@/components/Icon';
 import { Progress } from '@/components/Progress';
@@ -13,6 +13,8 @@ import { useArchiveGoal, useGoal } from '@/features/goals/queries';
 import { GoalEntrySheet } from '@/features/goals/GoalEntrySheet';
 import { GoalFormSheet } from '@/features/goals/GoalFormSheet';
 import { useCompleteTask, useTasks } from '@/features/tasks/queries';
+import { useCountUp } from '@/hooks/use-count-up';
+import { haptics } from '@/lib/haptics';
 import type { ApiGoal, ApiGoalDetail, ApiGoalEntry, ApiTask } from '@/lib/api/types';
 import { formatMoney, formatNumber } from '@/lib/format';
 import { toIconName } from '@/lib/icon';
@@ -32,15 +34,19 @@ function formatEntryDate(iso: string): string {
   return `${date} · ${time}`;
 }
 
-function TotalView({ detail }: { detail: ApiGoalDetail }) {
+function TotalView({ detail, celebrate }: { detail: ApiGoalDetail; celebrate: boolean }) {
   const pct = Math.round((detail.card.progress ?? 0) * 100);
+  // The total ticks up to its new value the moment an entry lands — the payoff
+  // for logging, instead of the number just swapping. The ring beside it blooms
+  // + buzzes if this entry is the one that hits 100%.
+  const total = useCountUp(detail.total ?? 0);
   return (
     <View style={styles.viewCard}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
-        <Ring value={pct} size={56} stroke={5} label={`${pct}%`} />
+        <Ring value={pct} size={56} stroke={5} label={`${pct}%`} celebrate={celebrate} />
         <View style={{ flex: 1 }}>
           <Text style={styles.viewHeadline}>
-            {detail.currency}{formatMoney(detail.total ?? 0)} / {detail.currency}{formatMoney(detail.targetValue ?? 0)}
+            {detail.currency}{formatMoney(total)} / {detail.currency}{formatMoney(detail.targetValue ?? 0)}
           </Text>
           {detail.card.paceLine ? (
             <Text style={[styles.viewSub, detail.card.onTrack === true && { color: theme.success }]}>
@@ -197,6 +203,7 @@ function StagesView({ goal, tasks }: { goal: ApiGoal; tasks: ApiTask[] }) {
 }
 
 export default function GoalDetailScreen() {
+  const isFocused = useIsFocused();
   const { id } = useLocalSearchParams<{ id: string }>();
   const { data, isLoading } = useGoal(id);
   const { data: tasks = [] } = useTasks();
@@ -243,7 +250,7 @@ export default function GoalDetailScreen() {
         </View>
         <Pressable
           onPress={() => {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+            haptics.tap();
             setEditVisible(true);
           }}
           style={styles.editButton}
@@ -263,7 +270,7 @@ export default function GoalDetailScreen() {
         ) : isIndirect ? (
           <TrendView detail={detail} entries={entries} />
         ) : (
-          <TotalView detail={detail} />
+          <TotalView detail={detail} celebrate={isFocused && !isLoading} />
         )}
 
         {!hidesEntries && (
@@ -274,12 +281,19 @@ export default function GoalDetailScreen() {
             ) : (
               <View style={{ gap: 8 }}>
                 {entries.map((entry: ApiGoalEntry) => (
-                  <View key={entry.id} style={styles.entryRow}>
+                  // A freshly logged entry drops in and the rest slide down to
+                  // make room; on first open every row fades in gently.
+                  <Animated.View
+                    key={entry.id}
+                    entering={FadeInDown.duration(260)}
+                    layout={LinearTransition.springify().damping(20).stiffness(180)}
+                    style={styles.entryRow}
+                  >
                     <Text style={styles.entryLine} numberOfLines={1}>
                       {formatEntryLine(detail, entry.data)}
                     </Text>
                     <Text style={styles.entryDate}>{formatEntryDate(entry.entryAt)}</Text>
-                  </View>
+                  </Animated.View>
                 ))}
               </View>
             )}
@@ -294,7 +308,7 @@ export default function GoalDetailScreen() {
               </Pressable>
               <Pressable
                 onPress={() => {
-                  Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
+                  haptics.warning();
                   archiveGoal.mutate(goal.id, { onSuccess: () => router.back() });
                 }}
                 style={styles.removeConfirmButton}
@@ -315,7 +329,7 @@ export default function GoalDetailScreen() {
         <>
           <Pressable
             onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+              haptics.tap();
               setEntrySheetOpen(true);
             }}
             style={styles.logButton}

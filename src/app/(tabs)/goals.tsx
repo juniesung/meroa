@@ -1,5 +1,4 @@
-import { router } from 'expo-router';
-import * as Haptics from 'expo-haptics';
+import { router, useIsFocused } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -25,11 +24,38 @@ import { useArchivedGoals, useGoalConsistency, useGoals } from '@/features/goals
 import { useMe } from '@/features/profile/queries';
 import { useTasks } from '@/features/tasks/queries';
 import { useTabBarHeight } from '@/hooks/use-tab-bar-inset';
+import { haptics } from '@/lib/haptics';
 import type { ApiGoal, ApiGoalConsistency, ApiTask } from '@/lib/api/types';
 import { toIconName } from '@/lib/icon';
 
-function haptic() {
-  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+// One goal in the list — its own tap-scale so the card presses in, instead of
+// a bare Pressable with no feedback. A component (not an inline map body) so it
+// can own the useTapFeedback hook.
+function GoalRow({ goal, celebrate }: { goal: ApiGoal; celebrate: boolean }) {
+  const feedback = useTapFeedback(0.98);
+  return (
+    <AnimatedPressable
+      onPressIn={feedback.onPressIn}
+      onPressOut={feedback.onPressOut}
+      onPress={() => {
+        haptics.tap();
+        router.push({ pathname: '/goal/[id]', params: { id: goal.id } });
+      }}
+      style={feedback.animatedStyle}
+    >
+      <GoalCard
+        type={goal.definition.type}
+        icon={toIconName(goal.icon)}
+        title={goal.name}
+        subtitle={goal.headline ?? goal.sub ?? `${goal.entryCount} entries logged`}
+        progress={goal.progress != null ? Math.round(goal.progress * 100) : null}
+        paceLine={goal.paceLine}
+        onTrack={goal.onTrack}
+        streak={goal.streak}
+        celebrate={celebrate}
+      />
+    </AnimatedPressable>
+  );
 }
 
 function tzOrLocal(timezone?: string | null): string | undefined {
@@ -120,6 +146,7 @@ function EmptyState() {
 }
 
 export default function GoalsScreen() {
+  const isFocused = useIsFocused();
   const { data: goals = [], isLoading, isError, refetch } = useGoals();
   const { data: archivedGoals = [] } = useArchivedGoals();
   const { data: consistency } = useGoalConsistency();
@@ -178,7 +205,7 @@ export default function GoalsScreen() {
             onPressIn={addFeedback.onPressIn}
             onPressOut={addFeedback.onPressOut}
             onPress={() => {
-              haptic();
+              haptics.tap();
               setCreateVisible(true);
             }}
             style={[styles.addBtn, addFeedback.animatedStyle]}
@@ -222,24 +249,7 @@ export default function GoalsScreen() {
         ) : (
           <View style={{ gap: 12 }}>
             {goals.map((goal) => (
-              <Pressable
-                key={goal.id}
-                onPress={() => {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-                  router.push({ pathname: '/goal/[id]', params: { id: goal.id } });
-                }}
-              >
-                <GoalCard
-                  type={goal.definition.type}
-                  icon={toIconName(goal.icon)}
-                  title={goal.name}
-                  subtitle={goal.headline ?? goal.sub ?? `${goal.entryCount} entries logged`}
-                  progress={goal.progress != null ? Math.round(goal.progress * 100) : null}
-                  paceLine={goal.paceLine}
-                  onTrack={goal.onTrack}
-                  streak={goal.streak}
-                />
-              </Pressable>
+              <GoalRow key={goal.id} goal={goal} celebrate={isFocused && !isLoading} />
             ))}
           </View>
         )}
@@ -255,7 +265,7 @@ export default function GoalsScreen() {
         {hasArchived && (
           <Pressable
             onPress={() => {
-              haptic();
+              haptics.tap();
               router.push('/archived-goals');
             }}
             style={styles.archivedLink}

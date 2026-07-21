@@ -69,6 +69,7 @@ export function GoalCard({
   onTrack,
   streak,
   accent,
+  celebrate = false,
 }: {
   // Discriminates the render shape explicitly — a habit's `streak` presence
   // used to be inferred from a truthy prop, but that collapsed indirect
@@ -91,6 +92,11 @@ export function GoalCard({
   // Habit goals only.
   streak?: GoalStreak | null;
   accent?: string;
+  // Let the savings ring bloom + buzz when it crosses 100%. Same contract as
+  // Ring's own `celebrate`: the caller must keep it false until the list has
+  // loaded and the screen is on-view, so a placeholder 0→100 on first paint
+  // (or a tab kept mounted behind another) never fakes a finish.
+  celebrate?: boolean;
 }) {
   if (type === 'habit') {
     const s = streak ?? { current: 0, longest: 0, doneCount: 0 };
@@ -141,7 +147,7 @@ export function GoalCard({
       title={title}
       subtitle={subtitle}
       accent={accent}
-      right={<Ring value={pct} size={38} stroke={3.5} label={`${pct}`} />}
+      right={<Ring value={pct} size={38} stroke={3.5} label={`${pct}`} celebrate={celebrate} />}
     >
       <Progress value={pct} />
       {paceLine ? <PaceLine text={paceLine} onTrack={onTrack} /> : null}
