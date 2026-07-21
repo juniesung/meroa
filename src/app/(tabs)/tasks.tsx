@@ -1,6 +1,6 @@
 import { useIsFocused } from 'expo-router';
 import { useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeIn, FadeOut, LinearTransition } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -9,6 +9,7 @@ import { Icon } from '@/components/Icon';
 import { LoadError } from '@/components/LoadError';
 import { MeroaMark } from '@/components/MeroaMark';
 import { Ring } from '@/components/Ring';
+import { TaskListSkeleton } from '@/components/Skeleton';
 import { SwipeToDelete } from '@/components/SwipeToDelete';
 import { isOverdue, isUpcoming, TaskCard, taskProgressFraction } from '@/components/TaskCard';
 import { theme } from '@/constants/theme';
@@ -189,9 +190,7 @@ export default function TasksScreen() {
         {isError ? (
           <LoadError onRetry={() => refetch()} />
         ) : isLoading ? (
-          <View style={styles.loading}>
-            <ActivityIndicator color={theme.dim} />
-          </View>
+          <TaskListSkeleton />
         ) : isEmpty ? (
           <Animated.View entering={FadeIn.duration(320)} style={styles.empty}>
             <MeroaMark size={44} glow />
@@ -282,7 +281,6 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.5,
     shadowRadius: 10,
   },
-  loading: { alignItems: 'center', justifyContent: 'center', marginTop: 60 },
   empty: { alignItems: 'center', marginTop: 60, paddingHorizontal: 20, gap: 16 },
   emptyText: { color: theme.dim, fontSize: 14, textAlign: 'center', lineHeight: 20 },
   sectionTitle: { color: theme.dim, fontSize: 11, fontWeight: '700', letterSpacing: 1.2 },

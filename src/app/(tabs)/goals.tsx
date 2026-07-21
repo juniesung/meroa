@@ -1,6 +1,6 @@
 import { router, useIsFocused } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Animated, {
   Easing,
@@ -18,6 +18,7 @@ import { Icon } from '@/components/Icon';
 import { LoadError } from '@/components/LoadError';
 import { MeroaMark, type MeroaMood } from '@/components/MeroaMark';
 import { Ring } from '@/components/Ring';
+import { GoalListSkeleton } from '@/components/Skeleton';
 import { taskProgressFraction } from '@/components/TaskCard';
 import { radii, theme } from '@/constants/theme';
 import { GoalFormSheet } from '@/features/goals/GoalFormSheet';
@@ -242,9 +243,7 @@ export default function GoalsScreen() {
         {isError ? (
           <LoadError onRetry={() => refetch()} />
         ) : isLoading ? (
-          <View style={styles.loading}>
-            <ActivityIndicator color={theme.dim} />
-          </View>
+          <GoalListSkeleton />
         ) : goals.length === 0 ? (
           <EmptyState />
         ) : (
@@ -318,7 +317,6 @@ const styles = StyleSheet.create({
   eyebrow: { color: theme.dim, fontSize: 11, fontWeight: '700', letterSpacing: 1.2 },
   h1: { color: theme.text, fontSize: 28, fontWeight: '700', letterSpacing: -0.5, marginTop: 4 },
   sectionTitle: { color: theme.text, fontSize: 15, fontWeight: '700' },
-  loading: { alignItems: 'center', justifyContent: 'center', paddingVertical: 40 },
   headerCard: {
     flexDirection: 'row',
     alignItems: 'center',

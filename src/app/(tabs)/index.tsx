@@ -2,7 +2,6 @@ import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
   Platform,
@@ -31,6 +30,7 @@ import { Bubble } from '@/components/Bubble';
 import { Icon } from '@/components/Icon';
 import { MeroaMark, type MeroaMood } from '@/components/MeroaMark';
 import { ANIM_DURATION } from '@/components/Sheet';
+import { ChatSkeleton } from '@/components/Skeleton';
 import { TaskCard } from '@/components/TaskCard';
 import { radii, theme } from '@/constants/theme';
 import { ChatMenuSheet } from '@/features/chat/ChatMenuSheet';
@@ -912,9 +912,7 @@ export default function ChatScreen() {
         keyboardVerticalOffset={80}
       >
         {isLoading ? (
-          <View style={styles.loading}>
-            <ActivityIndicator color={theme.dim} />
-          </View>
+          <ChatSkeleton />
         ) : (
           <ScrollView
             ref={scrollRef}
@@ -1061,7 +1059,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  loading: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   timestamp: { color: theme.faint, fontSize: 11, textAlign: 'center', marginBottom: 8 },
   typingBubble: {
     flexDirection: 'row',
