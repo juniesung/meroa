@@ -1,6 +1,7 @@
 import { StyleSheet, Text, View } from 'react-native';
 
 import { radii, theme } from '@/constants/theme';
+import { haptics } from '@/lib/haptics';
 import { AnimatedPressable, useTapFeedback } from './AnimatedPressable';
 import { Icon, type IconName } from './Icon';
 
@@ -19,9 +20,16 @@ export function Row({
 }) {
   const { animatedStyle, onPressIn, onPressOut } = useTapFeedback(0.98);
 
+  const handlePress = onPress
+    ? () => {
+        haptics.tap();
+        onPress();
+      }
+    : undefined;
+
   return (
     <AnimatedPressable
-      onPress={onPress}
+      onPress={handlePress}
       onPressIn={onPressIn}
       onPressOut={onPressOut}
       style={[styles.row, animatedStyle]}

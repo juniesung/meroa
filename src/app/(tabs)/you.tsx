@@ -9,6 +9,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { MeroaMark } from '@/components/MeroaMark';
 import { Row } from '@/components/Row';
 import { theme } from '@/constants/theme';
+import { haptics } from '@/lib/haptics';
 import { consentGranted } from '@/features/profile/ai-consent';
 import { useMe, useUpdatePrefs } from '@/features/profile/queries';
 import { api } from '@/lib/api/client';
@@ -40,6 +41,7 @@ export default function YouScreen() {
     : 'Off';
 
   const handleToggleCheckins = async (next: boolean) => {
+    haptics.select();
     // Ask the OS only when turning check-ins on (CLAUDE.md §2) — the sync
     // logic separately checks actual permission before scheduling, so a
     // denial here doesn't need to be reflected back into the toggle.
@@ -49,6 +51,7 @@ export default function YouScreen() {
 
   const aiSharingOn = consentGranted(data?.user.prefs);
   const handleToggleAiSharing = (next: boolean) => {
+    haptics.select();
     if (next) {
       updatePrefs.mutate({ aiConsent: { granted: true } });
       return;

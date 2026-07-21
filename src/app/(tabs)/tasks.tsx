@@ -1,12 +1,13 @@
 import { useIsFocused } from 'expo-router';
 import { useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import Animated, { FadeOut, LinearTransition } from 'react-native-reanimated';
+import Animated, { FadeIn, FadeOut, LinearTransition } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AnimatedPressable, useRimHighlight, useTapFeedback } from '@/components/AnimatedPressable';
 import { Icon } from '@/components/Icon';
 import { LoadError } from '@/components/LoadError';
+import { MeroaMark } from '@/components/MeroaMark';
 import { Ring } from '@/components/Ring';
 import { SwipeToDelete } from '@/components/SwipeToDelete';
 import { isOverdue, isUpcoming, TaskCard, taskProgressFraction } from '@/components/TaskCard';
@@ -192,9 +193,10 @@ export default function TasksScreen() {
             <ActivityIndicator color={theme.dim} />
           </View>
         ) : isEmpty ? (
-          <View style={styles.empty}>
-            <Text style={styles.emptyText}>{"Nothing yet — tell Meroa what you're up to."}</Text>
-          </View>
+          <Animated.View entering={FadeIn.duration(320)} style={styles.empty}>
+            <MeroaMark size={44} glow />
+            <Text style={styles.emptyText}>{"Nothing yet — tell Meroa what you're up to and it'll line up your day."}</Text>
+          </Animated.View>
         ) : (
           visibleTasks.length > 0 && <View style={{ gap: 10, marginTop: 20 }}>{visibleTasks.map(renderTaskCard)}</View>
         )}
@@ -281,7 +283,7 @@ const styles = StyleSheet.create({
     shadowRadius: 10,
   },
   loading: { alignItems: 'center', justifyContent: 'center', marginTop: 60 },
-  empty: { alignItems: 'center', marginTop: 60, paddingHorizontal: 20 },
+  empty: { alignItems: 'center', marginTop: 60, paddingHorizontal: 20, gap: 16 },
   emptyText: { color: theme.dim, fontSize: 14, textAlign: 'center', lineHeight: 20 },
   sectionTitle: { color: theme.dim, fontSize: 11, fontWeight: '700', letterSpacing: 1.2 },
   templateRow: {

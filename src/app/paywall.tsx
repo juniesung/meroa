@@ -20,6 +20,7 @@ import {
 import { isBillingConfigured } from '@/features/billing/purchases';
 import type { OnboardingDraft } from '@/features/profile/OnboardingDraftFlush';
 import { useMe } from '@/features/profile/queries';
+import { haptics } from '@/lib/haptics';
 import { privacyUrl, termsUrl } from '@/lib/legal-urls';
 
 
@@ -64,16 +65,29 @@ export default function PaywallScreen() {
 
   const handleSubscribe = () => {
     if (!pkg) return;
-    purchase.mutate(pkg, { onSuccess: (result) => !result.cancelled && canDismiss && router.back() });
+    purchase.mutate(pkg, {
+      onSuccess: (result) => {
+        if (result.cancelled) return;
+        // The payoff for converting — a success chime as it lands, before the
+        // screen hands off into the app.
+        haptics.success();
+        if (canDismiss) router.back();
+      },
+    });
   };
 
   const handleRestore = () => {
+    haptics.tap();
     setRestoreMessage(null);
     restore.mutate(undefined, {
       onSuccess: () => {
+        haptics.success();
         setRestoreMessage("You're all set.");
       },
-      onError: () => setRestoreMessage("Couldn't restore — try again in a moment."),
+      onError: () => {
+        haptics.warning();
+        setRestoreMessage("Couldn't restore — try again in a moment.");
+      },
     });
   };
 
@@ -102,7 +116,9 @@ export default function PaywallScreen() {
 
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.hero}>
-          <MeroaMark size={56} glow />
+          {/* The mascot warms up once you're Plus — a small welcome on the
+              "you're on Meroa Plus" state. */}
+          <MeroaMark size={56} glow mood={isPlus ? 'warm' : 'idle'} />
           <Text style={styles.title}>Meroa Plus</Text>
         </View>
 

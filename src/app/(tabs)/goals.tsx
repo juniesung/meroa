@@ -4,6 +4,7 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Animated, {
   Easing,
+  FadeIn,
   useAnimatedStyle,
   useSharedValue,
   withSequence,
@@ -130,7 +131,7 @@ function buildWins(goals: ApiGoal[], consistency: ApiGoalConsistency): string[] 
 
 function EmptyState() {
   return (
-    <View style={styles.empty}>
+    <Animated.View entering={FadeIn.duration(320)} style={styles.empty}>
       <View style={styles.ghostCard}>
         <View style={styles.ghostIconChip} />
         <View style={{ flex: 1, gap: 6 }}>
@@ -141,7 +142,7 @@ function EmptyState() {
       <Text style={styles.emptyText}>
         No goals yet — tell Meroa what you&apos;re working toward and it&apos;ll build one with you.
       </Text>
-    </View>
+    </Animated.View>
   );
 }
 
