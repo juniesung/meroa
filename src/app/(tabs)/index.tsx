@@ -15,11 +15,15 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Animated, {
+  FadeIn,
+  FadeInDown,
   useAnimatedStyle,
   useSharedValue,
   withRepeat,
   withSequence,
   withTiming,
+  ZoomIn,
+  ZoomOut,
 } from 'react-native-reanimated';
 
 import { AnimatedPressable, useTapFeedback } from '@/components/AnimatedPressable';
@@ -111,13 +115,28 @@ function TypingDots() {
   const s3 = useAnimatedStyle(() => ({ opacity: d3.value }));
 
   return (
-    <View style={{ flexDirection: 'row', justifyContent: 'flex-start', marginVertical: 3 }}>
+    <Animated.View
+      entering={FadeIn.duration(200)}
+      style={{ flexDirection: 'row', justifyContent: 'flex-start', marginVertical: 3 }}
+    >
       <View style={styles.typingBubble}>
         <Animated.View style={[styles.typingDot, s1]} />
         <Animated.View style={[styles.typingDot, s2]} />
         <Animated.View style={[styles.typingDot, s3]} />
       </View>
-    </View>
+    </Animated.View>
+  );
+}
+
+// A card's status line ("Create this task?" → "Created ✓") is the confirmation
+// surface (CLAUDE.md §4: the card is the confirmation). Keying on the text so a
+// change remounts it lets each transition fade-rise in — the moment an action
+// lands gets a beat of motion to match its Success haptic, without any prose.
+function CardStatus({ children }: { children: React.ReactNode }) {
+  return (
+    <Animated.Text key={String(children)} entering={FadeInDown.duration(200)} style={styles.removalStatus}>
+      {children}
+    </Animated.Text>
   );
 }
 
@@ -197,7 +216,7 @@ function TaskRemovalConfirmCard({ message }: { message: ChatMessage }) {
           <Text style={styles.removalTitle} numberOfLines={1}>
             {task.title}
           </Text>
-          <Text style={styles.removalStatus}>{statusText}</Text>
+          <CardStatus>{statusText}</CardStatus>
         </View>
       </View>
       {!alreadyRemoved && !dismissed && (
@@ -254,7 +273,7 @@ function TaskBulkRemovalConfirmCard({ message }: { message: ChatMessage }) {
           <Text style={styles.removalTitle} numberOfLines={2}>
             {titleList}
           </Text>
-          <Text style={styles.removalStatus}>{statusText}</Text>
+          <CardStatus>{statusText}</CardStatus>
         </View>
       </View>
       {!allRemoved && !dismissed && (
@@ -339,7 +358,7 @@ function TaskPreviewCard({ message }: { message: ChatMessage }) {
           <Text style={styles.removalTitle} numberOfLines={1}>
             {preview.title}
           </Text>
-          <Text style={styles.removalStatus}>{statusText}</Text>
+          <CardStatus>{statusText}</CardStatus>
         </View>
       </View>
       <View style={styles.previewBody}>
@@ -457,7 +476,7 @@ function GoalPreviewCard({ message }: { message: ChatMessage }) {
           <Text style={styles.removalTitle} numberOfLines={1}>
             {preview.name}
           </Text>
-          <Text style={styles.removalStatus}>{statusText}</Text>
+          <CardStatus>{statusText}</CardStatus>
         </View>
       </View>
       <View style={styles.previewBody}>
@@ -608,7 +627,7 @@ function GoalAdvanceConfirmCard({ message }: { message: ChatMessage }) {
           <Text style={styles.removalTitle} numberOfLines={1}>
             {snapshot.name}
           </Text>
-          <Text style={styles.removalStatus}>{statusText}</Text>
+          <CardStatus>{statusText}</CardStatus>
         </View>
       </View>
       <View style={styles.previewBody}>
@@ -648,54 +667,67 @@ function GoalAdvanceConfirmCard({ message }: { message: ChatMessage }) {
   );
 }
 
+// The card components resolved by `meta.kind` — a chat action always renders
+// as exactly one of these.
+const CARD_BY_KIND: Record<string, (props: { message: ChatMessage }) => React.ReactNode> = {
+  task_action: TaskActionCard,
+  task_removal_pending: TaskRemovalConfirmCard,
+  task_bulk_removal_pending: TaskBulkRemovalConfirmCard,
+  task_creation_pending: TaskPreviewCard,
+  goal_preview: GoalPreviewCard,
+  goal_action: GoalActionCard,
+  goal_advance_pending: GoalAdvanceConfirmCard,
+  memory_action: MemoryActionCard,
+};
+
 function MessageRow({
   message,
   onRetry,
   onReport,
   isFirstInGroup = true,
   isLastInGroup = true,
+  animate = false,
 }: {
   message: ChatMessage;
   onRetry: (m: ChatMessage) => void;
   onReport: (m: ChatMessage) => void;
   isFirstInGroup?: boolean;
   isLastInGroup?: boolean;
+  // Play an entrance for this row. Gated by the parent so history loading in a
+  // batch doesn't replay dozens of entrances — only rows that arrive live do.
+  animate?: boolean;
 }) {
   const isStreamingEmpty =
     message.role === 'assistant' && message.status === 'streaming' && !message.content;
   if (isStreamingEmpty) return <TypingDots />;
 
-  if (message.role === 'assistant' && message.meta?.kind === 'task_action') {
-    return <TaskActionCard message={message} />;
-  }
-  if (message.role === 'assistant' && message.meta?.kind === 'task_removal_pending') {
-    return <TaskRemovalConfirmCard message={message} />;
-  }
-  if (message.role === 'assistant' && message.meta?.kind === 'task_bulk_removal_pending') {
-    return <TaskBulkRemovalConfirmCard message={message} />;
-  }
-  if (message.role === 'assistant' && message.meta?.kind === 'task_creation_pending') {
-    return <TaskPreviewCard message={message} />;
-  }
-  if (message.role === 'assistant' && message.meta?.kind === 'goal_preview') {
-    return <GoalPreviewCard message={message} />;
-  }
-  if (message.role === 'assistant' && message.meta?.kind === 'goal_action') {
-    return <GoalActionCard message={message} />;
-  }
-  if (message.role === 'assistant' && message.meta?.kind === 'goal_advance_pending') {
-    return <GoalAdvanceConfirmCard message={message} />;
-  }
-  if (message.role === 'assistant' && message.meta?.kind === 'memory_action') {
-    return <MemoryActionCard message={message} />;
+  const kind = message.role === 'assistant' ? message.meta?.kind : undefined;
+  const Card = typeof kind === 'string' ? CARD_BY_KIND[kind] : undefined;
+  if (Card) {
+    // Meroa's action cards glide in when they land — a card is created once
+    // (via an `action` event) and never reconciles again, so this fires exactly
+    // once. The confirmation still lives in the card itself (§4).
+    return (
+      <Animated.View entering={animate ? FadeInDown.duration(300) : undefined}>
+        <Card message={message} />
+      </Animated.View>
+    );
   }
 
   // Long-press to report is offered only on a settled assistant reply (not the
   // user's own bubbles, not a still-streaming/failed placeholder) — matching the
   // server rule that only an assistant message is reportable.
   const canReport = message.role === 'assistant' && !message.status;
+  // Only the user's own send gets an entrance, and only while it's the optimistic
+  // 'sending' temp (queries.ts) — the persisted copy that replaces it in place
+  // carries no status, so it swaps in silently instead of re-animating. Assistant
+  // text bubbles are left to grow in via streaming, their own motion.
+  const bubbleEntrance =
+    message.role === 'user' && message.status === 'sending'
+      ? FadeInDown.springify().damping(20).stiffness(180)
+      : undefined;
   return (
-    <View>
+    <Animated.View entering={bubbleEntrance}>
       <Bubble
         from={message.role === 'user' ? 'me' : 'ai'}
         isFirstInGroup={isFirstInGroup}
@@ -716,7 +748,7 @@ function MessageRow({
           </Text>
         </Pressable>
       )}
-    </View>
+    </Animated.View>
   );
 }
 
@@ -755,6 +787,20 @@ export default function ChatScreen() {
     scrollRef.current?.scrollToEnd({ animated: hasScrolledInitially.current });
     hasScrolledInitially.current = true;
   };
+
+  // Same reasoning as the scroll snap above, for entrance animations: the first
+  // loaded batch is history and must not replay entrances. Seed the "already
+  // seen" set once from that batch — React's guarded set-state-during-render
+  // (the documented "store info from previous renders" pattern) captures it
+  // without an effect, so nothing in that first render animates. Anything with
+  // an id not in the set arrived live (a new card or send) and earns its
+  // entrance. Seeded once and never grown — a card's id is stable once
+  // persisted, so it enters exactly once.
+  const [seenIds, setSeenIds] = useState<Set<string> | null>(null);
+  if (seenIds === null && !isLoading) {
+    setSeenIds(new Set(messages.map((m) => m.id)));
+  }
+  const isFreshMessage = (id: string) => seenIds !== null && !seenIds.has(id);
 
   const lastMessage = messages[messages.length - 1];
   const lastMessageContent = lastMessage?.content;
@@ -890,6 +936,7 @@ export default function ChatScreen() {
                   onReport={handleReport}
                   isFirstInGroup={flags?.isFirst}
                   isLastInGroup={flags?.isLast}
+                  animate={isFreshMessage(m.id)}
                 />
               );
             })}
@@ -908,16 +955,20 @@ export default function ChatScreen() {
             onSubmitEditing={sendDraft}
           />
           {/* Send appears only when there's text — no dead-end mic/attach
-              controls (neither voice nor attachments exist server-side). */}
+              controls (neither voice nor attachments exist server-side). It
+              scales in as you start typing and out when the draft clears, so
+              it feels like a live control rather than a hard pop. */}
           {draft.trim() ? (
-            <AnimatedPressable
-              onPress={sendDraft}
-              onPressIn={sendFeedback.onPressIn}
-              onPressOut={sendFeedback.onPressOut}
-              style={[styles.composerIcon, styles.sendBtn, sendFeedback.animatedStyle]}
-            >
-              <Icon name="send" size={18} color="#fff" stroke={2} />
-            </AnimatedPressable>
+            <Animated.View entering={ZoomIn.duration(160)} exiting={ZoomOut.duration(140)}>
+              <AnimatedPressable
+                onPress={sendDraft}
+                onPressIn={sendFeedback.onPressIn}
+                onPressOut={sendFeedback.onPressOut}
+                style={[styles.composerIcon, styles.sendBtn, sendFeedback.animatedStyle]}
+              >
+                <Icon name="send" size={18} color="#fff" stroke={2} />
+              </AnimatedPressable>
+            </Animated.View>
           ) : null}
         </View>
       </KeyboardAvoidingView>

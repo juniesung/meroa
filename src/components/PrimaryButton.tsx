@@ -1,8 +1,8 @@
 import { LinearGradient } from 'expo-linear-gradient';
-import * as Haptics from 'expo-haptics';
 import { StyleSheet, Text, type ViewStyle } from 'react-native';
 
 import { radii, theme } from '@/constants/theme';
+import { haptics } from '@/lib/haptics';
 import { AnimatedPressable, useTapFeedback } from './AnimatedPressable';
 
 export function PrimaryButton({
@@ -18,7 +18,7 @@ export function PrimaryButton({
 
   const handlePress = onPress
     ? () => {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+        haptics.tap();
         onPress();
       }
     : undefined;
