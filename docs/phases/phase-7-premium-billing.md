@@ -66,8 +66,8 @@ There is no persistent limited free tier. Two states only:
 
 ### Human prerequisites before the blocked items can close
 1. RevenueCat account + project; iOS app added (bundle `com.meroa.app`).
-2. Entitlement id `plus`; product `meroa_plus_monthly` ($11.99/mo); offering `default` with a `$rc_monthly` package.
-3. **A 7-day free trial introductory offer configured on `meroa_plus_monthly` in App Store Connect** — this is what actually makes `Purchases.purchasePackage()` start a trial instead of charging immediately; no app or server code causes this, it's store configuration. New requirement on top of the two items above.
+2. Entitlement id `plus` (kept as the internal identifier — invisible to users; the app is branded as a single "Meroa membership", no "Plus" tier, since the hard paywall has no free tier for a Plus to sit above); product `meroa_monthly` ($11.99/mo); offering `default` with a `$rc_monthly` package. **The entitlement identifier MUST be `plus`** (server default `REVENUECAT_ENTITLEMENT_ID=plus`); the product id is free-form (the client reads the offering's `monthly` package, never a hardcoded product id) — `meroa_monthly` just drops the now-retired "plus" branding.
+3. **A 7-day free trial introductory offer configured on `meroa_monthly` in App Store Connect** — this is what actually makes `Purchases.purchasePackage()` start a trial instead of charging immediately; no app or server code causes this, it's store configuration. New requirement on top of the two items above.
 4. **Test Store** key (`test_…`) → app `.env`'s `EXPO_PUBLIC_REVENUECAT_IOS_KEY`; secret key (`sk_…`) → server `.env`'s `REVENUECAT_SECRET_API_KEY`.
 5. `npx expo install` already ran; still needed: `npx expo run:ios` (or a dev-client build) to actually exercise the paywall and a real purchase — Expo Go can't load native IAP modules.
 6. Optional for now: webhook URL + `REVENUECAT_WEBHOOK_SECRET` (a local tunnel is only needed to test the webhook path itself; `/billing/sync` + `npm run dev:plan` already cover the entitlement loop without one).

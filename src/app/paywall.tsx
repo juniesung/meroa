@@ -53,8 +53,8 @@ export default function PaywallScreen() {
   // The mandatory hard-paywall landing screen (!canDismiss) has nowhere to
   // router.back() to — Stack.Protected making (tabs) newly reachable doesn't
   // by itself move the user off whatever screen they're already sitting on,
-  // so without this they're left stranded here showing "You're on Meroa
-  // Plus" after a real purchase/restore instead of landing in the app. The
+  // so without this they're left stranded here showing "You're a Meroa
+  // member" after a real purchase/restore instead of landing in the app. The
   // voluntary, dismissible entry points (Settings, cap-hit banners) are
   // unaffected — canDismiss is already true there, so this never fires.
   useEffect(() => {
@@ -116,10 +116,10 @@ export default function PaywallScreen() {
 
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.hero}>
-          {/* The mascot warms up once you're Plus — a small welcome on the
-              "you're on Meroa Plus" state. */}
+          {/* The mascot warms up once you're a member — a small welcome on the
+              "you're a Meroa member" state. */}
           <MeroaMark size={56} glow mood={isPlus ? 'warm' : 'idle'} />
-          <Text style={styles.title}>Meroa Plus</Text>
+          <Text style={styles.title}>Meroa membership</Text>
         </View>
 
         {isPlus ? (
@@ -143,7 +143,7 @@ export default function PaywallScreen() {
               <ActivityIndicator color={theme.dim} style={{ marginTop: 24 }} />
             ) : !isBillingConfigured() || !pkg ? (
               <Text style={styles.unavailable}>
-                Meroa Plus isn&apos;t available to purchase yet — check back soon.
+                Membership isn&apos;t available to purchase yet — check back soon.
               </Text>
             ) : (
               <>
@@ -205,7 +205,7 @@ function PlusState({ expiresAt, onManage }: { expiresAt: string | null; onManage
   const expiryLabel = formatExpiry(expiresAt);
   return (
     <View style={styles.plusState}>
-      <Text style={styles.plusHeadline}>You&apos;re on Meroa Plus</Text>
+      <Text style={styles.plusHeadline}>You&apos;re a Meroa member</Text>
       {expiryLabel && <Text style={styles.plusSub}>Renews {expiryLabel}</Text>}
       <PrimaryButton label="Manage subscription" onPress={onManage} style={{ marginTop: 24 }} />
     </View>

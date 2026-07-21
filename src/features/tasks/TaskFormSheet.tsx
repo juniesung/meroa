@@ -553,9 +553,9 @@ function TaskFormBody({ task, onClose }: { task?: ApiTask; onClose: () => void }
       {formError && (
         <View style={styles.errorBox}>
           <Text style={styles.errorText}>{formError}</Text>
-          {asLimitReached(createTask.error) && (
+          {asLimitReached(createTask.error)?.plan === 'free' && (
             <Text style={styles.upgradeLink} onPress={() => router.push('/paywall')}>
-              Upgrade to Meroa Plus →
+              Subscribe to Meroa →
             </Text>
           )}
         </View>

@@ -19,11 +19,20 @@ export function asLimitReached(err: unknown): LimitReachedBody | null {
 }
 
 export function limitReachedMessage(body: LimitReachedBody): string {
+  // Hard paywall (no free tier): a `plan: 'free'` body means the user is locked
+  // out entirely and needs to subscribe — not that they hit a graduated cap.
+  // (In practice the nav guard keeps a locked user off these screens, so this
+  // mainly covers a trial expiring mid-session.) A `plan: 'plus'` body is a
+  // member hitting the daily fair-use ceiling — there's no higher tier to sell,
+  // so the copy just states the limit, no "upgrade".
+  if (body.plan === 'free') {
+    return 'Subscribe to Meroa for full access.';
+  }
   if (body.feature === 'tasks') {
-    return `Free plan limit — ${body.limit} new task${body.limit === 1 ? '' : 's'} a day. Upgrade for unlimited.`;
+    return `You've hit today's limit of ${body.limit} new task${body.limit === 1 ? '' : 's'}.`;
   }
   if (body.feature === 'goals') {
-    return `Free plan limit — ${body.limit} active goal${body.limit === 1 ? '' : 's'}. Upgrade for more.`;
+    return `You've reached your limit of ${body.limit} active goal${body.limit === 1 ? '' : 's'}.`;
   }
-  return "You've reached today's message limit. Upgrade for more.";
+  return "You've reached today's message limit — check back tomorrow.";
 }

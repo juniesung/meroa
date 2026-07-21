@@ -404,9 +404,9 @@ function PreviewLimitBanner({ error }: { error: unknown }) {
       <Text style={styles.previewErrorText}>
         {limit ? limitReachedMessage(limit) : "Couldn't create — try again."}
       </Text>
-      {limit && (
+      {limit?.plan === 'free' && (
         <Text style={styles.previewUpgradeLink} onPress={() => router.push('/paywall')}>
-          Upgrade to Meroa Plus →
+          Subscribe to Meroa →
         </Text>
       )}
     </View>
@@ -742,11 +742,14 @@ function MessageRow({
         </Pressable>
       )}
       {message.status === 'limit_reached' && (
-        <Pressable onPress={() => router.push('/paywall')} style={styles.statusRow} hitSlop={8}>
+        // A member hit the daily fair-use ceiling — there's no higher tier to
+        // sell, so this is informational, not a paywall prompt. (A locked user
+        // never reaches chat: the nav guard keeps them on the paywall.)
+        <View style={styles.statusRow}>
           <Text style={styles.statusText}>
-            You&apos;ve reached today&apos;s message limit · Upgrade for more →
+            You&apos;ve reached today&apos;s message limit — check back tomorrow.
           </Text>
-        </Pressable>
+        </View>
       )}
     </Animated.View>
   );

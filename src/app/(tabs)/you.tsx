@@ -157,7 +157,7 @@ export default function YouScreen() {
           {data?.user.displayName ? <Text style={styles.email}>{data.user.phoneE164}</Text> : null}
           <View style={styles.pill}>
             <Text style={styles.pillText}>
-              {data?.entitlement.plan === 'plus' ? 'Meroa Plus' : 'Meroa Free'}
+              {data?.entitlement.plan === 'plus' ? 'Member' : 'Meroa'}
             </Text>
           </View>
         </View>
@@ -213,7 +213,7 @@ export default function YouScreen() {
         <Section title="ACCOUNT">
           <Row
             icon="crown"
-            label={data?.entitlement.plan === 'plus' ? 'Manage subscription' : 'Upgrade to Meroa Plus'}
+            label={data?.entitlement.plan === 'plus' ? 'Manage subscription' : 'Subscribe to Meroa'}
             onPress={() => router.push('/paywall')}
           />
           <Row
