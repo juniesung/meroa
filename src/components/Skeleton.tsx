@@ -93,9 +93,37 @@ export function GoalListSkeleton() {
   );
 }
 
+/** Generic list placeholder — a few card rows. For Memories and Archived, whose
+ *  header renders for real above this. */
+export function ListSkeleton() {
+  return (
+    <View style={styles.padList}>
+      {[0, 1, 2, 3].map((i) => (
+        <SkeletonBlock key={i} height={64} />
+      ))}
+    </View>
+  );
+}
+
+/** Detail placeholder — a hero block, a section label, then a few rows. Used by
+ *  the goal detail screen while its data loads (was a lone spinner on near-black). */
+export function DetailSkeleton() {
+  return (
+    <View style={styles.detail}>
+      <SkeletonBlock height={116} />
+      <SkeletonBlock width="45%" height={16} radius={6} />
+      {[0, 1, 2].map((i) => (
+        <SkeletonBlock key={i} height={52} />
+      ))}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   block: { backgroundColor: theme.card2 },
   chat: { padding: 14, gap: 12 },
   list: { gap: 10, marginTop: 20 },
   goalList: { gap: 12 },
+  padList: { padding: 16, gap: 10 },
+  detail: { padding: 20, gap: 14 },
 });

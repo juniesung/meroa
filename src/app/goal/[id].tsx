@@ -1,12 +1,13 @@
 import { router, Stack, useIsFocused, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Animated, { FadeInDown, LinearTransition } from 'react-native-reanimated';
 
 import { Icon } from '@/components/Icon';
 import { Progress } from '@/components/Progress';
 import { Ring } from '@/components/Ring';
+import { DetailSkeleton } from '@/components/Skeleton';
 import { TrendChart, type TrendPoint } from '@/components/TrendChart';
 import { radii, theme } from '@/constants/theme';
 import { useArchiveGoal, useGoal } from '@/features/goals/queries';
@@ -214,11 +215,9 @@ export default function GoalDetailScreen() {
 
   if (isLoading || !data) {
     return (
-      <SafeAreaView style={styles.safe}>
+      <SafeAreaView style={styles.safe} edges={['top']}>
         <Stack.Screen options={{ headerShown: false }} />
-        <View style={styles.loading}>
-          <ActivityIndicator color={theme.dim} />
-        </View>
+        <DetailSkeleton />
       </SafeAreaView>
     );
   }
@@ -349,7 +348,6 @@ export default function GoalDetailScreen() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: theme.bg },
-  loading: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   header: {
     flexDirection: 'row',
     alignItems: 'center',

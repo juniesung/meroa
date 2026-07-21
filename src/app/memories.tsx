@@ -1,11 +1,12 @@
 import { router, Stack } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AnimatedPressable, useTapFeedback } from '@/components/AnimatedPressable';
 import { Icon } from '@/components/Icon';
+import { ListSkeleton } from '@/components/Skeleton';
 import { LoadError } from '@/components/LoadError';
 import { SwipeToDelete } from '@/components/SwipeToDelete';
 import { radii, theme } from '@/constants/theme';
@@ -78,9 +79,7 @@ export default function MemoriesScreen() {
       {isError ? (
         <LoadError onRetry={() => refetch()} />
       ) : isLoading ? (
-        <View style={styles.loading}>
-          <ActivityIndicator color={theme.dim} />
-        </View>
+        <ListSkeleton />
       ) : memories.length === 0 ? (
         <View style={styles.empty}>
           <Text style={styles.emptyText}>
@@ -162,7 +161,6 @@ const styles = StyleSheet.create({
   // — same size as iconButton, but invisible (no FAB-adjacent "+" here anymore).
   headerSpacer: { width: 32, height: 32 },
   title: { color: theme.text, fontSize: 16, fontWeight: '700' },
-  loading: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   empty: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 40 },
   emptyText: { color: theme.dim, fontSize: 14, textAlign: 'center', lineHeight: 20 },
   sectionTitle: {

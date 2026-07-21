@@ -1,9 +1,10 @@
 import { router, Stack } from 'expo-router';
 import * as Haptics from 'expo-haptics';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Icon } from '@/components/Icon';
+import { ListSkeleton } from '@/components/Skeleton';
 import { radii, theme } from '@/constants/theme';
 import { useArchivedGoals, useRestoreGoal } from '@/features/goals/queries';
 import { toIconName } from '@/lib/icon';
@@ -73,9 +74,7 @@ export default function ArchivedGoalsScreen() {
       </View>
 
       {isLoading ? (
-        <View style={styles.loading}>
-          <ActivityIndicator color={theme.dim} />
-        </View>
+        <ListSkeleton />
       ) : goals.length === 0 ? (
         <View style={styles.empty}>
           <Text style={styles.emptyText}>
@@ -118,7 +117,6 @@ const styles = StyleSheet.create({
   },
   headerSpacer: { width: 32, height: 32 },
   title: { color: theme.text, fontSize: 16, fontWeight: '700' },
-  loading: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   empty: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 40 },
   emptyText: { color: theme.dim, fontSize: 14, textAlign: 'center', lineHeight: 20 },
   hint: { color: theme.faint, fontSize: 12, paddingHorizontal: 2, marginBottom: 2 },
