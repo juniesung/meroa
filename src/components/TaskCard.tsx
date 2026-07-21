@@ -1,4 +1,3 @@
-import * as Haptics from 'expo-haptics';
 import { useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, {
@@ -15,15 +14,13 @@ import { useGoals } from '@/features/goals/queries';
 import { useMe } from '@/features/profile/queries';
 import { useLiveNow } from '@/hooks/use-live-now';
 import { formatMoney } from '@/lib/format';
+import { haptics } from '@/lib/haptics';
+import { useReduceMotion } from '@/lib/motion';
 import type { ApiTask, ChecklistConfig, CounterConfig, DurationConfig } from '@/lib/api/types';
 import { toIconName } from '@/lib/icon';
 import { useRimHighlight } from './AnimatedPressable';
 import { Icon } from './Icon';
 import { Progress } from './Progress';
-
-function haptic() {
-  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-}
 
 // `undefined` here (not a real IANA name) is deliberate — every timeZone
 // option below passes it straight through to Intl, which treats `undefined`
@@ -272,6 +269,9 @@ export function TaskCard({
   const meta = metaText(task, now, me?.user.timezone);
   const goalLabel = goalLinkLabel(task, goals);
   const rim = useRimHighlight();
+  // Only the counter's count drives the tick — a constant for every other type
+  // keeps their meta still (a running duration's mm:ss must not pop each second).
+  const counterBump = useBumpOnChange(task.type === 'counter' ? (task.config as CounterConfig).count : 0);
 
   // Server-side auto-complete only runs when a progress action actually
   // lands (duration_stop/add/set) — if the user just leaves the timer
@@ -297,22 +297,33 @@ export function TaskCard({
     }
   }, [running, now, task.config, onTimerStop]);
 
+  // The interaction haptic fires at the press, its weight matched to the act:
+  // a value that changes by a step (counter ±, timer start/stop) gets the
+  // lighter Selection tick; a plain toggle/expand gets Light. The heavier
+  // Success chime for a task actually landing on done is fired once from the
+  // mutation layer (features/tasks/queries.ts), not here.
   const handleBannerPress = () => {
-    haptic();
     switch (task.type) {
       case 'completion':
+        haptics.tap();
         onToggleComplete?.();
         break;
       case 'checklist':
+        haptics.tap();
         setExpanded((e) => !e);
         break;
       case 'counter':
+        haptics.select();
         (done ? onCounterDecrement : onCounterIncrement)?.();
         break;
       case 'duration':
-        if (done) onDurationReopen?.();
-        else if (running) onTimerStop?.();
-        else onTimerStart?.();
+        if (done) {
+          haptics.tap();
+          onDurationReopen?.();
+        } else {
+          haptics.select();
+          (running ? onTimerStop : onTimerStart)?.();
+        }
         break;
     }
   };
@@ -341,7 +352,11 @@ export function TaskCard({
             </Text>
             {task.templateId && <Icon name="repeat" size={12} color={theme.faint} stroke={2.2} />}
           </View>
-          {meta && <Text style={[styles.meta, meta.danger && styles.metaDanger]}>{meta.text}</Text>}
+          {meta && (
+            <Animated.View style={[styles.metaWrap, counterBump]}>
+              <Text style={[styles.meta, meta.danger && styles.metaDanger]}>{meta.text}</Text>
+            </Animated.View>
+          )}
           {goalLabel && (
             <View style={styles.goalChip}>
               <Icon name="goals" size={10} color={theme.blue} stroke={2.4} />
@@ -373,6 +388,31 @@ export function TaskCard({
       )}
     </View>
   );
+}
+
+// A quick scale "tick" whenever `value` changes — the counter's count popping
+// as you increment it, so a tap that only nudges a number still feels like it
+// landed. Skips the first render (no pop on mount) and respects reduce-motion.
+// Pass a constant for non-counter tasks so their meta (a duration's mm:ss
+// ticking every second) never pops.
+function useBumpOnChange(value: number) {
+  const scale = useSharedValue(1);
+  const prev = useRef(value);
+  const reduceMotion = useReduceMotion();
+
+  useEffect(() => {
+    if (value !== prev.current) {
+      if (!reduceMotion) {
+        scale.value = withSequence(
+          withTiming(1.14, { duration: 110, easing: Easing.out(Easing.cubic) }),
+          withTiming(1, { duration: 160, easing: Easing.out(Easing.back(1.6)) }),
+        );
+      }
+      prev.current = value;
+    }
+  }, [value, scale, reduceMotion]);
+
+  return useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
 }
 
 // A brief bounce + glow the instant a task flips to done — satisfying, not
@@ -491,7 +531,7 @@ function ChecklistBody({
             <Pressable
               key={item.id}
               onPress={() => {
-                haptic();
+                haptics.select();
                 onToggleItem?.(item.id);
               }}
               style={styles.checklistItemRow}
@@ -539,6 +579,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   title: { color: theme.text, fontSize: 15, fontWeight: '600', flexShrink: 1 },
+  // alignSelf keeps the wrap only as wide as the text, so the counter tick
+  // scales from the left edge rather than ballooning out of the card's center.
+  metaWrap: { alignSelf: 'flex-start' },
   meta: { color: theme.dim, fontSize: 12, marginTop: 2 },
   metaDanger: { color: theme.danger },
   goalChip: {

@@ -1,8 +1,7 @@
-import * as Haptics from 'expo-haptics';
 import { useIsFocused } from 'expo-router';
 import { useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import Animated from 'react-native-reanimated';
+import Animated, { FadeOut, LinearTransition } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AnimatedPressable, useRimHighlight, useTapFeedback } from '@/components/AnimatedPressable';
@@ -16,14 +15,17 @@ import { useGoals } from '@/features/goals/queries';
 import { useMe } from '@/features/profile/queries';
 import { TaskFormSheet } from '@/features/tasks/TaskFormSheet';
 import { useCompleteTask, useDeleteTask, useProgressTask, useTasks } from '@/features/tasks/queries';
+import { haptics } from '@/lib/haptics';
 import { useLiveNow } from '@/hooks/use-live-now';
 import { useTabBarHeight } from '@/hooks/use-tab-bar-inset';
 import type { ApiTask } from '@/lib/api/types';
 import { requestNotificationPermission } from '@/lib/notifications';
 
-function haptic() {
-  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-}
+// A row slides to close a gap when its neighbor is deleted or it changes
+// section, and fades out as it's removed — so the list settles instead of
+// snapping. `entering` is deliberately omitted: the tab remounts on every
+// visit, and re-fading the whole list each time reads as jitter, not polish.
+const ROW_LAYOUT = LinearTransition.springify().damping(20).stiffness(180);
 
 export default function TasksScreen() {
   const { data: tasks = [], isLoading, isError, refetch } = useTasks();
@@ -122,7 +124,8 @@ export default function TasksScreen() {
 
   function renderTaskCard(t: ApiTask) {
     return (
-      <SwipeToDelete key={t.id} onDelete={() => confirmDelete(t)}>
+      <Animated.View key={t.id} layout={ROW_LAYOUT} exiting={FadeOut.duration(180)}>
+        <SwipeToDelete onDelete={() => confirmDelete(t)}>
         {(guardPress) => (
           <TaskCard
             task={t}
@@ -148,7 +151,8 @@ export default function TasksScreen() {
             )}
           />
         )}
-      </SwipeToDelete>
+        </SwipeToDelete>
+      </Animated.View>
     );
   }
 
@@ -171,7 +175,7 @@ export default function TasksScreen() {
             onPressIn={addFeedback.onPressIn}
             onPressOut={addFeedback.onPressOut}
             onPress={() => {
-              haptic();
+              haptics.tap();
               setCreateVisible(true);
             }}
             style={[styles.addBtn, addFeedback.animatedStyle]}
@@ -207,11 +211,13 @@ export default function TasksScreen() {
             <Text style={styles.sectionTitle}>REPEATING</Text>
             <View style={{ gap: 10, marginTop: 10 }}>
               {templates.map((t) => (
-                <SwipeToDelete key={t.id} onDelete={() => confirmDelete(t)}>
-                  {(guardPress) => (
-                    <TemplateRow task={t} onPress={guardPress(() => setEditingTemplate(t))} />
-                  )}
-                </SwipeToDelete>
+                <Animated.View key={t.id} layout={ROW_LAYOUT} exiting={FadeOut.duration(180)}>
+                  <SwipeToDelete onDelete={() => confirmDelete(t)}>
+                    {(guardPress) => (
+                      <TemplateRow task={t} onPress={guardPress(() => setEditingTemplate(t))} />
+                    )}
+                  </SwipeToDelete>
+                </Animated.View>
               ))}
             </View>
           </View>
@@ -240,7 +246,7 @@ function TemplateRow({ task, onPress }: { task: ApiTask; onPress: () => void }) 
   return (
     <Pressable
       onPress={() => {
-        haptic();
+        haptics.tap();
         onPress();
       }}
       onPressIn={rim.onPressIn}

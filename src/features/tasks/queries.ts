@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { api } from '@/lib/api/client';
+import { haptics } from '@/lib/haptics';
 import type {
   ApiTask,
   CompleteTaskInput,
@@ -46,6 +47,18 @@ function useTaskMutation<TVars>(mutationFn: (vars: TVars) => Promise<{ task: Api
   return useMutation({
     mutationFn,
     onSuccess: (data) => {
+      // The single, correct place for the "task completed" success haptic: it
+      // fires once per user action, unlike a per-card effect (the same task can
+      // be on screen in the Tasks tab and as a chat card at once). Covers every
+      // way a task lands on done — completion tap, a counter hitting its target,
+      // a duration timer auto-stopping, the last checklist item — by watching
+      // the open→done transition against what was cached a moment ago.
+      const before = queryClient
+        .getQueryData<{ tasks: ApiTask[] }>(tasksQueryKey)
+        ?.tasks.find((t) => t.id === data.task.id);
+      if (data.task.status === 'done' && before?.status !== 'done') {
+        haptics.success();
+      }
       queryClient.setQueryData<{ tasks: ApiTask[] }>(tasksQueryKey, (prev) => ({
         tasks: upsertTask(prev?.tasks ?? [], data.task),
       }));
