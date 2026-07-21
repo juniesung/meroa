@@ -8,6 +8,7 @@ import { logger } from './logger.ts';
 import { authRoutes } from './routes/auth.ts';
 import { billingRoutes } from './routes/billing.ts';
 import { bootstrapRoutes } from './routes/bootstrap.ts';
+import { internalRoutes } from './routes/internal.ts';
 import { legalRoutes } from './routes/legal.ts';
 import { meRoutes } from './routes/me.ts';
 import { memoryRoutes } from './routes/memories.ts';
@@ -53,6 +54,7 @@ app.route('/tasks', taskRoutes);
 app.route('/goals', goalRoutes);
 app.route('/memories', memoryRoutes);
 app.route('/billing', billingRoutes);
+app.route('/internal', internalRoutes);
 
 serve({ fetch: app.fetch, port: env.PORT }, (info) => {
   logger.info(`meroa-server listening on http://localhost:${info.port}`);

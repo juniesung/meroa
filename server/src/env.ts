@@ -46,6 +46,19 @@ const schema = z.object({
   // Sentry.init only runs when this is set (index.ts), so the server boots
   // fine without error reporting configured.
   SENTRY_DSN: z.string().optional(),
+  // Proactive re-engagement pushes (routes/internal.ts's POST /internal/tick,
+  // driven by an external Railway cron). CRON_SECRET guards that endpoint; when
+  // it's unset the tick route refuses every call, so notifications stay off
+  // until it's deliberately configured — no accidental sends in dev.
+  CRON_SECRET: z.string().optional(),
+  // A user is a win-back candidate once they've been inactive this many days.
+  NOTIFY_WINBACK_AFTER_DAYS: z.coerce.number().int().positive().default(3),
+  // The proactive-message cap (CLAUDE.md §2). Defaults: at most 1 proactive
+  // push/day and 4/week, on top of the user-set task reminders (which are
+  // client-local and never counted here). A user can tighten this via
+  // prefs.notificationCap; these are the ceilings and the fallback.
+  NOTIFY_MAX_PER_DAY: z.coerce.number().int().nonnegative().default(1),
+  NOTIFY_MAX_PER_WEEK: z.coerce.number().int().nonnegative().default(4),
 });
 
 export const env = schema

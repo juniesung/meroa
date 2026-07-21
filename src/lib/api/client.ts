@@ -230,6 +230,12 @@ export const api = {
       body: JSON.stringify({ timezone }),
     }),
 
+  registerPushToken: (body: { token: string; platform: 'ios' | 'android'; deviceLabel?: string }) =>
+    request<{ ok: true }>('/me/push-token', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
   // A faithful, unpaginated dump of every row the user owns (routes/me.ts).
   exportData: () => request<Record<string, unknown>>('/me/export'),
 

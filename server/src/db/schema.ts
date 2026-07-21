@@ -23,6 +23,12 @@ export const users = pgTable('users', {
   displayName: text('display_name'),
   timezone: text('timezone'),
   prefs: jsonb('prefs').notNull().default({}),
+  // Last time the app was demonstrably in use — stamped on token refresh and
+  // on sending a message (lib/usage.ts's touchLastActive). The signal the
+  // re-engagement tick keys off for a win-back push: no column meant the only
+  // "last seen" was sessions.lastUsedAt, which a lapsed user's expired session
+  // stops advancing anyway. Nullable so pre-existing rows need no backfill.
+  lastActiveAt: timestamp('last_active_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -320,6 +326,67 @@ export const messageReports = pgTable(
   ],
 );
 
+// --- push_tokens ----------------------------------------------------------
+// Expo push tokens, one row per device. Captured client-side only after the OS
+// grants notification permission (src/lib/push.ts) and POSTed to /me/push-token.
+// Unique on (userId, token) so a re-register is an idempotent upsert, not a
+// duplicate. `disabledAt` is set (never deleted) when Expo reports the token as
+// DeviceNotRegistered on a send, so history of what device existed survives.
+export const pushTokens = pgTable(
+  'push_tokens',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    token: text('token').notNull(),
+    platform: text('platform').notNull().default('ios'),
+    deviceLabel: text('device_label'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).notNull().defaultNow(),
+    disabledAt: timestamp('disabled_at', { withTimezone: true }),
+  },
+  (t) => [
+    index('push_tokens_user_idx').on(t.userId),
+    uniqueIndex('push_tokens_user_token_unique').on(t.userId, t.token),
+    check('push_tokens_platform_check', sql`${t.platform} in ('ios','android')`),
+  ],
+);
+
+// --- notifications_log -----------------------------------------------------
+// One row per proactive push actually sent. Two jobs: (1) enforce the
+// frequency cap (CLAUDE.md §2's "proactive-message limits") by counting rows in
+// a trailing window per user, and (2) idempotency — a partial unique index on
+// (userId, dedupeKey) stops the every-15-min tick from re-sending the same
+// trigger (e.g. one streak nudge per goal per day). Task reminders the user set
+// themselves are client-local and never logged here, so they don't count
+// against the cap. `openedAt` is stamped if/when the tap is reported back.
+export const notificationsLog = pgTable(
+  'notifications_log',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    kind: text('kind').notNull(),
+    title: text('title'),
+    body: text('body').notNull(),
+    dedupeKey: text('dedupe_key'),
+    sentAt: timestamp('sent_at', { withTimezone: true }).notNull().defaultNow(),
+    openedAt: timestamp('opened_at', { withTimezone: true }),
+  },
+  (t) => [
+    index('notifications_log_user_sent_idx').on(t.userId, t.sentAt),
+    // NOT partial: Postgres treats NULL dedupe keys as distinct, so the many
+    // non-deduped log rows (raw sends) never collide, while a real dedupeKey
+    // stays unique per user. A plain index is what makes the ON CONFLICT
+    // (userId, dedupeKey) upsert in send.ts actually match a constraint — a
+    // partial index needs its predicate restated on every conflict target,
+    // which drizzle's onConflictDoNothing can't express.
+    uniqueIndex('notifications_log_dedupe_unique').on(t.userId, t.dedupeKey),
+  ],
+);
+
 // --- relations ---------------------------------------------------------
 
 export const usersRelations = relations(users, ({ many, one }) => ({
@@ -329,6 +396,8 @@ export const usersRelations = relations(users, ({ many, one }) => ({
   tasks: many(tasks),
   goals: many(goals),
   memories: many(memories),
+  pushTokens: many(pushTokens),
+  notificationsLog: many(notificationsLog),
   entitlement: one(entitlements, {
     fields: [users.id],
     references: [entitlements.userId],
@@ -402,4 +471,12 @@ export const entitlementsRelations = relations(entitlements, ({ one }) => ({
 export const messageReportsRelations = relations(messageReports, ({ one }) => ({
   user: one(users, { fields: [messageReports.userId], references: [users.id] }),
   message: one(messages, { fields: [messageReports.messageId], references: [messages.id] }),
+}));
+
+export const pushTokensRelations = relations(pushTokens, ({ one }) => ({
+  user: one(users, { fields: [pushTokens.userId], references: [users.id] }),
+}));
+
+export const notificationsLogRelations = relations(notificationsLog, ({ one }) => ({
+  user: one(users, { fields: [notificationsLog.userId], references: [users.id] }),
 }));

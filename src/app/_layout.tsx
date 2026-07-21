@@ -31,15 +31,33 @@ function BillingGate() {
   return null;
 }
 
-// A tapped task reminder (local notification, scheduled with data.taskId in
-// lib/notifications.ts) should land on the Tasks tab — that's the task's surface
-// (there's no separate task-detail route). Custom-scheme only; no
-// associatedDomains, so no Apple-account dependency. Rendered only when the tabs
-// are actually reachable, so a cold-start tap can't fight the onboarding/paywall/
-// consent guards.
+// A tapped notification lands on the surface it's about. Two sources:
+//  - Local reminders (lib/reminder-schedule.ts): a task reminder → Tasks (the
+//    task's surface — there's no task-detail route); the "haven't seen you"
+//    nudge → Chat, since it's a friend check-in, not a task.
+//  - Server re-engagement pushes (server/lib/notifications): carry an explicit
+//    `route` ('chat' | 'goals' | 'tasks') for where the message points.
+// Custom-scheme only; no associatedDomains, so no Apple-account dependency.
+// Rendered only when the tabs are reachable, so a cold-start tap can't fight the
+// onboarding/paywall/consent guards.
+const ROUTE_BY_KEY: Record<string, string> = {
+  chat: '/(tabs)',
+  goals: '/(tabs)/goals',
+  tasks: '/(tabs)/tasks',
+};
+
 function routeFromNotification(response: Notifications.NotificationResponse | null) {
-  const taskId = response?.notification.request.content.data?.taskId;
-  if (typeof taskId === 'string') router.navigate('/(tabs)/tasks');
+  const data = response?.notification.request.content.data;
+  const route = typeof data?.route === 'string' ? ROUTE_BY_KEY[data.route] : undefined;
+  if (route) {
+    router.navigate(route as Parameters<typeof router.navigate>[0]);
+    return;
+  }
+  if (data?.kind === 'reengage') {
+    router.navigate('/(tabs)');
+    return;
+  }
+  if (typeof data?.taskId === 'string') router.navigate('/(tabs)/tasks');
 }
 
 function NotificationRouter() {

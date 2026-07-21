@@ -22,6 +22,7 @@ import { vibeLabel } from '@/features/profile/vibes';
 import { useTabBarHeight } from '@/hooks/use-tab-bar-inset';
 import { useAuth } from '@/lib/auth/AuthProvider';
 import { requestNotificationPermission } from '@/lib/notifications';
+import { registerForPushNotifications } from '@/lib/push';
 
 export default function YouScreen() {
   const tabBarHeight = useTabBarHeight();
@@ -45,7 +46,13 @@ export default function YouScreen() {
     // Ask the OS only when turning check-ins on (CLAUDE.md §2) — the sync
     // logic separately checks actual permission before scheduling, so a
     // denial here doesn't need to be reflected back into the toggle.
-    if (next) await requestNotificationPermission();
+    if (next) {
+      const granted = await requestNotificationPermission();
+      // Register this device for server-side re-engagement pushes right away on
+      // opt-in (no-op off a dev build); the tabs layout also re-registers on
+      // every foreground.
+      if (granted) void registerForPushNotifications();
+    }
     updatePrefs.mutate({ proactiveCheckins: next });
   };
 

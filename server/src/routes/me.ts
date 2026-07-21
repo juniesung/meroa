@@ -13,6 +13,7 @@ import {
   memoryExtractionState,
   messageReports,
   messages,
+  pushTokens,
   records,
   sessions,
   tasks,
@@ -108,6 +109,15 @@ const prefsPatchSchema = z.object({
       end: timeSchema,
     })
     .optional(),
+  // Proactive-notification frequency the user is willing to receive. Only ever
+  // TIGHTENS the server ceiling (NOTIFY_MAX_PER_*): lib/notifications/policy.ts's
+  // effectiveCap takes the min, so a client can ask for fewer, never more.
+  notificationCap: z
+    .object({
+      perDay: z.number().int().nonnegative().optional(),
+      perWeek: z.number().int().nonnegative().optional(),
+    })
+    .optional(),
   onboardingDraft: onboardingDraftSchema,
   // Apple 5.1.2(i) AI-sharing consent. The client only asserts `granted`; the
   // server stamps `at` and `version` below, so a client can neither backdate a
@@ -164,6 +174,36 @@ meRoutes.patch('/prefs', zValidator('json', prefsPatchSchema), async (c) => {
   if (!updated) throw new Error('user_update_failed');
 
   return c.json({ prefs: updated.prefs });
+});
+
+// Register (or refresh) this device's Expo push token — the client sends it
+// after the OS grants notification permission (src/lib/push.ts). Upsert on
+// (userId, token): a re-register just bumps lastSeenAt and clears any prior
+// disabled flag, never a duplicate row. Registering a token is also a strong
+// "app is in active use" signal, so it doubles as a lastActiveAt stamp (the
+// signal the re-engagement tick keys off).
+const pushTokenSchema = z.object({
+  token: z.string().min(1),
+  platform: z.enum(['ios', 'android']).default('ios'),
+  deviceLabel: z.string().max(120).optional(),
+});
+
+meRoutes.post('/push-token', zValidator('json', pushTokenSchema), async (c) => {
+  const userId = c.get('userId');
+  const { token, platform, deviceLabel } = c.req.valid('json');
+  const now = new Date();
+
+  await db
+    .insert(pushTokens)
+    .values({ userId, token, platform, deviceLabel, lastSeenAt: now })
+    .onConflictDoUpdate({
+      target: [pushTokens.userId, pushTokens.token],
+      set: { platform, deviceLabel, lastSeenAt: now, disabledAt: null },
+    });
+
+  await db.update(users).set({ lastActiveAt: now }).where(eq(users.id, userId));
+
+  return c.json({ ok: true });
 });
 
 // Data export (Phase 8). A faithful, UNFILTERED, UNPAGINATED dump of every row

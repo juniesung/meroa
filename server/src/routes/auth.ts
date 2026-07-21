@@ -142,11 +142,17 @@ authRoutes.post('/refresh', zValidator('json', refreshSchema), async (c) => {
 
   if (!session) return c.json({ error: 'invalid_session' }, 401);
 
+  const now = new Date();
   const newRefreshToken = generateRefreshToken();
   await db
     .update(sessions)
-    .set({ refreshTokenHash: hashWithPepper(newRefreshToken), lastUsedAt: new Date(), expiresAt: refreshExpiry() })
+    .set({ refreshTokenHash: hashWithPepper(newRefreshToken), lastUsedAt: now, expiresAt: refreshExpiry() })
     .where(eq(sessions.id, session.id));
+
+  // A live refresh means the app is in active use — the broad signal the
+  // re-engagement tick reads to decide who has drifted away (lib/notifications/
+  // triggers.ts). Fires ~every 15 min while the app is open.
+  await db.update(users).set({ lastActiveAt: now }).where(eq(users.id, session.userId));
 
   const accessToken = await signAccessToken(session.userId);
 

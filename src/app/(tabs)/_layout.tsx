@@ -6,6 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Icon, type IconName } from '@/components/Icon';
 import { TAB_BAR_CONTENT_HEIGHT, theme } from '@/constants/theme';
+import { usePushRegistration } from '@/features/profile/usePushRegistration';
 import { useTimezoneSync } from '@/features/profile/useTimezoneSync';
 import { useTaskReminderSync } from '@/features/tasks/useTaskReminderSync';
 import { haptics } from '@/lib/haptics';
@@ -28,6 +29,7 @@ export default function TabsLayout() {
   const insets = useSafeAreaInsets();
   useTaskReminderSync();
   useTimezoneSync();
+  usePushRegistration();
 
   return (
     <Tabs

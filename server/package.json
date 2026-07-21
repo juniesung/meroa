@@ -25,6 +25,7 @@
     "@sentry/node": "^10.66.0",
     "dotenv": "^16.4.7",
     "drizzle-orm": "^0.45.2",
+    "expo-server-sdk": "^6.1.0",
     "hono": "^4.6.20",
     "jose": "^5.9.6",
     "openai": "^6.46.0",
