@@ -46,6 +46,10 @@ const schema = z.object({
   // Sentry.init only runs when this is set (index.ts), so the server boots
   // fine without error reporting configured.
   SENTRY_DSN: z.string().optional(),
+  // Comma-separated allow-list of browser origins permitted cross-origin in
+  // production (index.ts). Unset ⇒ none, which is correct today: the native
+  // app sends no Origin and the legal pages are same-origin.
+  CORS_ORIGINS: z.string().optional(),
   // Proactive re-engagement pushes (routes/internal.ts's POST /internal/tick,
   // driven by an external Railway cron). CRON_SECRET guards that endpoint; when
   // it's unset the tick route refuses every call, so notifications stay off

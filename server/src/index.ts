@@ -25,9 +25,25 @@ if (env.SENTRY_DSN) {
 
 const app = new Hono();
 
-// Dev-only permissive CORS — the app talks to this server directly during
-// local development; tighten this if/when the server is ever deployed.
-app.use('*', cors());
+// CORS only ever mattered for browsers. The two real clients are a native app
+// (React Native's fetch sends no Origin, so CORS never applies to it) and the
+// server-rendered legal/support pages (same-origin). So production denies all
+// cross-origin requests by default, and CORS_ORIGINS exists purely as an
+// escape hatch if a real web surface is ever added.
+const corsOrigins = (env.CORS_ORIGINS ?? '')
+  .split(',')
+  .map((o) => o.trim())
+  .filter(Boolean);
+
+app.use(
+  '*',
+  cors({
+    origin: (origin) => {
+      if (env.NODE_ENV !== 'production') return origin || '*';
+      return corsOrigins.includes(origin) ? origin : null;
+    },
+  }),
+);
 
 app.get('/health', (c) => c.json({ ok: true }));
 

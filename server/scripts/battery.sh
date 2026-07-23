@@ -48,7 +48,11 @@ set -uo pipefail
 cd "$(dirname "$0")/.."
 
 API="${API:-http://localhost:8787}"
-PHONE="+1555${1:-9000001}"
+# A fresh account per run by default: the suite asserts on absolute counts
+# ("2 tasks exist"), so reusing one number makes every run after the first
+# fail against the previous run's leftovers. Pass a 7-digit suffix explicitly
+# to reattach to a specific account (e.g. to inspect state after a failure).
+PHONE="+1555${1:-$(printf '%07d' $(( (RANDOM * 32768 + RANDOM) % 10000000 )))}"
 
 if ! curl -s -o /dev/null --max-time 3 "$API/"; then
   echo "✗ no server at $API — run 'npm run dev' first" >&2

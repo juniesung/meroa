@@ -23,7 +23,14 @@ function secretsMatch(a: string, b: string): boolean {
   return timingSafeEqual(bufA, bufB);
 }
 
+// users.id is a Postgres uuid — comparing it against a non-UUID string is a
+// type error at the DB level, not an empty result. RevenueCat's dashboard
+// "send test event" button uses ids like `test_app_user_id`, so an unguarded
+// query 500s and puts the webhook into retry backoff.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 async function userExists(userId: string): Promise<boolean> {
+  if (!UUID_RE.test(userId)) return false;
   const [row] = await db.select({ id: users.id }).from(users).where(eq(users.id, userId)).limit(1);
   return !!row;
 }
