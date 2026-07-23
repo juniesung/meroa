@@ -111,7 +111,7 @@ the App Store or Google Play.
 - **Correction / deletion of memories.** You can edit, suppress, or delete individual
   memories, and tell Meroa not to bring something up.
 - **Account deletion.** You can delete your account and all associated data from within the
-  app, or via our web deletion page at [WEB DELETION URL]. Deletion is immediate and
+  app, or via our web deletion page at https://meroa-production.up.railway.app/account/delete. Deletion is immediate and
   permanent.
 - **Withdraw AI consent.** You can withdraw permission for AI processing at any time in
   Settings.

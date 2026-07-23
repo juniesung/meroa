@@ -25,7 +25,7 @@ helps us help you faster.
 
 **How do I delete my account?**
 Open Meroa → **You** tab → **Delete account**. Deletion is immediate and permanent. You can
-also delete your account on the web at [WEB DELETION URL] — no app required.
+also delete your account on the web at https://meroa-production.up.railway.app/account/delete — no app required.
 
 **How do I export my data?**
 Open Meroa → **You** tab → **Export my data**. You'll get a file containing your account
@@ -47,11 +47,11 @@ In the chat, open the options on the AI message you want to report and choose **
 response**. You can add an optional reason. We review reports to improve the service.
 
 **How is my data used?**
-See our [Privacy Policy]([PRIVACY URL]). In short: your messages are sent to a third-party
+See our [Privacy Policy](https://meroa-production.up.railway.app/privacy). In short: your messages are sent to a third-party
 AI service to generate replies (with your consent), and we don't sell your data or track
 you across other apps.
 
 ## Legal
 
-- [Privacy Policy]([PRIVACY URL])
-- [Terms of Use]([TERMS URL])
+- [Privacy Policy](https://meroa-production.up.railway.app/privacy)
+- [Terms of Use](https://meroa-production.up.railway.app/terms)
