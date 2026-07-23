@@ -4,12 +4,23 @@ import { api } from '@/lib/api/client';
 import type { ApiEntitlement, ApiUser } from '@/lib/api/types';
 
 export const meQueryKey = ['me'] as const;
+// Parent key ['profile'] is what the task/goal/chat mutations invalidate (they
+// already invalidate the sibling ['goals'] parent for the streak) so the
+// stat row + badges refresh whenever a real record changes.
+export const profileOverviewQueryKey = ['profile', 'overview'] as const;
 
 export function useMe(options?: { enabled?: boolean }) {
   return useQuery({
     queryKey: meQueryKey,
     queryFn: () => api.me(),
     enabled: options?.enabled,
+  });
+}
+
+export function useProfileOverview() {
+  return useQuery({
+    queryKey: profileOverviewQueryKey,
+    queryFn: () => api.getProfileOverview(),
   });
 }
 

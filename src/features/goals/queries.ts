@@ -171,6 +171,7 @@ export function useRestoreGoal() {
       // math and the day ring read off live task rows.
       queryClient.invalidateQueries({ queryKey: tasksQueryKey });
       queryClient.invalidateQueries({ queryKey: goalConsistencyQueryKey });
+      queryClient.invalidateQueries({ queryKey: ['profile'] });
     },
   });
 }

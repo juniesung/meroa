@@ -66,6 +66,7 @@ function useTaskMutation<TVars>(mutationFn: (vars: TVars) => Promise<{ task: Api
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: tasksQueryKey });
       queryClient.invalidateQueries({ queryKey: ['goals'] });
+      queryClient.invalidateQueries({ queryKey: ['profile'] });
     },
   });
 }
@@ -126,6 +127,7 @@ export function useDeleteTask() {
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: tasksQueryKey });
       queryClient.invalidateQueries({ queryKey: ['goals'] });
+      queryClient.invalidateQueries({ queryKey: ['profile'] });
     },
   });
 }
@@ -150,6 +152,7 @@ export function useBulkDeleteTasks() {
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: tasksQueryKey });
       queryClient.invalidateQueries({ queryKey: ['goals'] });
+      queryClient.invalidateQueries({ queryKey: ['profile'] });
     },
   });
 }
@@ -163,6 +166,7 @@ export function useUndoLastTaskAction() {
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: tasksQueryKey });
       queryClient.invalidateQueries({ queryKey: ['goals'] });
+      queryClient.invalidateQueries({ queryKey: ['profile'] });
     },
   });
 }

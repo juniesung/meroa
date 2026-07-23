@@ -319,6 +319,39 @@ export type ApiGoalConsistency = {
   calendar: DayBucket[];
 };
 
+// The You-tab profile surface (GET /profile/overview). Every number here is a
+// real count over non-reverted records — the server never fabricates. Streak
+// is NOT here (fetched via getGoalConsistency, reused unchanged).
+export type ApiAchievementKey = 'tasks_completed' | 'streak' | 'goals_started' | 'goals_finished';
+
+export type ApiAchievementView = {
+  key: ApiAchievementKey;
+  unit: string;
+  count: number;
+  earnedTier: number | null;
+  earnedLabel: string | null;
+  earnedAt: string | null;
+  nextThreshold: number | null;
+  nextLabel: string | null;
+  progressToNext: number | null; // 0..1
+};
+
+export type ApiProfileOverview = {
+  memberSince: string;
+  stats: {
+    tasksCompleted: number;
+    goalsActive: number;
+    goalsFinished: number;
+    activeDays: number;
+  };
+  achievements: ApiAchievementView[];
+  month: {
+    tasksCompleted: number;
+    goalsAdvanced: number;
+    topHabit: string | null;
+  };
+};
+
 // The Goals-tab "+" sheet's direct-create body (docs/goal-manual-editing-
 // plan.md §1) — mirrors server/src/lib/goals/schema.ts's
 // manualCreateGoalSchema exactly, the same cross-field rules as chat's

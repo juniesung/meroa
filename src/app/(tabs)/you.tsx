@@ -1,298 +1,240 @@
-import { File, Paths } from 'expo-file-system';
 import { router } from 'expo-router';
-import * as Sharing from 'expo-sharing';
-import * as WebBrowser from 'expo-web-browser';
-import { useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { AchievementBadge } from '@/components/AchievementBadge';
+import { Heatmap } from '@/components/Heatmap';
+import { Icon } from '@/components/Icon';
 import { MeroaMark } from '@/components/MeroaMark';
-import { Row } from '@/components/Row';
+import { SkeletonBlock } from '@/components/Skeleton';
 import { theme } from '@/constants/theme';
-import { haptics } from '@/lib/haptics';
-import { consentGranted } from '@/features/profile/ai-consent';
-import { useMe, useUpdatePrefs } from '@/features/profile/queries';
-import { api } from '@/lib/api/client';
-import { privacyUrl, supportUrl, termsUrl } from '@/lib/legal-urls';
-import { QuietHoursSheet } from '@/features/profile/QuietHoursSheet';
-import { formatHhmmDisplay } from '@/features/tasks/task-form-helpers';
-import { readQuietHours } from '@/features/profile/quiet-hours';
-import { VibePickerSheet } from '@/features/profile/VibePickerSheet';
-import { vibeLabel } from '@/features/profile/vibes';
+import { AnimatedPressable, useTapFeedback } from '@/components/AnimatedPressable';
+import { useGoalConsistency } from '@/features/goals/queries';
+import { useMe, useProfileOverview } from '@/features/profile/queries';
 import { useTabBarHeight } from '@/hooks/use-tab-bar-inset';
-import { useAuth } from '@/lib/auth/AuthProvider';
-import { requestNotificationPermission } from '@/lib/notifications';
-import { registerForPushNotifications } from '@/lib/push';
 
+function memberSinceLabel(iso: string): string {
+  const d = new Date(iso);
+  return `Member since ${d.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}`;
+}
+
+// The You tab: a profile/progress/identity surface (CLAUDE.md §5 + the
+// retention research in memory). Everything shown is the user's OWN real
+// recorded progress — never fabricated, never framed as a bond with Meroa.
+// App settings live behind the gear, top-right.
 export default function YouScreen() {
   const tabBarHeight = useTabBarHeight();
-  const { data } = useMe();
-  const { signOut } = useAuth();
-  const updatePrefs = useUpdatePrefs();
-  const [vibeSheetOpen, setVibeSheetOpen] = useState(false);
-  const [quietHoursSheetOpen, setQuietHoursSheetOpen] = useState(false);
-  const [deletingAccount, setDeletingAccount] = useState(false);
-  const [exporting, setExporting] = useState(false);
+  const { data: me } = useMe();
+  const overview = useProfileOverview();
+  const consistency = useGoalConsistency();
+  const gearFeedback = useTapFeedback();
 
-  const communicationStyle = vibeLabel(data?.user.prefs.communicationStyle);
-  const proactiveCheckins = data?.user.prefs.proactiveCheckins === true;
-  const quietHours = readQuietHours(data?.user.prefs);
-  const quietHoursHint = quietHours.enabled
-    ? `${formatHhmmDisplay(quietHours.start)}–${formatHhmmDisplay(quietHours.end)}`
-    : 'Off';
+  const loading = overview.isLoading || consistency.isLoading;
+  const streak = consistency.data;
+  const o = overview.data;
 
-  const handleToggleCheckins = async (next: boolean) => {
-    haptics.select();
-    // Ask the OS only when turning check-ins on (CLAUDE.md §2) — the sync
-    // logic separately checks actual permission before scheduling, so a
-    // denial here doesn't need to be reflected back into the toggle.
-    if (next) {
-      const granted = await requestNotificationPermission();
-      // Register this device for server-side re-engagement pushes right away on
-      // opt-in (no-op off a dev build); the tabs layout also re-registers on
-      // every foreground.
-      if (granted) void registerForPushNotifications();
-    }
-    updatePrefs.mutate({ proactiveCheckins: next });
-  };
+  const displayName = me?.user.displayName ?? me?.user.phoneE164 ?? '—';
 
-  const aiSharingOn = consentGranted(data?.user.prefs);
-  const handleToggleAiSharing = (next: boolean) => {
-    haptics.select();
-    if (next) {
-      updatePrefs.mutate({ aiConsent: { granted: true } });
-      return;
-    }
-    // Revoking blocks chat entirely (the server refuses every send without
-    // consent, and the nav guard re-shows the consent screen) — so confirm the
-    // consequence rather than silently breaking chat on a stray tap.
-    Alert.alert(
-      'Turn off AI data sharing?',
-      "Meroa's chat sends your messages to a third-party AI service to reply. Turn this off and chat stops working until you turn it back on. Nothing you've saved is deleted.",
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Turn off',
-          style: 'destructive',
-          onPress: () => updatePrefs.mutate({ aiConsent: { granted: false } }),
-        },
-      ],
-    );
-  };
-
-  const handleExport = async () => {
-    if (exporting) return;
-    setExporting(true);
-    try {
-      const data = await api.exportData();
-      // Cache dir — this is a transient handoff file for the share sheet, not
-      // something to keep. Overwrite any prior export.
-      const file = new File(Paths.cache, 'meroa-export.json');
-      if (file.exists) file.delete();
-      file.create();
-      file.write(JSON.stringify(data, null, 2));
-      if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(file.uri, { mimeType: 'application/json', UTI: 'public.json' });
-      } else {
-        Alert.alert('Export ready', "Your data was saved, but sharing isn't available on this device.");
-      }
-    } catch {
-      Alert.alert('Export failed', "Couldn't export your data. Please try again.");
-    } finally {
-      setExporting(false);
-    }
-  };
-
-  const doDeleteAccount = async () => {
-    setDeletingAccount(true);
-    try {
-      await api.deleteAccount();
-    } catch {
-      setDeletingAccount(false);
-      Alert.alert('Something went wrong', "We couldn't delete your account. Please try again.");
-      return;
-    }
-    // The account is gone server-side; run the normal terminal path (logout
-    // fails silently — its session is already cascaded away — then clears
-    // tokens, logs out of RevenueCat, and routes to the auth stack).
-    await signOut();
-  };
-
-  const handleDeleteAccount = () => {
-    if (deletingAccount) return;
-    // Two-step confirm: destructive and irreversible, so a single stray tap
-    // must not do it. The copy is explicit that billing is separate (deleting
-    // the account does NOT cancel the store subscription — only the store can).
-    Alert.alert(
-      'Delete account?',
-      "This permanently deletes your account and everything in it — your messages, tasks, goals, and memories. It can't be undone.\n\nDeleting your account does not cancel your subscription. To stop billing, cancel it in the App Store.",
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: () =>
-            Alert.alert(
-              'Are you absolutely sure?',
-              'Your data will be erased immediately and cannot be recovered.',
-              [
-                { text: 'Cancel', style: 'cancel' },
-                { text: 'Delete forever', style: 'destructive', onPress: doDeleteAccount },
-              ],
-            ),
-        },
-      ],
-    );
+  const refreshing = overview.isRefetching || consistency.isRefetching;
+  const onRefresh = () => {
+    void overview.refetch();
+    void consistency.refetch();
   };
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
+      <View style={styles.topBar}>
+        <View style={styles.gearSpacer} />
+        <AnimatedPressable
+          onPress={() => router.push('/settings')}
+          onPressIn={gearFeedback.onPressIn}
+          onPressOut={gearFeedback.onPressOut}
+          style={[styles.gearButton, gearFeedback.animatedStyle]}
+          hitSlop={8}
+        >
+          {/* No dedicated gear glyph in the set — the settings entry uses the
+              same understated affordance as the rest of the app. */}
+          <Icon name="ellipsis" size={20} color={theme.dim} stroke={2} />
+        </AnimatedPressable>
+      </View>
+
       <ScrollView
         style={{ flex: 1 }}
-        contentContainerStyle={{ padding: 20, paddingBottom: tabBarHeight + 40 }}
+        contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: tabBarHeight + 40 }}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.dim} />
+        }
       >
+        {/* Hero — identity, about the user */}
         <View style={styles.hero}>
           <MeroaMark size={64} glow />
-          <Text style={styles.name}>{data?.user.displayName ?? data?.user.phoneE164 ?? '—'}</Text>
-          {data?.user.displayName ? <Text style={styles.email}>{data.user.phoneE164}</Text> : null}
+          <Text style={styles.name}>{displayName}</Text>
+          {me?.user.displayName ? <Text style={styles.sub}>{me.user.phoneE164}</Text> : null}
           <View style={styles.pill}>
-            <Text style={styles.pillText}>
-              {data?.entitlement.plan === 'plus' ? 'Member' : 'Meroa'}
-            </Text>
+            <Text style={styles.pillText}>{me?.entitlement.plan === 'plus' ? 'Member' : 'Meroa'}</Text>
           </View>
+          {o ? <Text style={styles.memberSince}>{memberSinceLabel(o.memberSince)}</Text> : null}
         </View>
 
-        <Section title="PERSONALITY">
-          <Row
-            icon="sparkle"
-            label="Communication style"
-            right={<Text style={styles.hint}>{communicationStyle}</Text>}
-            onPress={() => setVibeSheetOpen(true)}
-          />
-          <Row icon="book" label="Memory" onPress={() => router.push('/memories')} />
-        </Section>
+        {loading ? (
+          <View style={{ gap: 12, marginTop: 24 }}>
+            <SkeletonBlock height={120} radius={18} />
+            <SkeletonBlock height={90} radius={18} />
+            <SkeletonBlock height={160} radius={18} />
+          </View>
+        ) : (
+          <>
+            {/* Streak — the user's own consistency, never "days with Meroa" */}
+            {streak ? (
+              <View style={styles.card}>
+                <View style={styles.streakHead}>
+                  <Text style={styles.streakNum}>{streak.current}</Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.streakLabel}>
+                      {streak.current === 1 ? 'day streak' : 'day streak'}
+                    </Text>
+                    {/* label is the same singular/plural by design — "1 day streak" / "5 day streak" */}
+                    <Text style={styles.streakSub}>
+                      {streak.current > 0
+                        ? 'You showed up. Keep it going at your own pace.'
+                        : streak.longest > 0
+                          ? `Longest streak: ${streak.longest} days. It restarts the next day you finish what's due.`
+                          : 'Finish what’s due in a day and a streak starts — no pressure.'}
+                    </Text>
+                  </View>
+                </View>
+                {streak.calendar.length > 0 ? (
+                  <View style={styles.heatmapWrap}>
+                    <Heatmap calendar={streak.calendar} />
+                  </View>
+                ) : null}
+              </View>
+            ) : null}
 
-        <Section title="PREFERENCES">
-          <Row
-            icon="bell"
-            label="Proactive check-ins"
-            right={
-              <Switch
-                value={proactiveCheckins}
-                onValueChange={handleToggleCheckins}
-                trackColor={{ true: theme.blue, false: theme.border }}
-                thumbColor="#fff"
-              />
-            }
-          />
-          <Row
-            icon="clock"
-            label="Quiet hours"
-            right={<Text style={styles.hint}>{quietHoursHint}</Text>}
-            onPress={() => setQuietHoursSheetOpen(true)}
-          />
-          <Row
-            icon="moon"
-            label="Dark appearance"
-            right={<Text style={styles.hint}>Always</Text>}
-          />
-          <Row
-            icon="lock"
-            label="AI data sharing"
-            right={
-              <Switch
-                value={aiSharingOn}
-                onValueChange={handleToggleAiSharing}
-                trackColor={{ true: theme.blue, false: theme.border }}
-                thumbColor="#fff"
-              />
-            }
-          />
-        </Section>
+            {/* Stat row — real counts, the same numbers badges are earned from */}
+            {o ? (
+              <View style={styles.statRow}>
+                <Stat value={o.stats.tasksCompleted} label="tasks done" />
+                <Stat value={o.stats.goalsActive} label="goals active" />
+                <Stat value={o.stats.goalsFinished} label="finished" />
+                <Stat value={o.stats.activeDays} label="active days" />
+              </View>
+            ) : null}
 
-        <Section title="ACCOUNT">
-          <Row
-            icon="crown"
-            label={data?.entitlement.plan === 'plus' ? 'Manage subscription' : 'Subscribe to Meroa'}
-            onPress={() => router.push('/paywall')}
-          />
-          <Row
-            icon="book"
-            label={exporting ? 'Preparing export…' : 'Export my data'}
-            onPress={handleExport}
-          />
-          <Row icon="logout" label="Sign out" danger onPress={() => signOut()} />
-          <Row
-            icon="lock"
-            label={deletingAccount ? 'Deleting…' : 'Delete account'}
-            danger
-            onPress={handleDeleteAccount}
-          />
-        </Section>
+            {/* Achievements — earned + locked teasers */}
+            {o ? (
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>ACHIEVEMENTS</Text>
+                <View style={styles.badgeGrid}>
+                  {o.achievements.map((b) => (
+                    <AchievementBadge key={b.key} badge={b} />
+                  ))}
+                </View>
+              </View>
+            ) : null}
 
-        <Section title="ABOUT">
-          <Row
-            icon="lock"
-            label="Privacy Policy"
-            onPress={() => WebBrowser.openBrowserAsync(privacyUrl())}
-          />
-          <Row
-            icon="book"
-            label="Terms of Use"
-            onPress={() => WebBrowser.openBrowserAsync(termsUrl())}
-          />
-          <Row
-            icon="chat"
-            label="Support"
-            onPress={() => WebBrowser.openBrowserAsync(supportUrl())}
-          />
-        </Section>
-
-        <Text style={styles.footer}>Meroa · v1.0.0</Text>
+            {/* This month — honest recap, only when there's something to show */}
+            {o && (o.month.tasksCompleted > 0 || o.month.goalsAdvanced > 0 || o.month.topHabit) ? (
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>THIS MONTH</Text>
+                <View style={styles.card}>
+                  <Text style={styles.monthLine}>
+                    <Text style={styles.monthNum}>{o.month.tasksCompleted}</Text>{' '}
+                    {o.month.tasksCompleted === 1 ? 'task' : 'tasks'} completed
+                    {o.month.goalsAdvanced > 0 ? (
+                      <>
+                        {' · '}
+                        <Text style={styles.monthNum}>{o.month.goalsAdvanced}</Text> goal
+                        {o.month.goalsAdvanced === 1 ? '' : 's'} advanced
+                      </>
+                    ) : null}
+                  </Text>
+                  {o.month.topHabit ? (
+                    <Text style={styles.monthSub}>
+                      Your most-kept habit this month: {o.month.topHabit}
+                    </Text>
+                  ) : null}
+                </View>
+              </View>
+            ) : null}
+          </>
+        )}
       </ScrollView>
-      <VibePickerSheet visible={vibeSheetOpen} onClose={() => setVibeSheetOpen(false)} />
-      <QuietHoursSheet visible={quietHoursSheetOpen} onClose={() => setQuietHoursSheetOpen(false)} />
     </SafeAreaView>
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Stat({ value, label }: { value: number; label: string }) {
   return (
-    <View style={{ marginTop: 28 }}>
-      <Text style={styles.sectionTitle}>{title}</Text>
-      <View style={styles.sectionBody}>{children}</View>
+    <View style={styles.statTile}>
+      <Text style={styles.statValue}>{value}</Text>
+      <Text style={styles.statLabel} numberOfLines={1}>
+        {label}
+      </Text>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: theme.bg },
-  hero: { alignItems: 'center', gap: 8, marginTop: 12 },
+  topBar: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 6 },
+  gearSpacer: { flex: 1 },
+  gearButton: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+
+  hero: { alignItems: 'center', gap: 6, marginTop: 4 },
   name: { color: theme.text, fontSize: 22, fontWeight: '700', marginTop: 8 },
-  email: { color: theme.dim, fontSize: 13 },
+  sub: { color: theme.dim, fontSize: 13 },
   pill: {
-    marginTop: 6,
+    marginTop: 4,
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 999,
     backgroundColor: 'rgba(10,132,255,0.14)',
   },
   pillText: { color: theme.blue, fontSize: 12, fontWeight: '600' },
+  memberSince: { color: theme.faint, fontSize: 12, marginTop: 2 },
+
+  card: {
+    backgroundColor: theme.card,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: theme.border,
+    padding: 16,
+    marginTop: 16,
+    gap: 12,
+  },
+  streakHead: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  streakNum: { color: theme.blue, fontSize: 44, fontWeight: '800', minWidth: 56, textAlign: 'center' },
+  streakLabel: { color: theme.text, fontSize: 15, fontWeight: '700' },
+  streakSub: { color: theme.dim, fontSize: 12.5, marginTop: 2, lineHeight: 17 },
+  heatmapWrap: { alignItems: 'center', borderTopWidth: 1, borderTopColor: theme.border, paddingTop: 14 },
+
+  statRow: { flexDirection: 'row', gap: 8, marginTop: 16 },
+  statTile: {
+    flex: 1,
+    backgroundColor: theme.card,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: theme.border,
+    paddingVertical: 14,
+    alignItems: 'center',
+    gap: 3,
+  },
+  statValue: { color: theme.text, fontSize: 20, fontWeight: '800' },
+  statLabel: { color: theme.faint, fontSize: 11 },
+
+  section: { marginTop: 28 },
   sectionTitle: {
     color: theme.dim,
     fontSize: 11,
     fontWeight: '700',
     letterSpacing: 1.2,
-    marginBottom: 8,
+    marginBottom: 10,
     paddingHorizontal: 4,
   },
-  sectionBody: {
-    backgroundColor: theme.card,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: theme.border,
-    overflow: 'hidden',
-  },
-  hint: { color: theme.dim, fontSize: 14, marginRight: 6 },
-  footer: { color: theme.faint, fontSize: 11, textAlign: 'center', marginTop: 32 },
+  badgeGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, justifyContent: 'space-between' },
+
+  monthLine: { color: theme.text, fontSize: 15 },
+  monthNum: { color: theme.text, fontWeight: '800' },
+  monthSub: { color: theme.dim, fontSize: 13 },
 });

@@ -147,6 +147,7 @@ function RootNavigator() {
           <Stack.Screen name="goal/[id]" options={{ presentation: 'card' }} />
           <Stack.Screen name="archived-goals" options={{ presentation: 'card' }} />
           <Stack.Screen name="memories" options={{ presentation: 'card' }} />
+          <Stack.Screen name="settings" options={{ presentation: 'card' }} />
         </Stack.Protected>
         <Stack.Protected guard={status === 'signedIn' && !needsOnboarding}>
           {/* Declared once, always reachable while signed in — 'card' with no

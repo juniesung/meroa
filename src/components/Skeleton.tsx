@@ -17,7 +17,7 @@ import { useReduceMotion } from '@/lib/motion';
  * a loading screen reads as "the content, arriving" rather than a lone spinner.
  * Reduce-motion holds it at a flat dim instead of pulsing.
  */
-function SkeletonBlock({
+export function SkeletonBlock({
   width = '100%',
   height,
   radius = radii.card,

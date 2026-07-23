@@ -139,6 +139,9 @@ export function useSendMessage() {
             // list, every detail/entries query, and the consistency map.
             queryClient.invalidateQueries({ queryKey: tasksQueryKey });
             queryClient.invalidateQueries({ queryKey: goalsQueryKey });
+            // Profile stat row + badges are derived from the same records this
+            // action just wrote (the ['profile'] prefix covers the overview).
+            queryClient.invalidateQueries({ queryKey: ['profile'] });
           } else if (event.type === 'stream_end') {
             // The last segment always leaves one trailing, never-filled
             // placeholder behind (created in anticipation of a segment that
