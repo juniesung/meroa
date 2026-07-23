@@ -3,6 +3,7 @@ import { router } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -773,6 +774,21 @@ export default function ChatScreen() {
   const ellipsisFeedback = useTapFeedback();
   const sendFeedback = useTapFeedback(0.9);
   const tabBarHeight = useTabBarHeight();
+
+  // The composer normally pads its bottom by the translucent tab bar's height
+  // so it floats clear of it. But when the keyboard is up it covers the tab
+  // bar, so that same padding becomes dead space that pushes the input far
+  // above the keyboard's top. Collapse it to a small gap while typing.
+  const [keyboardShown, setKeyboardShown] = useState(false);
+  useEffect(() => {
+    const show = Keyboard.addListener('keyboardWillShow', () => setKeyboardShown(true));
+    const hide = Keyboard.addListener('keyboardWillHide', () => setKeyboardShown(false));
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
+
   // Mascot-lite reacts here too, not just the Goals tab header
   // (docs/goals-redesign-plan.md §1) — same mood derivation as goals.tsx.
   const { data: consistency } = useGoalConsistency();
@@ -912,7 +928,6 @@ export default function ChatScreen() {
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={80}
       >
         {isLoading ? (
           <ChatSkeleton />
@@ -944,7 +959,7 @@ export default function ChatScreen() {
           </ScrollView>
         )}
 
-        <View style={[styles.composer, { paddingBottom: tabBarHeight + 16 }]}>
+        <View style={[styles.composer, { paddingBottom: keyboardShown ? 16 : tabBarHeight + 16 }]}>
           <TextInput
             value={draft}
             onChangeText={setDraft}

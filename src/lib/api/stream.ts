@@ -2,6 +2,7 @@ import { fetch as expoFetch } from 'expo/fetch';
 
 import {
   ApiError,
+  getApiBaseUrl,
   notifySessionExpired,
   refreshAccessToken,
   SessionExpiredError,
@@ -10,10 +11,12 @@ import { getCachedAccessToken, loadTokens } from '@/lib/auth/tokenStore';
 
 import type { ApiMessage, ApiTask, ApiGoal, GoalPreview } from './types';
 
-const BASE_URL = process.env.EXPO_PUBLIC_API_URL;
-if (!BASE_URL) {
-  throw new Error('EXPO_PUBLIC_API_URL is not set — check your .env file.');
-}
+// Must be the RESOLVED origin, not the raw env var: on a physical device
+// `localhost` is the phone, so client.ts swaps in the Metro host (the Mac's
+// LAN IP). Reading process.env directly here sent the chat stream to the
+// phone's own localhost — every other call worked because they go through
+// client.ts, and the simulator hid it (there localhost genuinely is the Mac).
+const BASE_URL = getApiBaseUrl();
 
 export type ChatStreamEvent =
   | { type: 'user_message'; message: ApiMessage }
