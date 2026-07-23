@@ -52,9 +52,7 @@ export default function YouScreen() {
           style={[styles.gearButton, gearFeedback.animatedStyle]}
           hitSlop={8}
         >
-          {/* No dedicated gear glyph in the set — the settings entry uses the
-              same understated affordance as the rest of the app. */}
-          <Icon name="ellipsis" size={20} color={theme.dim} stroke={2} />
+          <Icon name="gear" size={22} color={theme.dim} stroke={1.8} />
         </AnimatedPressable>
       </View>
 
