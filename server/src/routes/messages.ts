@@ -9,6 +9,8 @@ import { db } from '../db/client.ts';
 import { conversations, messageReports, messages, records, users } from '../db/schema.ts';
 import { streamChatReply, type ChatHistoryMessage } from '../lib/ai/chat.ts';
 import { maybeExtractMemories } from '../lib/ai/memory-extractor.ts';
+import { evaluateAchievements, markAnnounced, mostSignificant } from '../lib/achievements/evaluate.ts';
+import { congratsLine } from '../lib/achievements/copy.ts';
 import { pickTaskCreatedQuip } from '../lib/ai/quips.ts';
 import { buildRecentChangesFeed, renderUndoTarget } from '../lib/ai/recent-changes.ts';
 import { hasValidAiConsent } from '../lib/consent.ts';
@@ -690,6 +692,37 @@ messageRoutes.post('/', rateLimit({ windowMs: 60_000, max: 20 }), zValidator('js
             data: JSON.stringify({ message: assistantMessage, memory: event.memory }),
           });
         } else if (event.type === 'stream_end') {
+          // Badge congrats — only when this turn actually mutated something
+          // (a preview/pure-conversation turn can't cross a threshold, so we
+          // skip the count queries there). evaluateAchievements is idempotent
+          // and returns ONLY tiers newly crossed this turn; the copy is
+          // server-templated from the real number (never a model call, so it
+          // can't fabricate — the same discipline as the create_task quip
+          // above). One congrats per turn, the most significant. Marked
+          // announced immediately so the proactive tick never repeats it.
+          if (turnHadAction) {
+            try {
+              const earned = await evaluateAchievements(userId, userContext.timezone, db);
+              const top = mostSignificant(earned);
+              if (top) {
+                const [badgeMessage] = await db
+                  .insert(messages)
+                  .values({
+                    conversationId: conversation.id,
+                    role: 'assistant',
+                    content: congratsLine(top.key, top.tier),
+                    meta: { actionAck: true },
+                  })
+                  .returning();
+                await stream.writeSSE({ event: 'segment', data: JSON.stringify({ message: badgeMessage }) });
+                await markAnnounced(userId, earned, db);
+              }
+            } catch (err) {
+              // A congrats is a nicety — never let it break the turn's close.
+              Sentry.captureException(err);
+              logger.error({ err, userId }, 'achievement congrats failed');
+            }
+          }
           await stream.writeSSE({ event: 'stream_end', data: JSON.stringify({}) });
           // Fire-and-forget, deliberately never awaited — the reply has
           // already fully reached the user by this point, so nothing about

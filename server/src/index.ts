@@ -11,6 +11,7 @@ import { bootstrapRoutes } from './routes/bootstrap.ts';
 import { internalRoutes } from './routes/internal.ts';
 import { legalRoutes } from './routes/legal.ts';
 import { meRoutes } from './routes/me.ts';
+import { profileRoutes } from './routes/profile.ts';
 import { memoryRoutes } from './routes/memories.ts';
 import { messageRoutes } from './routes/messages.ts';
 import { taskRoutes } from './routes/tasks.ts';
@@ -64,6 +65,7 @@ app.onError((err, c) => {
 
 app.route('/auth', authRoutes);
 app.route('/me', meRoutes);
+app.route('/profile', profileRoutes);
 app.route('/bootstrap', bootstrapRoutes);
 app.route('/conversations/current/messages', messageRoutes);
 app.route('/tasks', taskRoutes);

@@ -387,6 +387,42 @@ export const notificationsLog = pgTable(
   ],
 );
 
+// --- achievements ---------------------------------------------------------
+// Auto-earned badges derived from real recorded activity (never fabricated —
+// CLAUDE.md §2). A row exists only once a tier is genuinely earned; it is the
+// single source of truth for two things a pure compute-on-read couldn't give
+// us: (1) `earnedAt`, so the profile can honestly say when a badge was reached,
+// and (2) `announcedAt`, the guard that stops the two congrats-delivery paths
+// (in-chat templated segment + the proactive tick) from ever double-announcing
+// the same unlock. `tier` is the threshold reached (e.g. 50 for "50 tasks
+// done"); the label/icon for a (key, tier) live in code (lib/achievements/
+// catalog.ts), never denormalized here, so copy can change without a migration.
+// A streak/goals_finished tier stays earned forever even if the live count
+// later drops — the row is never deleted, mirroring records' append-only rule.
+export const achievements = pgTable(
+  'achievements',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    key: text('key').notNull(),
+    tier: integer('tier').notNull(),
+    earnedAt: timestamp('earned_at', { withTimezone: true }).notNull().defaultNow(),
+    announcedAt: timestamp('announced_at', { withTimezone: true }),
+  },
+  (t) => [
+    index('achievements_user_idx').on(t.userId),
+    // A tier is earned once, forever — makes evaluateAchievements' insert
+    // idempotent under concurrent evaluation of the same crossing.
+    uniqueIndex('achievements_user_key_tier_unique').on(t.userId, t.key, t.tier),
+    check(
+      'achievements_key_check',
+      sql`${t.key} in ('tasks_completed','streak','goals_started','goals_finished')`,
+    ),
+  ],
+);
+
 // --- relations ---------------------------------------------------------
 
 export const usersRelations = relations(users, ({ many, one }) => ({
@@ -398,6 +434,7 @@ export const usersRelations = relations(users, ({ many, one }) => ({
   memories: many(memories),
   pushTokens: many(pushTokens),
   notificationsLog: many(notificationsLog),
+  achievements: many(achievements),
   entitlement: one(entitlements, {
     fields: [users.id],
     references: [entitlements.userId],
@@ -479,4 +516,8 @@ export const pushTokensRelations = relations(pushTokens, ({ one }) => ({
 
 export const notificationsLogRelations = relations(notificationsLog, ({ one }) => ({
   user: one(users, { fields: [notificationsLog.userId], references: [users.id] }),
+}));
+
+export const achievementsRelations = relations(achievements, ({ one }) => ({
+  user: one(users, { fields: [achievements.userId], references: [users.id] }),
 }));
