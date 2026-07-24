@@ -15,7 +15,6 @@ import { Bubble } from '@/components/Bubble';
 import { Icon } from '@/components/Icon';
 import { MeroaMark } from '@/components/MeroaMark';
 import { PrimaryButton } from '@/components/PrimaryButton';
-import { Progress } from '@/components/Progress';
 import { Ring } from '@/components/Ring';
 import { radii, theme } from '@/constants/theme';
 import { GoalTypeOption } from '@/components/GoalTypeOption';
@@ -263,9 +262,12 @@ export default function OnboardingScreen() {
           {step === 0 && (
             <StepFrame>
               <BigStat value="42%" />
-              <Text style={styles.title}>Written-down goals get reached.</Text>
-              <Text style={styles.ref}>42% more likely · Matthews, 2015</Text>
-              <Text style={styles.subtitle}>I&apos;m Meroa. Let&apos;s write yours down.</Text>
+              <Text style={styles.statLine}>more likely to reach a goal when you write it down.</Text>
+              <Text style={styles.subtitle}>
+                That&apos;s the whole idea behind me. I&apos;m Meroa — tell me what you actually
+                want, and I&apos;ll help you get there.
+              </Text>
+              <Text style={styles.ref}>Matthews, 2015 · n=267</Text>
               <PrimaryButton label="Let's do it" onPress={() => setStep(1)} style={styles.cta} />
             </StepFrame>
           )}
@@ -301,10 +303,15 @@ export default function OnboardingScreen() {
           {step === 2 && (
             <StepFrame>
               <Text style={styles.title}>Talk to me like a friend.</Text>
-              <Text style={styles.subtitle}>No forms. Just tell me what&apos;s going on.</Text>
+              <Text style={styles.subtitle}>
+                No forms, no menus — just tell me what&apos;s going on and I&apos;ll keep track.
+              </Text>
               <ChatShowcase />
               <BigStat value="76% vs 43%" small />
-              <Text style={styles.ref}>Reaching a goal, with check-ins vs. alone · Matthews, 2015</Text>
+              <Text style={styles.statLine}>
+                reach a goal with someone checking in on you, versus going it alone.
+              </Text>
+              <Text style={styles.ref}>Matthews, 2015</Text>
               <PrimaryButton label="Keep going" onPress={() => setStep(3)} style={styles.cta} />
             </StepFrame>
           )}
@@ -312,9 +319,13 @@ export default function OnboardingScreen() {
           {step === 3 && (
             <StepFrame>
               <BigStat value="94 studies" small />
-              <Text style={styles.title}>I turn &quot;I should&quot; into a next step.</Text>
-              <Text style={styles.ref}>Planning one step beats intending · Gollwitzer &amp; Sheeran, 2006</Text>
+              <Text style={styles.statLine}>found that planning one concrete step beats just meaning to.</Text>
+              <Text style={styles.subtitle}>
+                So I turn a vague &quot;I should&quot; into a real, specific next step you&apos;ll
+                actually do.
+              </Text>
               <TaskShowcase />
+              <Text style={styles.ref}>Gollwitzer &amp; Sheeran, 2006</Text>
               <PrimaryButton label="Keep going" onPress={() => setStep(4)} style={styles.cta} />
             </StepFrame>
           )}
@@ -322,9 +333,13 @@ export default function OnboardingScreen() {
           {step === 4 && (
             <StepFrame>
               <BigStat value="138 studies" small />
-              <Text style={styles.title}>Watching it add up keeps you going.</Text>
-              <Text style={styles.ref}>~20,000 people · Harkin et al., 2016</Text>
+              <Text style={styles.statLine}>show that tracking your progress makes you more likely to reach the goal.</Text>
+              <Text style={styles.subtitle}>
+                Even more when it&apos;s actually recorded, not just felt — so I keep the score
+                for you.
+              </Text>
               <GoalShowcase />
+              <Text style={styles.ref}>Harkin et al., 2016 · ~20,000 people</Text>
               <PrimaryButton label="Keep going" onPress={() => setStep(5)} style={styles.cta} />
             </StepFrame>
           )}
@@ -341,10 +356,13 @@ export default function OnboardingScreen() {
           {step === 6 && (
             <StepFrame>
               <BigStat value="66 days" />
-              <Text style={styles.title}>Consistency beats intensity.</Text>
-              <Text style={styles.ref}>Median to a real habit, not 21 · Lally et al., 2010</Text>
-              <Text style={styles.subtitle}>Miss a day, no problem. Show up most days.</Text>
+              <Text style={styles.statLine}>is how long a habit really takes to stick — not 21.</Text>
+              <Text style={styles.subtitle}>
+                Missing one day doesn&apos;t break it. Showing up most days is what counts, and
+                that&apos;s exactly what I&apos;m here for.
+              </Text>
               <ConsistencyShowcase />
+              <Text style={styles.ref}>Lally et al., 2010</Text>
               <PrimaryButton label="I'm in" onPress={() => setStep(7)} style={styles.cta} />
             </StepFrame>
           )}
@@ -804,7 +822,6 @@ function ConsistencyShowcase() {
           <View key={i} style={[showcase.dayPill, on && showcase.dayPillOn]} />
         ))}
       </View>
-      <Progress value={86} />
     </View>
   );
 }
@@ -875,13 +892,24 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     paddingHorizontal: 8,
   },
+  // The line that says what the big number actually MEANS — prominent white,
+  // right under the stat, so the takeaway reads before the gray supporting copy.
+  statLine: {
+    color: theme.text,
+    fontSize: 17,
+    fontWeight: '600',
+    lineHeight: 23,
+    textAlign: 'center',
+    paddingHorizontal: 8,
+    marginTop: 6,
+  },
   // Compact source citation under a big stat — the study is referenced, not
   // explained (keeps the flow stat-forward and un-wordy).
   ref: {
     color: theme.faint,
     fontSize: 12,
     textAlign: 'center',
-    marginTop: 8,
+    marginTop: 10,
   },
   optionList: { alignSelf: 'stretch', marginTop: 16 },
   option: {
