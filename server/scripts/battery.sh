@@ -64,6 +64,13 @@ TOKEN="$(jq -r .accessToken /tmp/battery.json)"
 USER_ID="$(jq -r .userId /tmp/battery.json)"
 [[ "$TOKEN" == "null" || -z "$TOKEN" ]] && { echo "✗ could not mint a dev token" >&2; exit 1; }
 
+# Grant AI consent — the chat route refuses every send with a 403 until it's
+# recorded (Phase 6/8's compliance gate, added after this script was written).
+# Without this the whole chat-driven suite silently fails on 403 while the REST
+# section still passes. The app's own onboarding does this for a real user.
+curl -s -X PATCH "$API/me/prefs" -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" -d '{"aiConsent":{"granted":true}}' > /dev/null
+
 R=$'\033[31m'; G=$'\033[32m'; Y=$'\033[33m'; C=$'\033[36m'; M=$'\033[35m'; B=$'\033[1m'; X=$'\033[0m'
 PASS=0; FAIL=0; WEIRD=0
 CARDS=0; KIND=""; PROSE=""
