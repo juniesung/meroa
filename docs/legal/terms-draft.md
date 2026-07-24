@@ -31,7 +31,6 @@ professional.**
 ## 2. Eligibility
 
 You must be at least 13 years old and able to form a binding contract to use Meroa.
-[REVIEW: confirm the minimum age with counsel and match the store age rating.]
 
 ## 3. Your account
 
@@ -52,8 +51,9 @@ where you left off.
   end of the current period.
 - **Manage or cancel** your subscription in your App Store or Google Play account settings.
   Deleting your Meroa account does **not** cancel a store subscription.
-- Prices are shown in the app before purchase. [REVIEW: refund handling is governed by the
-  app stores' policies — confirm any additional refund terms with counsel.]
+- Prices are shown in the app before purchase. Refunds are handled by the app store you
+  purchased through under their refund policies — we do not process payments or issue
+  refunds directly.
 
 ## 5. Acceptable use
 
@@ -164,7 +164,7 @@ We may update these Terms. Continued use after an update means you accept the re
 ## 12. Governing law
 
 These Terms are governed by the laws of California, without regard to conflict-of-law
-rules. [REVIEW with counsel.]
+rules.
 
 ## 13. Contact
 

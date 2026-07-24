@@ -13,13 +13,15 @@ import { smsSender } from '../sms/sender.ts';
 // (zero new infra). The web-deletion flow reuses the exact OTP logic (lib/otp.ts)
 // and the exact hard-delete transaction (lib/account-deletion.ts) as the app.
 //
-// ── REVIEW GATE ─────────────────────────────────────────────────────────────
+// ── LEGAL COPY ──────────────────────────────────────────────────────────────
 // The /privacy, /terms, /support COPY below is drafted from the code-verified
-// data inventory (docs/data-inventory.md) and is LEGALLY BINDING once public. It
-// still contains [PLACEHOLDER] tokens and has NOT been reviewed. Do not deploy
-// this publicly until the copy is reviewed and the placeholders are filled. See
-// docs/legal/*-draft.md for the source drafts and their review banner.
-// Also: scope CORS (index.ts currently uses `*`, dev-only) before public.
+// data inventory (docs/data-inventory.md) and is LEGALLY BINDING once public.
+// Founder decisions recorded 2026-07-24: minimum age 13, governed by California
+// law, entity = Jun Kwon as an individual (revisit if an LLC is formed), refunds
+// deferred to the app stores. No placeholders or [REVIEW] markers remain. This
+// is founder-reviewed, NOT attorney-reviewed — have counsel look before a
+// large-scale launch. CORS is scoped in index.ts (production denies cross-origin
+// by default). See docs/legal/*-draft.md for the source drafts.
 // ────────────────────────────────────────────────────────────────────────────
 
 export const legalRoutes = new Hono();
@@ -162,7 +164,7 @@ const PRIVACY_BODY = `
   <p>To exercise these rights, email <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a> or use the in-app controls (data export, memory management, and account deletion). We verify requests using your account (your verified phone number), and you may use an authorized agent to submit a request on your behalf. If you live outside California, you may have other rights under your local law — contact us and we will do our best to help.</p>
 
   <h2>7. Children</h2>
-  <p>Meroa is not directed to children under 13, and we do not knowingly collect their information. [REVIEW: confirm minimum age.]</p>
+  <p>Meroa is not directed to children under 13, and we do not knowingly collect their information.</p>
 
   <h2>8. International users and data transfers</h2>
   <p>Meroa is operated from the United States, and your information is stored and processed in the <strong>United States</strong> (our servers and database are hosted in a US-West region). We do not store your information outside the United States, though some of our service providers — for example, the third-party AI service that generates replies — may process the data they receive in other locations.</p>
@@ -187,7 +189,7 @@ const TERMS_BODY = `
   <p><strong>Meroa is not a professional service.</strong> It is not a therapist, doctor, financial adviser, lawyer, or emergency service, and does not provide medical, mental-health, financial, or legal advice. <strong>If you are in crisis or have an emergency, contact your local emergency services or a qualified professional.</strong></p>
 
   <h2>2. Eligibility</h2>
-  <p>You must be at least 13 years old and able to form a binding contract. [REVIEW: confirm minimum age.]</p>
+  <p>You must be at least 13 years old and able to form a binding contract.</p>
 
   <h2>3. Your account</h2>
   <p>You sign in with your phone number and are responsible for keeping it and your account secure. Contact <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a> if your account may be compromised.</p>
@@ -199,7 +201,7 @@ const TERMS_BODY = `
     <li>Renews automatically unless cancelled at least 24 hours before the period ends.</li>
     <li><strong>Manage or cancel</strong> in your App Store or Google Play settings. Deleting your Meroa account does not cancel a store subscription.</li>
   </ul>
-  <p class="muted">[REVIEW: refunds are governed by the app stores' policies — confirm any additional terms with counsel.]</p>
+  <p class="muted">Refunds are handled by the app store you purchased through (Apple App Store or Google Play) under their refund policies — we do not process payments or issue refunds directly. To request one, contact the relevant store.</p>
 
   <h2>5. Acceptable use</h2>
   <p>You agree not to use Meroa unlawfully or abusively; not to break, overload, reverse-engineer, or gain unauthorized access to it; and not to generate or distribute content that is illegal or violates others' rights. We may suspend or terminate accounts that violate these Terms.</p>
@@ -233,7 +235,7 @@ const TERMS_BODY = `
   <p>We may update these Terms; continued use after an update means you accept the revised Terms.</p>
 
   <h2>12. Governing law</h2>
-  <p>These Terms are governed by the laws of California, without regard to conflict-of-law rules. [REVIEW with counsel.]</p>
+  <p>These Terms are governed by the laws of the State of California, without regard to conflict-of-law rules.</p>
 
   <h2>13. Contact</h2>
   <p><a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a></p>

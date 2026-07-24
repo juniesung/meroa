@@ -150,7 +150,7 @@ your behalf. If you live outside California, you may have other rights under you
 ## 7. Children
 
 Meroa is not directed to children under 13, and we do not knowingly collect information
-from them. [REVIEW: confirm the minimum age with counsel and match the store age rating.]
+from them.
 
 ## 8. International users and data transfers
 
