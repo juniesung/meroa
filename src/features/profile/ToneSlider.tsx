@@ -1,7 +1,8 @@
 import * as Haptics from 'expo-haptics';
+import { useEffect } from 'react';
 import { type LayoutChangeEvent, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import Animated, { runOnJS, useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
+import Animated, { runOnJS, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 
 import { radii, theme } from '@/constants/theme';
 import { TONE_EXAMPLE_PROMPT, TONE_MAX, TONE_MIN, TONE_STOPS, toneExample, toneLabel } from './tone';
@@ -29,12 +30,25 @@ export function ToneSlider({
   const usable = Math.max(0, trackWidth - THUMB);
   const stepW = usable / (TONE_MAX - TONE_MIN);
 
-  // The thumb's resting spot is a pure function of `value` (captured below in
-  // the worklets, refreshed every render). Only the live drag delta lives in a
-  // shared value, so nothing here is a shared value that a useEffect also owns
-  // — which is what the immutability lint rule forbids.
-  const dragX = useSharedValue(0);
-  const active = useSharedValue(false);
+  // `pos` (thumb x, in px) is the SINGLE source of truth for the thumb — it's
+  // snapped to the target notch on the UI thread the instant the drag ends, so
+  // it never depends on React re-rendering with the new value. The old approach
+  // (deriving the resting spot from the `value` prop) briefly read the STALE
+  // value on release and flashed the thumb back to the previous notch for a
+  // frame before it moved to the new one — the "ghost circle" bug.
+  const pos = useSharedValue(0);
+  const startPos = useSharedValue(0);
+  const dragging = useSharedValue(false);
+
+  // Pin the thumb to the current value whenever we're NOT dragging — covers
+  // first layout (trackWidth arrives) and external/tap changes. During a drag
+  // the gesture owns `pos`, so this leaves it alone.
+  useEffect(() => {
+    if (!dragging.value) {
+      pos.value = withTiming(value * stepW, { duration: 150 });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value, stepW]);
 
   const commit = (level: number) => {
     const clamped = Math.min(TONE_MAX, Math.max(TONE_MIN, level));
@@ -44,31 +58,27 @@ export function ToneSlider({
 
   const pan = Gesture.Pan()
     .onBegin(() => {
-      active.value = true;
-      dragX.value = 0;
+      // eslint-disable-next-line react-hooks/immutability -- reanimated shared value, not React state
+      dragging.value = true;
+      startPos.value = pos.value;
     })
     .onUpdate((e) => {
-      dragX.value = e.translationX;
+      // eslint-disable-next-line react-hooks/immutability -- reanimated shared value, not React state
+      pos.value = Math.min(usable, Math.max(0, startPos.value + e.translationX));
     })
     .onEnd(() => {
-      const resting = value * stepW;
-      const raw = Math.min(usable, Math.max(0, resting + dragX.value));
-      const level = stepW > 0 ? Math.round(raw / stepW) : value;
-      active.value = false;
-      dragX.value = 0;
+      const level = stepW > 0 ? Math.round(pos.value / stepW) : value;
+      // Settle to the snapped notch right here on the UI thread — no stale-value
+      // frame, so no ghost flash at the previous position.
+      // eslint-disable-next-line react-hooks/immutability -- reanimated shared value, not React state
+      pos.value = withTiming(level * stepW, { duration: 120 });
+      // eslint-disable-next-line react-hooks/immutability -- reanimated shared value, not React state
+      dragging.value = false;
       runOnJS(commit)(level);
     });
 
-  const thumbStyle = useAnimatedStyle(() => {
-    const resting = value * stepW;
-    const pos = active.value ? Math.min(usable, Math.max(0, resting + dragX.value)) : resting;
-    return { transform: [{ translateX: pos }] };
-  });
-  const fillStyle = useAnimatedStyle(() => {
-    const resting = value * stepW;
-    const pos = active.value ? Math.min(usable, Math.max(0, resting + dragX.value)) : resting;
-    return { width: pos + THUMB / 2 };
-  });
+  const thumbStyle = useAnimatedStyle(() => ({ transform: [{ translateX: pos.value }] }));
+  const fillStyle = useAnimatedStyle(() => ({ width: pos.value + THUMB / 2 }));
 
   return (
     <View>
@@ -168,8 +178,13 @@ const styles = StyleSheet.create({
     height: THUMB,
     borderRadius: radii.pill,
     backgroundColor: theme.blue,
-    borderWidth: 3,
-    borderColor: theme.bg,
+    // No outline — a solid blue knob. A soft drop shadow gives it depth so it
+    // still reads as a raised control where it sits over the blue track fill.
+    shadowColor: '#000',
+    shadowOpacity: 0.35,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 3,
   },
   endsRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 12 },
   endLabel: { color: theme.faint, fontSize: 12, fontWeight: '600' },
