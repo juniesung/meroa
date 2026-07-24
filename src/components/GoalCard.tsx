@@ -9,6 +9,9 @@ import { Icon, type IconName } from './Icon';
 import { Progress } from './Progress';
 import { Ring } from './Ring';
 
+// A square goal card, laid out 2-up on the Goals tab: the icon + a metric
+// (ring / streak) sit at the top, the title + subtitle + progress bar anchor
+// the bottom, with the middle free so cards stay square regardless of content.
 function CardShell({
   icon,
   title,
@@ -26,41 +29,24 @@ function CardShell({
 }) {
   return (
     // Each goal extrudes in its own type accent (the same 3D banner as task
-    // cards and achievement badges); dark surface kept so a goals list stays
-    // calm, only the edge + shadow carry the color.
+    // cards and achievement badges); dark surface kept so the grid stays calm,
+    // only the edge + shadow carry the color.
     <View style={[styles.card, banner3dStyle(accent ?? theme.blue, { tint: theme.card })]}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+      <View style={styles.topRow}>
         <View style={[styles.iconChip, { backgroundColor: `${accent ?? theme.blue}22` }]}>
           <Icon name={icon} size={18} color={accent ?? theme.blue} stroke={1.9} />
         </View>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.title} numberOfLines={1}>
-            {title}
-          </Text>
-          <Text style={styles.meta} numberOfLines={1}>
-            {subtitle}
-          </Text>
-        </View>
         {right}
       </View>
+      <View style={{ flex: 1 }} />
+      <Text style={styles.title} numberOfLines={2}>
+        {title}
+      </Text>
+      <Text style={styles.meta} numberOfLines={2}>
+        {subtitle}
+      </Text>
       {children}
     </View>
-  );
-}
-
-/**
- * The server-computed pace line, e.g. "needs $5.20/day to hit Dec 15 — on
- * track". Being on pace is worth showing off, so it reads in the success
- * color; being behind deliberately does NOT turn red. The text already says
- * "behind pace" plainly — dressing that in an alarm color would be the app
- * scolding someone for a number it's supposed to state matter-of-factly
- * (CLAUDE.md §2: never reinforce harmful self-judgment).
- */
-function PaceLine({ text, onTrack }: { text: string; onTrack?: boolean | null }) {
-  return (
-    <Text style={[styles.paceLine, onTrack === true && { color: theme.success }]} numberOfLines={1}>
-      {text}
-    </Text>
   );
 }
 
@@ -108,6 +94,12 @@ export function GoalCard({
   const resolvedAccent = accent ?? GOAL_TYPE_ACCENT[type] ?? theme.blue;
   accent = resolvedAccent;
 
+  // The detailed pace line doesn't fit a small square — it lives on the goal
+  // detail screen. The bar carries progress here; the subtitle carries the
+  // headline. (`paceLine`/`onTrack` still typed for callers, just not rendered.)
+  void paceLine;
+  void onTrack;
+
   if (type === 'habit') {
     const s = streak ?? { current: 0, longest: 0, doneCount: 0 };
     const lit = s.current > 0;
@@ -119,7 +111,7 @@ export function GoalCard({
         accent={accent}
         right={
           <View style={styles.streakChip}>
-            <Icon name="flame" size={16} color={lit ? theme.blue : theme.faint} stroke={2.2} />
+            <Icon name="flame" size={18} color={lit ? accent : theme.faint} stroke={2.2} />
             <Text style={[styles.streakCount, !lit && { color: theme.faint }]}>{s.current}</Text>
           </View>
         }
@@ -130,21 +122,18 @@ export function GoalCard({
   if (type === 'indirect') {
     return (
       <CardShell icon={icon} title={title} subtitle={subtitle} accent={accent}>
-        {progress != null && <Progress value={progress} />}
-        {paceLine ? <PaceLine text={paceLine} onTrack={onTrack} /> : null}
+        {progress != null && <Progress value={progress} color={accent} />}
       </CardShell>
     );
   }
 
   if (type === 'milestone') {
-    // subtitle is the active stage's title (or "Complete — all N stages"
-    // once done) — the headline server-computed by computeMilestoneCardSummary.
-    // The bar is a real, user-declared fraction (activeStageIndex /
-    // stages.length) — no ring, and never a paceLine (milestone goals have
-    // no numbers or deadlines to pace against).
+    // subtitle is the active stage's title (or "Complete — all N stages" once
+    // done). The bar is a real, user-declared fraction (activeStageIndex /
+    // stages.length) — no ring.
     return (
       <CardShell icon={icon} title={title} subtitle={subtitle} accent={accent}>
-        {progress != null && <Progress value={progress} />}
+        {progress != null && <Progress value={progress} color={accent} />}
       </CardShell>
     );
   }
@@ -157,10 +146,9 @@ export function GoalCard({
       title={title}
       subtitle={subtitle}
       accent={accent}
-      right={<Ring value={pct} size={38} stroke={3.5} label={`${pct}`} celebrate={celebrate} />}
+      right={<Ring value={pct} size={40} stroke={4} label={`${pct}`} celebrate={celebrate} />}
     >
-      <Progress value={pct} />
-      {paceLine ? <PaceLine text={paceLine} onTrack={onTrack} /> : null}
+      <Progress value={pct} color={accent} />
     </CardShell>
   );
 }
@@ -172,20 +160,22 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderRadius: radii.card,
     padding: 14,
+    // Square — the Goals tab lays these out two per row.
+    aspectRatio: 1,
     flexDirection: 'column',
     alignItems: 'stretch',
-    gap: 10,
+    gap: 6,
   },
+  topRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   iconChip: {
-    width: 34,
-    height: 34,
+    width: 40,
+    height: 40,
     borderRadius: radii.chip,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  title: { color: theme.text, fontSize: 15, fontWeight: '600' },
-  meta: { color: theme.dim, fontSize: 12, marginTop: 2 },
-  paceLine: { color: theme.faint, fontSize: 11.5 },
+  title: { color: theme.text, fontSize: 16, fontWeight: '700' },
+  meta: { color: theme.dim, fontSize: 12.5, marginTop: 2 },
   streakChip: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  streakCount: { color: theme.text, fontSize: 16, fontWeight: '700' },
+  streakCount: { color: theme.text, fontSize: 18, fontWeight: '700' },
 });

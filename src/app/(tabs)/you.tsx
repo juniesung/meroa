@@ -118,10 +118,10 @@ export default function YouScreen() {
             {/* Stat row — real counts, the same numbers badges are earned from */}
             {o ? (
               <View style={styles.statRow}>
-                <Stat value={o.stats.tasksCompleted} label="tasks done" accent="#0A84FF" />
-                <Stat value={o.stats.goalsActive} label="goals active" accent="#BF5AF2" />
-                <Stat value={o.stats.goalsFinished} label="finished" accent="#FFD60A" />
-                <Stat value={o.stats.activeDays} label="active days" accent="#34C6C6" />
+                <Stat value={o.stats.tasksCompleted} label="tasks done" />
+                <Stat value={o.stats.goalsActive} label="goals active" />
+                <Stat value={o.stats.goalsFinished} label="finished" />
+                <Stat value={o.stats.activeDays} label="active days" />
               </View>
             ) : null}
 
@@ -168,9 +168,9 @@ export default function YouScreen() {
   );
 }
 
-function Stat({ value, label, accent }: { value: number; label: string; accent: string }) {
+function Stat({ value, label }: { value: number; label: string }) {
   return (
-    <View style={[styles.statTile, banner3dStyle(accent, { tint: theme.card })]}>
+    <View style={styles.statTile}>
       <Text style={styles.statValue}>{value}</Text>
       <Text style={styles.statLabel} numberOfLines={1}>
         {label}

@@ -14,7 +14,6 @@ import Animated, {
 import { AddFab } from '@/components/AddFab';
 import { AnimatedPressable, useTapFeedback } from '@/components/AnimatedPressable';
 import { GoalCard } from '@/components/GoalCard';
-import { Heatmap } from '@/components/Heatmap';
 import { Icon } from '@/components/Icon';
 import { LoadError } from '@/components/LoadError';
 import { MeroaMark, type MeroaMood } from '@/components/MeroaMark';
@@ -45,7 +44,7 @@ function GoalRow({ goal, celebrate }: { goal: ApiGoal; celebrate: boolean }) {
         haptics.tap();
         router.push({ pathname: '/goal/[id]', params: { id: goal.id } });
       }}
-      style={feedback.animatedStyle}
+      style={[styles.goalCell, feedback.animatedStyle]}
     >
       <GoalCard
         type={goal.definition.type}
@@ -190,7 +189,6 @@ export default function GoalsScreen() {
   const perfectDaysThisMonth = consistency
     ? consistency.calendar.filter((d) => d.ymd.startsWith(thisMonthPrefix) && d.verdict === 'perfect').length
     : 0;
-  const hasAnyDueDay = consistency?.calendar.some((d) => d.dueCount > 0) ?? false;
   // Only advertised once there's something in it — an "Archived (0)" link is
   // just clutter for anyone who's never removed a goal.
   const hasArchived = archivedGoals.length > 0;
@@ -228,13 +226,6 @@ export default function GoalsScreen() {
           <MeroaMark size={38} mood={mood} />
         </View>
 
-        {hasAnyDueDay && consistency && (
-          <View style={{ gap: 8 }}>
-            <Text style={styles.sectionTitle}>Consistency</Text>
-            <Heatmap calendar={consistency.calendar} />
-          </View>
-        )}
-
         {isError ? (
           <LoadError onRetry={() => refetch()} />
         ) : isLoading ? (
@@ -242,7 +233,7 @@ export default function GoalsScreen() {
         ) : goals.length === 0 ? (
           <EmptyState />
         ) : (
-          <View style={{ gap: 12 }}>
+          <View style={styles.goalGrid}>
             {goals.map((goal) => (
               <GoalRow key={goal.id} goal={goal} celebrate={isFocused && !isLoading} />
             ))}
@@ -317,6 +308,9 @@ const styles = StyleSheet.create({
   headerValue: { color: theme.text, fontSize: 15, fontWeight: '600', marginTop: 2 },
   streakValue: { color: theme.text, fontSize: 16, fontWeight: '700' },
   streakSub: { color: theme.faint, fontSize: 10.5 },
+  // Two square goal cards per row, wrapping to the next line.
+  goalGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: 12 },
+  goalCell: { width: '48%' },
   statRow: { flexDirection: 'row', gap: 10 },
   statTile: {
     flex: 1,
