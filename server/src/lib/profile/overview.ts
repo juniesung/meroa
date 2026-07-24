@@ -111,18 +111,6 @@ async function countGoalsActive(userId: string): Promise<number> {
   return row?.n ?? 0;
 }
 
-async function countActiveDays(userId: string, tz: string): Promise<number> {
-  // Distinct calendar days (in the user's own tz) with at least one real,
-  // non-reverted record. AT TIME ZONE takes the zone as bound text.
-  const [row] = await db
-    .select({
-      n: sql<number>`count(distinct (${records.occurredAt} at time zone ${tz})::date)::int`,
-    })
-    .from(records)
-    .where(and(eq(records.userId, userId), isNull(records.revertedAt)));
-  return row?.n ?? 0;
-}
-
 async function buildMonthRecap(userId: string, tz: string, ym: string): Promise<MonthRecap> {
   const inMonth = sql`to_char(${records.occurredAt} at time zone ${tz}, 'YYYY-MM') = ${ym}`;
 
@@ -184,10 +172,9 @@ export async function buildProfileOverview(
   const tz = timezone ?? 'UTC';
   const ym = ymdInTz(new Date(), tz).slice(0, 7);
 
-  const [counts, goalsActive, activeDays, earnedRows, month] = await Promise.all([
+  const [counts, goalsActive, earnedRows, month] = await Promise.all([
     computeAchievementCounts(db, userId, timezone),
     countGoalsActive(userId),
-    countActiveDays(userId, tz),
     db
       .select({ key: achievements.key, tier: achievements.tier, earnedAt: achievements.earnedAt })
       .from(achievements)
@@ -201,7 +188,7 @@ export async function buildProfileOverview(
       tasksCompleted: counts.tasks_completed,
       goalsActive,
       goalsFinished: counts.goals_finished,
-      activeDays,
+      activeDays: counts.active_days,
     },
     achievements: assembleAchievements(counts, earnedRows),
     month,

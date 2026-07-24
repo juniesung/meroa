@@ -6,7 +6,7 @@ import type { AchievementCounts } from '../achievements/evaluate.ts';
 const D = new Date('2026-07-20T00:00:00Z');
 
 function counts(partial: Partial<AchievementCounts>): AchievementCounts {
-  return { tasks_completed: 0, streak: 0, goals_started: 0, goals_finished: 0, ...partial };
+  return { tasks_completed: 0, streak: 0, goals_started: 0, goals_finished: 0, active_days: 0, ...partial };
 }
 
 describe('assembleAchievements', () => {
@@ -56,7 +56,7 @@ describe('assembleAchievements', () => {
   it('returns one view per catalog family', () => {
     const views = assembleAchievements(counts({}), []);
     expect(views.map((v) => v.key).sort()).toEqual(
-      ['goals_finished', 'goals_started', 'streak', 'tasks_completed'],
+      ['active_days', 'goals_finished', 'goals_started', 'streak', 'tasks_completed'],
     );
   });
 });

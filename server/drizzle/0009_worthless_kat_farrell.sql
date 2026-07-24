@@ -1,0 +1,2 @@
+ALTER TABLE "achievements" DROP CONSTRAINT "achievements_key_check";--> statement-breakpoint
+ALTER TABLE "achievements" ADD CONSTRAINT "achievements_key_check" CHECK ("achievements"."key" in ('tasks_completed','streak','goals_started','goals_finished','active_days'));

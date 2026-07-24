@@ -23,5 +23,7 @@ export function congratsLine(key: AchievementKey, tier: number): string {
       return tier === 1
         ? `You finished a goal — "${label}". That's the whole point. 👑`
         : `${tier} goals finished — "${label}". You keep closing them out. 👑`;
+    case 'active_days':
+      return `${tier} active days — that's "${label}". Showing up is the hard part, and you did. 📅`;
   }
 }

@@ -322,7 +322,12 @@ export type ApiGoalConsistency = {
 // The You-tab profile surface (GET /profile/overview). Every number here is a
 // real count over non-reverted records — the server never fabricates. Streak
 // is NOT here (fetched via getGoalConsistency, reused unchanged).
-export type ApiAchievementKey = 'tasks_completed' | 'streak' | 'goals_started' | 'goals_finished';
+export type ApiAchievementKey =
+  | 'tasks_completed'
+  | 'streak'
+  | 'goals_started'
+  | 'goals_finished'
+  | 'active_days';
 
 export type ApiAchievementView = {
   key: ApiAchievementKey;

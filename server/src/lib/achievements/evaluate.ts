@@ -63,6 +63,24 @@ export async function longestStreak(userId: string, timezone: string | null): Pr
   return longest;
 }
 
+// Distinct calendar days (in the user's own tz) with at least one real,
+// non-reverted record — the same figure the stat row shows, so the badge and
+// the stat can't disagree. AT TIME ZONE takes the zone as bound text.
+export async function countActiveDays(
+  executor: DbOrTx,
+  userId: string,
+  timezone: string | null,
+): Promise<number> {
+  const tz = timezone ?? 'UTC';
+  const [row] = await executor
+    .select({
+      n: sql<number>`count(distinct (${records.occurredAt} at time zone ${tz})::date)::int`,
+    })
+    .from(records)
+    .where(and(eq(records.userId, userId), isNull(records.revertedAt)));
+  return row?.n ?? 0;
+}
+
 export type AchievementCounts = Record<AchievementKey, number>;
 
 export async function computeAchievementCounts(
@@ -70,13 +88,14 @@ export async function computeAchievementCounts(
   userId: string,
   timezone: string | null,
 ): Promise<AchievementCounts> {
-  const [tasks_completed, goals_started, goals_finished, streak] = await Promise.all([
+  const [tasks_completed, goals_started, goals_finished, streak, active_days] = await Promise.all([
     countTasksCompleted(executor, userId),
     countGoalsStarted(executor, userId),
     countGoalsFinished(executor, userId),
     longestStreak(userId, timezone),
+    countActiveDays(executor, userId, timezone),
   ]);
-  return { tasks_completed, goals_started, goals_finished, streak };
+  return { tasks_completed, goals_started, goals_finished, streak, active_days };
 }
 
 export type NewlyEarned = { key: AchievementKey; tier: number };
@@ -160,9 +179,10 @@ export async function markAnnounced(
 // per turn" rule. Order: finishing a goal > a streak milestone > tasks > a new
 // goal; ties break on the higher tier.
 const KEY_WEIGHT: Record<AchievementKey, number> = {
-  goals_finished: 4,
-  streak: 3,
-  tasks_completed: 2,
+  goals_finished: 5,
+  streak: 4,
+  tasks_completed: 3,
+  active_days: 2,
   goals_started: 1,
 };
 

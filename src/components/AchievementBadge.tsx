@@ -5,21 +5,26 @@ import { Progress } from '@/components/Progress';
 import { theme } from '@/constants/theme';
 import type { ApiAchievementKey, ApiAchievementView } from '@/lib/api/types';
 
-// Which icon each family shows (mirrors server catalog.ts). Kept here rather
-// than sent over the wire — a badge's look is a client concern.
-const ICON: Record<ApiAchievementKey, IconName> = {
-  tasks_completed: 'check',
-  streak: 'flame',
-  goals_started: 'sparkle',
-  goals_finished: 'crown',
+// Per-family identity: icon (mirrors server catalog.ts) + an accent and a
+// darker "deep" shade. The deep shade forms the thicker left+bottom border
+// that gives each earned banner a subtle 3D/extruded look. Colors are chosen
+// so tasks vs goals (and each family) read as distinct at a glance — tasks
+// blue, streak the warm flame, goals started purple, goals finished gold,
+// active days teal.
+const FAMILY: Record<ApiAchievementKey, { icon: IconName; accent: string; deep: string }> = {
+  tasks_completed: { icon: 'check', accent: '#0A84FF', deep: '#0A5FCF' },
+  streak: { icon: 'flame', accent: '#FF9F0A', deep: '#C2760A' },
+  goals_started: { icon: 'sparkle', accent: '#BF5AF2', deep: '#8B3FBF' },
+  goals_finished: { icon: 'crown', accent: '#FFD60A', deep: '#C79E00' },
+  active_days: { icon: 'clock', accent: '#34C6C6', deep: '#1E8F8F' },
 };
 
-// A single achievement tile. Earned → bright accent chip + the earned label,
-// with a thin progress bar toward the next tier (or "Maxed out" when every
-// tier is done). Not yet earned → a dimmed locked teaser showing what the
-// first tier is and how close they are. Framing is the user's own progress —
-// never a bond with Meroa (CLAUDE.md §2 + retention research).
+// A single achievement tile. Earned → the family's accent chip + a 3D banner
+// (thicker left/bottom border in the deep shade). Not yet earned → a dimmed,
+// flat locked teaser showing what the next tier is and how close they are.
+// Framing is the user's own progress — never a bond with Meroa (CLAUDE.md §2).
 export function AchievementBadge({ badge }: { badge: ApiAchievementView }) {
+  const fam = FAMILY[badge.key];
   const earned = badge.earnedTier !== null;
   const title = earned ? badge.earnedLabel! : (badge.nextLabel ?? '—');
   const hasNext = badge.nextThreshold !== null;
@@ -30,15 +35,28 @@ export function AchievementBadge({ badge }: { badge: ApiAchievementView }) {
       : `Maxed out · ${badge.count} ${badge.unit}`
     : `${badge.count} / ${badge.nextThreshold} ${badge.unit}`;
 
+  // The 3D extrude: left + bottom edges are thick and use the deep family
+  // shade (earned) or a plain dark edge (locked); top + right stay hairline.
+  const banner3d = earned
+    ? {
+        backgroundColor: theme.card,
+        borderTopColor: fam.accent + '55',
+        borderRightColor: fam.accent + '55',
+        borderLeftColor: fam.deep,
+        borderBottomColor: fam.deep,
+      }
+    : {
+        backgroundColor: theme.surface,
+        borderTopColor: theme.border,
+        borderRightColor: theme.border,
+        borderLeftColor: theme.card2,
+        borderBottomColor: theme.card2,
+      };
+
   return (
-    <View style={[styles.tile, earned ? styles.tileEarned : styles.tileLocked]}>
-      <View style={[styles.chip, earned ? styles.chipEarned : styles.chipLocked]}>
-        <Icon
-          name={ICON[badge.key]}
-          size={20}
-          color={earned ? '#fff' : theme.faint}
-          stroke={2.2}
-        />
+    <View style={[styles.tile, banner3d]}>
+      <View style={[styles.chip, { backgroundColor: earned ? fam.accent : theme.card2 }]}>
+        <Icon name={fam.icon} size={20} color={earned ? '#fff' : theme.faint} stroke={2.2} />
       </View>
       <Text style={[styles.title, !earned && styles.titleLocked]} numberOfLines={1}>
         {title}
@@ -61,12 +79,16 @@ const styles = StyleSheet.create({
   tile: {
     width: '48%',
     borderRadius: 16,
-    borderWidth: 1,
+    // Asymmetric border = the 3D extrude. Left/bottom are the "lit" thick
+    // edges; top/right are hairline.
+    borderTopWidth: 1,
+    borderRightWidth: 1,
+    borderLeftWidth: 3,
+    borderBottomWidth: 4,
     padding: 14,
+    paddingBottom: 12,
     gap: 6,
   },
-  tileEarned: { backgroundColor: theme.card, borderColor: theme.borderStrong },
-  tileLocked: { backgroundColor: theme.surface, borderColor: theme.border },
   chip: {
     width: 40,
     height: 40,
@@ -75,8 +97,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginBottom: 2,
   },
-  chipEarned: { backgroundColor: theme.blue },
-  chipLocked: { backgroundColor: theme.card2 },
   title: { color: theme.text, fontSize: 14, fontWeight: '700' },
   titleLocked: { color: theme.dim },
   sub: { color: theme.faint, fontSize: 12 },

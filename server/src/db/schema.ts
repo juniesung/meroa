@@ -418,7 +418,7 @@ export const achievements = pgTable(
     uniqueIndex('achievements_user_key_tier_unique').on(t.userId, t.key, t.tier),
     check(
       'achievements_key_check',
-      sql`${t.key} in ('tasks_completed','streak','goals_started','goals_finished')`,
+      sql`${t.key} in ('tasks_completed','streak','goals_started','goals_finished','active_days')`,
     ),
   ],
 );

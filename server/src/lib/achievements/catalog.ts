@@ -15,7 +15,8 @@ export type AchievementKey =
   | 'tasks_completed'
   | 'streak'
   | 'goals_started'
-  | 'goals_finished';
+  | 'goals_finished'
+  | 'active_days';
 
 export type AchievementTier = {
   // The threshold that earns this tier — the same integer stored in
@@ -72,6 +73,15 @@ export const ACHIEVEMENT_CATALOG: AchievementFamily[] = [
     tiers: [
       { threshold: 1, label: 'Finisher', icon: 'crown' },
       { threshold: 3, label: 'Serial finisher', icon: 'crown' },
+    ],
+  },
+  {
+    key: 'active_days',
+    unit: 'active days',
+    tiers: [
+      { threshold: 7, label: 'Showing up', icon: 'clock' },
+      { threshold: 30, label: 'Regular', icon: 'clock' },
+      { threshold: 100, label: 'Ever-present', icon: 'clock' },
     ],
   },
 ];
