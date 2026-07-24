@@ -10,6 +10,8 @@ import { Ring } from '@/components/Ring';
 import { DetailSkeleton } from '@/components/Skeleton';
 import { TrendChart, type TrendPoint } from '@/components/TrendChart';
 import { radii, theme } from '@/constants/theme';
+import { banner3dStyle } from '@/lib/banner';
+import { goalAccent } from '@/features/goals/goal-accent';
 import { useArchiveGoal, useGoal } from '@/features/goals/queries';
 import { GoalEntrySheet } from '@/features/goals/GoalEntrySheet';
 import { GoalFormSheet } from '@/features/goals/GoalFormSheet';
@@ -35,14 +37,14 @@ function formatEntryDate(iso: string): string {
   return `${date} · ${time}`;
 }
 
-function TotalView({ detail, celebrate }: { detail: ApiGoalDetail; celebrate: boolean }) {
+function TotalView({ detail, celebrate, accent }: { detail: ApiGoalDetail; celebrate: boolean; accent: string }) {
   const pct = Math.round((detail.card.progress ?? 0) * 100);
   // The total ticks up to its new value the moment an entry lands — the payoff
   // for logging, instead of the number just swapping. The ring beside it blooms
   // + buzzes if this entry is the one that hits 100%.
   const total = useCountUp(detail.total ?? 0);
   return (
-    <View style={styles.viewCard}>
+    <View style={[styles.viewCard, banner3dStyle(accent, { tint: theme.card })]}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
         <Ring value={pct} size={56} stroke={5} label={`${pct}%`} celebrate={celebrate} />
         <View style={{ flex: 1 }}>
@@ -56,7 +58,7 @@ function TotalView({ detail, celebrate }: { detail: ApiGoalDetail; celebrate: bo
           ) : null}
         </View>
       </View>
-      <Progress value={pct} />
+      <Progress value={pct} color={accent} />
     </View>
   );
 }
@@ -64,14 +66,14 @@ function TotalView({ detail, celebrate }: { detail: ApiGoalDetail; celebrate: bo
 // Habit goals have no total/target — the streak IS the progress
 // (docs/goals-redesign-plan.md §1), so the detail hero is the current run,
 // not a ring toward a fraction that doesn't exist.
-function StreakView({ detail }: { detail: ApiGoalDetail }) {
+function StreakView({ detail, accent }: { detail: ApiGoalDetail; accent: string }) {
   const streak = detail.streak ?? { current: 0, longest: 0, doneCount: 0 };
   const lit = streak.current > 0;
   return (
-    <View style={styles.viewCard}>
+    <View style={[styles.viewCard, banner3dStyle(accent, { tint: theme.card })]}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
-        <View style={[styles.flameChip, lit && { backgroundColor: 'rgba(10,132,255,0.14)' }]}>
-          <Icon name="flame" size={26} color={lit ? theme.blue : theme.faint} stroke={2} />
+        <View style={[styles.flameChip, lit && { backgroundColor: accent + '24' }]}>
+          <Icon name="flame" size={26} color={lit ? accent : theme.faint} stroke={2} />
         </View>
         <View style={{ flex: 1 }}>
           <Text style={styles.viewHeadline}>
@@ -90,12 +92,12 @@ function StreakView({ detail }: { detail: ApiGoalDetail }) {
 // Indirect goals never derive a number from a task (docs/goals-redesign-
 // plan.md's indirect goal type, locked decision) — the hero here is the
 // logged-entries trend line itself, not a ring toward a fabricated fraction.
-function TrendView({ detail, entries }: { detail: ApiGoalDetail; entries: ApiGoalEntry[] }) {
+function TrendView({ detail, entries, accent }: { detail: ApiGoalDetail; entries: ApiGoalEntry[]; accent: string }) {
   const [width, setWidth] = useState(0);
   const points: TrendPoint[] = entries.map((e) => ({ entryAt: e.entryAt, amount: e.data.amount }));
 
   return (
-    <View style={styles.viewCard}>
+    <View style={[styles.viewCard, banner3dStyle(accent, { tint: theme.card })]}>
       {detail.card.paceLine ? (
         <Text style={[styles.viewSub, detail.card.onTrack === true && { color: theme.success }]}>
           {detail.card.paceLine}
@@ -123,7 +125,7 @@ function TrendView({ detail, entries }: { detail: ApiGoalDetail; entries: ApiGoa
 //     icon) since a plan is an intention, not a record. That distinction is
 //     load-bearing (docs/goal-manual-editing-plan.md §3.8): the app must
 //     never blur "planned" with "real."
-function StagesView({ goal, tasks }: { goal: ApiGoal; tasks: ApiTask[] }) {
+function StagesView({ goal, tasks, accent }: { goal: ApiGoal; tasks: ApiTask[]; accent: string }) {
   const completeTask = useCompleteTask();
   if (goal.definition.type !== 'milestone') return null;
   const { stages, activeStageIndex, stagePlans } = goal.definition;
@@ -144,7 +146,9 @@ function StagesView({ goal, tasks }: { goal: ApiGoal; tasks: ApiTask[] }) {
         const active = i === activeStageIndex;
         const plans = stagePlans?.[i] ?? [];
         return (
-          <View key={i} style={styles.viewCard}>
+          // Only the ACTIVE stage extrudes in the goal color — the current
+          // focus pops without turning the whole stage list into a wall of it.
+          <View key={i} style={[styles.viewCard, active && banner3dStyle(accent, { tint: theme.card })]}>
             <View style={styles.stageRow}>
               <View style={[styles.stageMarker, done && styles.stageMarkerDone, active && styles.stageMarkerActive]}>
                 {done ? (
@@ -223,6 +227,7 @@ export default function GoalDetailScreen() {
   }
 
   const { goal, detail, entries } = data;
+  const accent = goalAccent(detail.type);
   const isHabit = detail.type === 'habit';
   const isIndirect = detail.type === 'indirect';
   const isMilestone = detail.type === 'milestone';
@@ -238,8 +243,8 @@ export default function GoalDetailScreen() {
             <Icon name="chevron" size={18} color={theme.text} stroke={2.2} />
           </View>
         </Pressable>
-        <View style={styles.iconChip}>
-          <Icon name={toIconName(goal.icon)} size={20} color={theme.blue} stroke={1.9} />
+        <View style={[styles.iconChip, { backgroundColor: accent + '22' }]}>
+          <Icon name={toIconName(goal.icon)} size={20} color={accent} stroke={1.9} />
         </View>
         <View style={{ flex: 1 }}>
           <Text style={styles.title} numberOfLines={1}>
@@ -263,13 +268,13 @@ export default function GoalDetailScreen() {
         <Text style={styles.headline}>{detail.card.headline}</Text>
 
         {isHabit ? (
-          <StreakView detail={detail} />
+          <StreakView detail={detail} accent={accent} />
         ) : isMilestone ? (
-          <StagesView goal={goal} tasks={tasks} />
+          <StagesView goal={goal} tasks={tasks} accent={accent} />
         ) : isIndirect ? (
-          <TrendView detail={detail} entries={entries} />
+          <TrendView detail={detail} entries={entries} accent={accent} />
         ) : (
-          <TotalView detail={detail} celebrate={isFocused && !isLoading} />
+          <TotalView detail={detail} celebrate={isFocused && !isLoading} accent={accent} />
         )}
 
         {!hidesEntries && (

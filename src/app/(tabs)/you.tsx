@@ -8,6 +8,7 @@ import { Icon } from '@/components/Icon';
 import { MeroaMark } from '@/components/MeroaMark';
 import { SkeletonBlock } from '@/components/Skeleton';
 import { theme } from '@/constants/theme';
+import { banner3dStyle } from '@/lib/banner';
 import { AnimatedPressable, useTapFeedback } from '@/components/AnimatedPressable';
 import { useGoalConsistency } from '@/features/goals/queries';
 import { useMe, useProfileOverview } from '@/features/profile/queries';
@@ -17,6 +18,11 @@ function memberSinceLabel(iso: string): string {
   const d = new Date(iso);
   return `Member since ${d.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}`;
 }
+
+// The streak card wears the flame accent (matching the streak badge). Stat
+// tiles wear their badge family's color so the whole tab reads as one system:
+// tasks blue, goals-active purple, finished gold, active-days teal.
+const STREAK_BANNER = banner3dStyle('#FF9F0A', { tint: theme.card });
 
 // The You tab: a profile/progress/identity surface (CLAUDE.md §5 + the
 // retention research in memory). Everything shown is the user's OWN real
@@ -84,7 +90,7 @@ export default function YouScreen() {
           <>
             {/* Streak — the user's own consistency, never "days with Meroa" */}
             {streak ? (
-              <View style={styles.card}>
+              <View style={[styles.card, STREAK_BANNER]}>
                 <View style={styles.streakHead}>
                   <Text style={styles.streakNum}>{streak.current}</Text>
                   <View style={{ flex: 1 }}>
@@ -112,10 +118,10 @@ export default function YouScreen() {
             {/* Stat row — real counts, the same numbers badges are earned from */}
             {o ? (
               <View style={styles.statRow}>
-                <Stat value={o.stats.tasksCompleted} label="tasks done" />
-                <Stat value={o.stats.goalsActive} label="goals active" />
-                <Stat value={o.stats.goalsFinished} label="finished" />
-                <Stat value={o.stats.activeDays} label="active days" />
+                <Stat value={o.stats.tasksCompleted} label="tasks done" accent="#0A84FF" />
+                <Stat value={o.stats.goalsActive} label="goals active" accent="#BF5AF2" />
+                <Stat value={o.stats.goalsFinished} label="finished" accent="#FFD60A" />
+                <Stat value={o.stats.activeDays} label="active days" accent="#34C6C6" />
               </View>
             ) : null}
 
@@ -162,9 +168,9 @@ export default function YouScreen() {
   );
 }
 
-function Stat({ value, label }: { value: number; label: string }) {
+function Stat({ value, label, accent }: { value: number; label: string; accent: string }) {
   return (
-    <View style={styles.statTile}>
+    <View style={[styles.statTile, banner3dStyle(accent, { tint: theme.card })]}>
       <Text style={styles.statValue}>{value}</Text>
       <Text style={styles.statLabel} numberOfLines={1}>
         {label}

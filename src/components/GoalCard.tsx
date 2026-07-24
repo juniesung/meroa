@@ -3,20 +3,11 @@ import { StyleSheet, Text, View } from 'react-native';
 
 import { radii, theme } from '@/constants/theme';
 import { banner3dStyle } from '@/lib/banner';
+import { GOAL_TYPE_ACCENT } from '@/features/goals/goal-accent';
 import type { GoalStreak, GoalTemplateKey } from '@/lib/api/types';
 import { Icon, type IconName } from './Icon';
 import { Progress } from './Progress';
 import { Ring } from './Ring';
-
-// Per-type goal colors — distinct from tasks (blue) and from each other:
-// savings green (money), habit orange (the flame/streak), indirect teal
-// (a tracked metric), milestone purple (staged progress).
-const GOAL_TYPE_ACCENT: Record<GoalTemplateKey, string> = {
-  savings: '#30D158',
-  habit: '#FF9F0A',
-  indirect: '#34C6C6',
-  milestone: '#BF5AF2',
-};
 
 function CardShell({
   icon,
