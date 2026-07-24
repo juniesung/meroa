@@ -34,6 +34,8 @@ import { ANIM_DURATION } from '@/components/Sheet';
 import { ChatSkeleton } from '@/components/Skeleton';
 import { TaskCard } from '@/components/TaskCard';
 import { radii, theme } from '@/constants/theme';
+import { banner3dStyle } from '@/lib/banner';
+import { goalAccent } from '@/features/goals/goal-accent';
 import { ChatMenuSheet } from '@/features/chat/ChatMenuSheet';
 import { type ChatMessage, useMessages, useReportMessage, useSendMessage } from '@/features/chat/queries';
 import {
@@ -208,10 +210,10 @@ function TaskRemovalConfirmCard({ message }: { message: ChatMessage }) {
   const statusText = alreadyRemoved ? 'Removed' : dismissed ? "Kept — didn't delete it" : 'Delete this task?';
 
   return (
-    <View style={styles.actionCard}>
+    <View style={[styles.actionCard, styles.chatCard, banner3dStyle(theme.blue, { tint: theme.card })]}>
       <View style={styles.removalRow}>
-        <View style={styles.removalIconChip}>
-          <Icon name={toIconName(task.icon)} size={18} color={theme.dim} stroke={1.9} />
+        <View style={[styles.removalIconChip, { backgroundColor: theme.blue + '24' }]}>
+          <Icon name={toIconName(task.icon)} size={18} color={theme.blue} stroke={1.9} />
         </View>
         <View style={{ flex: 1 }}>
           <Text style={styles.removalTitle} numberOfLines={1}>
@@ -265,10 +267,10 @@ function TaskBulkRemovalConfirmCard({ message }: { message: ChatMessage }) {
   const titleList = snapshot.map((t) => t.title).join(', ');
 
   return (
-    <View style={styles.actionCard}>
+    <View style={[styles.actionCard, styles.chatCard, banner3dStyle(theme.blue, { tint: theme.card })]}>
       <View style={styles.removalRow}>
-        <View style={styles.removalIconChip}>
-          <Icon name="trash" size={18} color={theme.dim} stroke={1.9} />
+        <View style={[styles.removalIconChip, { backgroundColor: theme.blue + '24' }]}>
+          <Icon name="trash" size={18} color={theme.blue} stroke={1.9} />
         </View>
         <View style={{ flex: 1 }}>
           <Text style={styles.removalTitle} numberOfLines={2}>
@@ -350,9 +352,9 @@ function TaskPreviewCard({ message }: { message: ChatMessage }) {
       : 'Create this task?';
 
   return (
-    <View style={styles.actionCard}>
+    <View style={[styles.actionCard, styles.chatCard, banner3dStyle(theme.blue, { tint: theme.card })]}>
       <View style={styles.removalRow}>
-        <View style={styles.removalIconChip}>
+        <View style={[styles.removalIconChip, { backgroundColor: theme.blue + '24' }]}>
           <Icon name={toIconName(preview.icon)} size={18} color={theme.blue} stroke={1.9} />
         </View>
         <View style={{ flex: 1 }}>
@@ -467,11 +469,12 @@ function GoalPreviewCard({ message }: { message: ChatMessage }) {
       ? 'Not saved'
       : 'Create this goal?';
 
+  const accent = goalAccent(definition.type);
   return (
-    <View style={styles.actionCard}>
+    <View style={[styles.actionCard, styles.chatCard, banner3dStyle(accent, { tint: theme.card })]}>
       <View style={styles.removalRow}>
-        <View style={styles.removalIconChip}>
-          <Icon name={toIconName(preview.icon)} size={18} color={theme.blue} stroke={1.9} />
+        <View style={[styles.removalIconChip, { backgroundColor: accent + '24' }]}>
+          <Icon name={toIconName(preview.icon)} size={18} color={accent} stroke={1.9} />
         </View>
         <View style={{ flex: 1 }}>
           <Text style={styles.removalTitle} numberOfLines={1}>
@@ -509,7 +512,7 @@ function GoalPreviewCard({ message }: { message: ChatMessage }) {
               Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
               createGoalFromPreview.mutate(message.id);
             }}
-            style={styles.previewConfirmButton}
+            style={[styles.previewConfirmButton, { backgroundColor: accent }]}
             hitSlop={4}
           >
             <Icon name="check" size={14} color="#fff" stroke={2.2} />
@@ -535,9 +538,9 @@ function MemoryActionCard({ message }: { message: ChatMessage }) {
   if (!memory) return null;
 
   return (
-    <View style={styles.actionCard}>
+    <View style={[styles.actionCard, styles.chatCard, banner3dStyle(theme.blue, { tint: theme.card })]}>
       <View style={styles.removalRow}>
-        <View style={styles.removalIconChip}>
+        <View style={[styles.removalIconChip, { backgroundColor: theme.blue + '24' }]}>
           <Icon name="book" size={18} color={theme.blue} stroke={1.9} />
         </View>
         <View style={{ flex: 1 }}>
@@ -560,14 +563,16 @@ function GoalActionCard({ message }: { message: ChatMessage }) {
   const { data: goals } = useGoals();
   const goalId = message.meta.goalId as string | undefined;
   const snapshot = message.meta.goal as { name: string; icon: string | null } | undefined;
-  const goal = goals?.find((g) => g.id === goalId) ?? snapshot;
+  const liveGoal = goals?.find((g) => g.id === goalId);
+  const goal = liveGoal ?? snapshot;
   if (!goal) return null;
+  const accent = liveGoal ? goalAccent(liveGoal.definition.type) : theme.blue;
 
   return (
-    <View style={styles.actionCard}>
+    <View style={[styles.actionCard, styles.chatCard, banner3dStyle(accent, { tint: theme.card })]}>
       <View style={styles.removalRow}>
-        <View style={styles.removalIconChip}>
-          <Icon name={toIconName(goal.icon)} size={18} color={theme.blue} stroke={1.9} />
+        <View style={[styles.removalIconChip, { backgroundColor: accent + '24' }]}>
+          <Icon name={toIconName(goal.icon)} size={18} color={accent} stroke={1.9} />
         </View>
         <View style={{ flex: 1 }}>
           <Text style={styles.removalTitle} numberOfLines={1}>
@@ -618,11 +623,13 @@ function GoalAdvanceConfirmCard({ message }: { message: ChatMessage }) {
           ? `Move to "${proposal.toStage}"?`
           : 'Complete this goal?';
 
+  // Advance is a milestone-only action — wear the milestone accent.
+  const accent = goalAccent('milestone');
   return (
-    <View style={styles.actionCard}>
+    <View style={[styles.actionCard, styles.chatCard, banner3dStyle(accent, { tint: theme.card })]}>
       <View style={styles.removalRow}>
-        <View style={styles.removalIconChip}>
-          <Icon name={toIconName(snapshot.icon)} size={18} color={theme.blue} stroke={1.9} />
+        <View style={[styles.removalIconChip, { backgroundColor: accent + '24' }]}>
+          <Icon name={toIconName(snapshot.icon)} size={18} color={accent} stroke={1.9} />
         </View>
         <View style={{ flex: 1 }}>
           <Text style={styles.removalTitle} numberOfLines={1}>
@@ -656,7 +663,7 @@ function GoalAdvanceConfirmCard({ message }: { message: ChatMessage }) {
               Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
               advanceGoalStage.mutate({ id: proposal.goalId, proposalMessageId: message.id });
             }}
-            style={styles.previewConfirmButton}
+            style={[styles.previewConfirmButton, { backgroundColor: accent }]}
             hitSlop={4}
           >
             <Icon name="check" size={14} color="#fff" stroke={2.2} />
@@ -995,6 +1002,11 @@ export default function ChatScreen() {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: theme.bg },
   actionCard: { marginVertical: 4, alignSelf: 'stretch' },
+  // The card surface for chat's goal/preview/removal cards — a rounded
+  // container so the 3D colored banner (applied per card in its type accent)
+  // has an edge to sit on. Task action cards skip this; they wrap TaskCard,
+  // which brings its own card + banner.
+  chatCard: { borderRadius: radii.card },
   actionDetail: {
     color: theme.dim,
     fontSize: 12.5,
