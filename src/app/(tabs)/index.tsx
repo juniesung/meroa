@@ -49,7 +49,7 @@ import {
 import { useAdvanceGoalStage, useCreateGoalFromPreview, useGoalConsistency, useGoals } from '@/features/goals/queries';
 import { useMe } from '@/features/profile/queries';
 import { VibePickerSheet } from '@/features/profile/VibePickerSheet';
-import { vibeLabel } from '@/features/profile/vibes';
+import { toneFromPrefs, toneLabel } from '@/features/profile/tone';
 import { useTabBarHeight } from '@/hooks/use-tab-bar-inset';
 import { asLimitReached, limitReachedMessage } from '@/lib/api/limits';
 import type { AdvanceStageProposal, ApiTask, CreateTaskInput, GoalPreview, StarterTask } from '@/lib/api/types';
@@ -776,7 +776,7 @@ export default function ChatScreen() {
   const [menuSheetOpen, setMenuSheetOpen] = useState(false);
   const [vibeSheetOpen, setVibeSheetOpen] = useState(false);
   const { data: me } = useMe();
-  const communicationStyle = vibeLabel(me?.user.prefs.communicationStyle);
+  const communicationStyle = toneLabel(toneFromPrefs(me?.user.prefs));
   const scrollRef = useRef<ScrollView>(null);
   const ellipsisFeedback = useTapFeedback();
   const sendFeedback = useTapFeedback(0.9);
@@ -926,7 +926,7 @@ export default function ChatScreen() {
       <ChatMenuSheet
         visible={menuSheetOpen}
         onClose={() => setMenuSheetOpen(false)}
-        communicationStyle={communicationStyle}
+        toneName={communicationStyle}
         onSelectTone={openToneFromMenu}
         onSelectMemory={openMemoryFromMenu}
       />

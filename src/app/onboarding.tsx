@@ -27,14 +27,15 @@ import {
   describeRecurrence,
   type RecurrenceChoice,
 } from '@/features/tasks/task-form-helpers';
-import { VibeOptionList } from '@/features/profile/VibeOptionList';
+import { ToneSlider } from '@/features/profile/ToneSlider';
 import type { GoalTemplateKey, Weekday } from '@/lib/api/types';
 import { useUpdatePrefs } from '@/features/profile/queries';
-import { vibeLabel, type VibePreset } from '@/features/profile/vibes';
+import { DEFAULT_TONE, toneLabel } from '@/features/profile/tone';
 
 // First-run sell + questionnaire, shown before the paywall (root guard:
-// absence of prefs.communicationStyle — server-persisted, survives
-// reinstall). Since the app is a hard paywall (docs/phases/phase-7-premium-
+// absence of prefs.tone — server-persisted, survives reinstall; a legacy
+// communicationStyle still counts, see app/_layout.tsx). Since the app is a
+// hard paywall (docs/phases/phase-7-premium-
 // billing.md), this is the ONLY chance a new user gets to see what they're
 // buying before being asked to subscribe — so it walks through every real
 // feature (chat, tasks, goals, reminders, consistency), not just the style
@@ -157,6 +158,11 @@ export default function OnboardingScreen() {
   const [goalName, setGoalName] = useState('');
   const [goalTarget, setGoalTarget] = useState('');
   const [goalUnit, setGoalUnit] = useState('');
+  // The emotional anchor: WHY this goal matters. Stored as a memory so every
+  // later accountability nudge / check-in can pull on their own stated reason
+  // ("you said you wanted this so you'd stop feeling behind") instead of
+  // landing mechanically. Optional — never gates a step.
+  const [goalWhy, setGoalWhy] = useState('');
   const [checkinTitle, setCheckinTitle] = useState('');
   // Habit cadence, mirroring GoalFormSheet's picker so a habit set up during
   // onboarding isn't stuck at daily when the real create form offers weekly
@@ -166,7 +172,10 @@ export default function OnboardingScreen() {
   const [checkinWeekdays, setCheckinWeekdays] = useState<Weekday[]>([]);
   const [checkinEveryN, setCheckinEveryN] = useState('2');
   const [taskTitle, setTaskTitle] = useState('');
-  const [style, setStyle] = useState<VibePreset | null>(null);
+  // Voice tone slider (0 = warmest, 4 = edgiest). Always has a value, so the
+  // tone step never blocks Continue the way the old required vibe pick did.
+  const [tone, setTone] = useState<number>(DEFAULT_TONE);
+  const [toneTrackWidth, setToneTrackWidth] = useState(0);
   const createMemory = useCreateMemory();
   const updatePrefs = useUpdatePrefs();
 
@@ -211,6 +220,17 @@ export default function OnboardingScreen() {
       if (option) createMemory.mutate({ content: option.memory, kind: 'preference' });
     }
 
+    const trimmedWhy = goalWhy.trim();
+    if (trimmedWhy) {
+      const trimmedName = goalName.trim();
+      createMemory.mutate({
+        content: trimmedName
+          ? `Why "${trimmedName}" matters to them: ${trimmedWhy}`
+          : `Something that matters to them right now: ${trimmedWhy}`,
+        kind: 'preference',
+      });
+    }
+
     const trimmedGoalName = goalName.trim();
     const trimmedTask = taskTitle.trim();
     const trimmedCheckin = checkinTitle.trim();
@@ -239,7 +259,7 @@ export default function OnboardingScreen() {
           }
         : null;
 
-    updatePrefs.mutate({ communicationStyle: style ?? 'balanced', onboardingDraft });
+    updatePrefs.mutate({ tone, onboardingDraft });
   };
 
   return (
@@ -454,6 +474,14 @@ export default function OnboardingScreen() {
                     </View>
                   </>
                 )}
+                <TextInput
+                  value={goalWhy}
+                  onChangeText={setGoalWhy}
+                  placeholder="Why does this matter to you right now? (optional)"
+                  placeholderTextColor={theme.faint}
+                  style={[styles.input, styles.inputSpaced]}
+                  multiline
+                />
               </View>
               <PrimaryButton
                 label="Continue"
@@ -498,19 +526,17 @@ export default function OnboardingScreen() {
             <StepFrame>
               <Text style={styles.title}>Last thing — how should I talk to you?</Text>
               <Text style={styles.subtitle}>
-                Pick a starting point — you can change this any time in the You tab.
+                Slide toward warm or edgy. You can change this any time in the You tab.
               </Text>
               <View style={styles.optionList}>
-                <VibeOptionList selected={style} onSelect={setStyle} />
+                <ToneSlider
+                  value={tone}
+                  onChange={setTone}
+                  trackWidth={toneTrackWidth}
+                  onTrackLayout={setToneTrackWidth}
+                />
               </View>
-              <PrimaryButton
-                label="Continue"
-                onPress={style ? () => setStep(11) : undefined}
-                style={StyleSheet.flatten([styles.cta, !style && styles.ctaDisabled])}
-              />
-              <Text style={styles.skip} onPress={() => setStep(11)}>
-                Skip for now
-              </Text>
+              <PrimaryButton label="Continue" onPress={() => setStep(11)} style={styles.cta} />
             </StepFrame>
           )}
 
@@ -538,7 +564,7 @@ export default function OnboardingScreen() {
                 ) : (
                   <RecapRow text="Figure out my goals together" />
                 )}
-                <RecapRow text={`${vibeLabel(style ?? 'balanced')} check-ins`} />
+                <RecapRow text={`${toneLabel(tone)} tone`} />
               </View>
               <PrimaryButton
                 label={updatePrefs.isPending ? 'Setting up your Meroa…' : "I'm ready to show up"}
@@ -656,8 +682,8 @@ function BigStat({ value, small }: { value: string; small?: boolean }) {
   );
 }
 
-// Same row anatomy as VibeOption (features/profile/VibeOptionList.tsx), but
-// multi-select — membership toggles instead of replacing the selection.
+// A multi-select option row (membership toggles instead of replacing the
+// selection) — used for the "what brings you to Meroa?" focus step.
 function FocusOption({
   label,
   description,

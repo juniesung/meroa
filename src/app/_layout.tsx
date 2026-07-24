@@ -105,11 +105,15 @@ function RootNavigator() {
   // as an active entitlement) — there's no persistent free tier to fall back
   // to, so anyone without it is routed straight to the paywall below.
   const hasAccess = me?.entitlement.plan === 'plus';
-  // Absence of prefs.communicationStyle is the first-run signal — it's
+  // A written tone-slider level (prefs.tone) is the first-run signal — it's
   // server-persisted, so it survives a reinstall (unlike the transient
-  // isNewUser flag from OTP verify, which the client never keeps). Gated
-  // ahead of the paywall: signup → onboarding → paywall → tabs.
-  const needsOnboarding = typeof me?.user.prefs.communicationStyle !== 'string';
+  // isNewUser flag from OTP verify, which the client never keeps). A legacy
+  // communicationStyle string still counts, so users onboarded before the
+  // slider aren't sent back through it. Gated ahead of the paywall: signup →
+  // onboarding → paywall → tabs.
+  const prefs = me?.user.prefs;
+  const needsOnboarding =
+    typeof prefs?.tone !== 'number' && typeof prefs?.communicationStyle !== 'string';
   // Apple 5.1.2(i): after onboarding and the paywall, an entitled user must have
   // agreed to AI data-sharing before reaching chat. One code path covers both a
   // brand-new user (onboarding → paywall → consent → tabs) and every existing

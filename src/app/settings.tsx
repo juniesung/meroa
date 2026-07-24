@@ -18,7 +18,7 @@ import { QuietHoursSheet } from '@/features/profile/QuietHoursSheet';
 import { formatHhmmDisplay } from '@/features/tasks/task-form-helpers';
 import { readQuietHours } from '@/features/profile/quiet-hours';
 import { VibePickerSheet } from '@/features/profile/VibePickerSheet';
-import { vibeLabel } from '@/features/profile/vibes';
+import { toneFromPrefs, toneLabel } from '@/features/profile/tone';
 import { useAuth } from '@/lib/auth/AuthProvider';
 import { requestNotificationPermission } from '@/lib/notifications';
 import { registerForPushNotifications } from '@/lib/push';
@@ -37,7 +37,7 @@ export default function SettingsScreen() {
   const [deletingAccount, setDeletingAccount] = useState(false);
   const [exporting, setExporting] = useState(false);
 
-  const communicationStyle = vibeLabel(data?.user.prefs.communicationStyle);
+  const communicationStyle = toneLabel(toneFromPrefs(data?.user.prefs));
   const proactiveCheckins = data?.user.prefs.proactiveCheckins === true;
   const quietHours = readQuietHours(data?.user.prefs);
   const quietHoursHint = quietHours.enabled
@@ -166,7 +166,7 @@ export default function SettingsScreen() {
         <Section title="PERSONALITY">
           <Row
             icon="sparkle"
-            label="Communication style"
+            label="Voice tone"
             right={<Text style={styles.hint}>{communicationStyle}</Text>}
             onPress={() => setVibeSheetOpen(true)}
           />

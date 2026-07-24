@@ -7,13 +7,13 @@ import { theme } from '@/constants/theme';
 export function ChatMenuSheet({
   visible,
   onClose,
-  communicationStyle,
+  toneName,
   onSelectTone,
   onSelectMemory,
 }: {
   visible: boolean;
   onClose: () => void;
-  communicationStyle: string;
+  toneName: string;
   onSelectTone: () => void;
   onSelectMemory: () => void;
 }) {
@@ -23,7 +23,7 @@ export function ChatMenuSheet({
         <Row
           icon="sparkle"
           label="Tone"
-          right={<Text style={styles.hint}>{communicationStyle}</Text>}
+          right={<Text style={styles.hint}>{toneName}</Text>}
           onPress={onSelectTone}
         />
         <Row icon="book" label="Memory" onPress={onSelectMemory} />
