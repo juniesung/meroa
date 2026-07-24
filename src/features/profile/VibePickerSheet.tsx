@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ScrollView } from 'react-native';
+import { View } from 'react-native';
 
 import { Sheet } from '@/components/Sheet';
 import { useMe, useUpdatePrefs } from './queries';
@@ -23,8 +23,13 @@ function TonePickerBody() {
   const [value, setValue] = useState(() => toneFromPrefs(data?.user.prefs));
   const [trackWidth, setTrackWidth] = useState(0);
 
+  // No ScrollView: the Sheet grows to fit its content (up to 86% of the
+  // screen), but a ScrollView reports no intrinsic height to that auto-sizing
+  // parent, which collapsed the sheet and forced the slider to scroll. The
+  // slider is short, so rendering it directly lets the sheet size to the whole
+  // control.
   return (
-    <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 12 }}>
+    <View style={{ paddingBottom: 8 }}>
       <ToneSlider
         value={value}
         onChange={(level) => {
@@ -34,6 +39,6 @@ function TonePickerBody() {
         trackWidth={trackWidth}
         onTrackLayout={setTrackWidth}
       />
-    </ScrollView>
+    </View>
   );
 }
