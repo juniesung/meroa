@@ -11,6 +11,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 
 import { radii, theme } from '@/constants/theme';
 import { banner3dStyle } from '@/lib/banner';
+import { goalAccent } from '@/features/goals/goal-accent';
 import { useGoals } from '@/features/goals/queries';
 import { useMe } from '@/features/profile/queries';
 import { useLiveNow } from '@/hooks/use-live-now';
@@ -246,11 +247,6 @@ export function taskProgressFraction(task: ApiTask, now: number = Date.now()): n
   }
 }
 
-// Tasks read blue (the app accent). Keep the dark card surface (tint: card) —
-// only the 3D colored edge + shadow carry the color, so a long task list stays
-// calm rather than a wall of blue tint.
-const TASK_BANNER = banner3dStyle(theme.blue, { tint: theme.card });
-
 export function TaskCard({
   task,
   onToggleComplete,
@@ -287,6 +283,10 @@ export function TaskCard({
   const { data: goals } = useGoals();
   const meta = metaText(task, now, me?.user.timezone);
   const goalLabel = goalLinkLabel(task, goals);
+  // A goal-linked task borrows its goal's type color, so a task and the goal
+  // it feeds read as the same thread across the app; unlinked tasks stay blue.
+  const linkedGoal = task.goalId ? goals?.find((g) => g.id === task.goalId) : undefined;
+  const accent = linkedGoal ? goalAccent(linkedGoal.definition.type) : theme.blue;
   const rim = useRimHighlight();
   // Only the counter's count drives the tick — a constant for every other type
   // keeps their meta still (a running duration's mm:ss must not pop each second).
@@ -348,7 +348,7 @@ export function TaskCard({
   };
 
   return (
-    <View style={[styles.card, TASK_BANNER]}>
+    <View style={[styles.card, banner3dStyle(accent, { tint: theme.card })]}>
       {/* A direct child of the card, not the Pressable below — sized to hug
           the card's own outer border (same pattern as tasks.tsx's
           TemplateRow) rather than a smaller inset box around just the
@@ -361,8 +361,8 @@ export function TaskCard({
         onPressOut={rim.onPressOut}
         style={styles.headerRow}
       >
-        <View style={styles.iconChip}>
-          <Icon name={toIconName(task.icon)} size={18} color={theme.blue} stroke={1.9} />
+        <View style={[styles.iconChip, { backgroundColor: accent + '24' }]}>
+          <Icon name={toIconName(task.icon)} size={18} color={accent} stroke={1.9} />
         </View>
         <View style={{ flex: 1 }}>
           <View style={styles.titleRow}>
@@ -377,9 +377,9 @@ export function TaskCard({
             </Animated.View>
           )}
           {goalLabel && (
-            <View style={styles.goalChip}>
-              <Icon name="goals" size={10} color={theme.blue} stroke={2.4} />
-              <Text style={styles.goalChipText} numberOfLines={1}>
+            <View style={[styles.goalChip, { backgroundColor: accent + '1F' }]}>
+              <Icon name="goals" size={10} color={accent} stroke={2.4} />
+              <Text style={[styles.goalChipText, { color: accent }]} numberOfLines={1}>
                 {goalLabel}
               </Text>
             </View>
