@@ -19,10 +19,8 @@ function memberSinceLabel(iso: string): string {
   return `Member since ${d.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}`;
 }
 
-// The streak card wears the flame accent (matching the streak badge). Stat
-// tiles wear their badge family's color so the whole tab reads as one system:
-// tasks blue, goals-active purple, finished gold, active-days teal.
-const STREAK_BANNER = banner3dStyle('#FF9F0A', { tint: theme.card });
+// The streak/calendar card wears the app's blue accent.
+const STREAK_BANNER = banner3dStyle(theme.blue, { tint: theme.card });
 
 // The You tab: a profile/progress/identity surface (CLAUDE.md §5 + the
 // retention research in memory). Everything shown is the user's OWN real
