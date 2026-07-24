@@ -169,7 +169,8 @@ export default function TasksScreen() {
     <SafeAreaView style={styles.safe} edges={['top']}>
       <ScrollView
         style={{ flex: 1 }}
-        contentContainerStyle={{ padding: 20, paddingBottom: tabBarHeight + 40 }}
+        {/* Clear the 56px AddFab (sits at tabBarHeight + 16) plus a 16px gap. */}
+        contentContainerStyle={{ padding: 20, paddingBottom: tabBarHeight + 88 }}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.dim} colors={[theme.blue]} />
         }
