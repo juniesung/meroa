@@ -1,4 +1,4 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View, type ViewStyle } from 'react-native';
 
 import { Icon, type IconName } from '@/components/Icon';
 import { Progress } from '@/components/Progress';
@@ -19,13 +19,18 @@ const FAMILY: Record<ApiAchievementKey, { icon: IconName; accent: string }> = {
   active_days: { icon: 'clock', accent: '#34C6C6' },
 };
 
-// A single achievement tile. Earned → the family's accent chip + a 3D banner
-// (thicker left/bottom border in the deep shade). Not yet earned → a dimmed,
-// flat locked teaser showing what the next tier is and how close they are.
+// Three visual states:
+// - earned  → the full 3D colored banner (thick left/bottom edge + shadow).
+// - started → some progress but no tier yet (e.g. a 3-day streak toward 7):
+//             a colored OUTLINE in the family accent, no 3D fill — clearly
+//             "in progress" without claiming the badge.
+// - untouched (count 0) → flat grey.
 // Framing is the user's own progress — never a bond with Meroa (CLAUDE.md §2).
 export function AchievementBadge({ badge }: { badge: ApiAchievementView }) {
   const fam = FAMILY[badge.key];
   const earned = badge.earnedTier !== null;
+  const started = !earned && badge.count > 0;
+  const active = earned || started; // has color; untouched does not
   const title = earned ? badge.earnedLabel! : (badge.nextLabel ?? '—');
   const hasNext = badge.nextThreshold !== null;
 
@@ -35,18 +40,23 @@ export function AchievementBadge({ badge }: { badge: ApiAchievementView }) {
       : `Maxed out · ${badge.count} ${badge.unit}`
     : `${badge.count} / ${badge.nextThreshold} ${badge.unit}`;
 
-  // Earned → the shared 3D colored banner; locked → a flat grey teaser so the
-  // earned ones pop.
-  const banner = earned
+  const banner: ViewStyle = earned
     ? banner3dStyle(fam.accent, { tint: fam.accent + '1A' })
-    : styles.tileLockedBanner;
+    : started
+      ? { ...styles.tileOutlined, borderColor: fam.accent }
+      : styles.tileUntouched;
 
   return (
     <View style={[styles.tile, banner]}>
-      <View style={[styles.chip, { backgroundColor: earned ? fam.accent : theme.card2 }]}>
-        <Icon name={fam.icon} size={20} color={earned ? '#fff' : theme.faint} stroke={2.2} />
+      <View
+        style={[
+          styles.chip,
+          { backgroundColor: earned ? fam.accent : started ? fam.accent + '22' : theme.card2 },
+        ]}
+      >
+        <Icon name={fam.icon} size={20} color={earned ? '#fff' : started ? fam.accent : theme.faint} stroke={2.2} />
       </View>
-      <Text style={[styles.title, !earned && styles.titleLocked]} numberOfLines={1}>
+      <Text style={[styles.title, !active && styles.titleUntouched]} numberOfLines={1}>
         {title}
       </Text>
       <Text style={styles.sub} numberOfLines={1}>
@@ -54,7 +64,8 @@ export function AchievementBadge({ badge }: { badge: ApiAchievementView }) {
       </Text>
       {hasNext ? (
         <View style={styles.bar}>
-          <Progress value={(badge.progressToNext ?? 0) * 100} />
+          {/* Bar matches the family outline color (accent). */}
+          <Progress value={(badge.progressToNext ?? 0) * 100} color={fam.accent} />
         </View>
       ) : (
         <View style={styles.barSpacer} />
@@ -67,23 +78,20 @@ const styles = StyleSheet.create({
   tile: {
     width: '48%',
     borderRadius: 16,
-    // Asymmetric border widths = the 3D extrude (colors come from the banner
-    // style, earned or locked). Left/bottom are the thick edges; top/right
-    // are hairline.
-    borderTopWidth: 1,
-    borderRightWidth: 1,
-    borderLeftWidth: 3,
-    borderBottomWidth: 4,
     padding: 14,
     paddingBottom: 12,
     gap: 6,
   },
-  tileLockedBanner: {
+  // Started: a uniform colored outline (border color set inline per family).
+  tileOutlined: {
     backgroundColor: theme.surface,
-    borderTopColor: theme.border,
-    borderRightColor: theme.border,
-    borderLeftColor: theme.card2,
-    borderBottomColor: theme.card2,
+    borderWidth: 1.5,
+  },
+  // Untouched: flat, faint grey.
+  tileUntouched: {
+    backgroundColor: theme.surface,
+    borderWidth: 1,
+    borderColor: theme.border,
   },
   chip: {
     width: 40,
@@ -94,7 +102,7 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   title: { color: theme.text, fontSize: 14, fontWeight: '700' },
-  titleLocked: { color: theme.dim },
+  titleUntouched: { color: theme.dim },
   sub: { color: theme.faint, fontSize: 12 },
   bar: { marginTop: 4 },
   barSpacer: { height: 6, marginTop: 4 },

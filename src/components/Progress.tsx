@@ -12,7 +12,7 @@ import Animated, {
 import { theme } from '@/constants/theme';
 import { useReduceMotion } from '@/lib/motion';
 
-export function Progress({ value }: { value: number }) {
+export function Progress({ value, color }: { value: number; color?: string }) {
   const clamped = Math.min(100, Math.max(0, value));
   const progress = useSharedValue(clamped);
   const glow = useSharedValue(0);
@@ -38,15 +38,23 @@ export function Progress({ value }: { value: number }) {
   const animatedStyle = useAnimatedStyle(() => ({ width: `${progress.value}%` }));
   const glowStyle = useAnimatedStyle(() => ({ opacity: glow.value }));
 
+  // Default is the blue gradient (every existing caller). An explicit `color`
+  // renders a solid bar in that hue and recolors the fill glow to match —
+  // used by achievement badges so the bar matches the family outline.
+  const gradient: readonly [string, string] = color ? [color, color] : [theme.blue, theme.blueLight];
+
   return (
     <View style={styles.wrap}>
-      {/* Sits behind the track so only its blue shadow haloes past the filled
-          bar (iOS); on Android the coloured shadow no-ops, same as Ring. */}
-      <Animated.View pointerEvents="none" style={[styles.glow, glowStyle]} />
+      {/* Sits behind the track so only its shadow haloes past the filled bar
+          (iOS); on Android the coloured shadow no-ops, same as Ring. */}
+      <Animated.View
+        pointerEvents="none"
+        style={[styles.glow, color ? { backgroundColor: color, shadowColor: color } : null, glowStyle]}
+      />
       <View style={styles.track}>
         <Animated.View style={[styles.fill, animatedStyle]}>
           <LinearGradient
-            colors={[theme.blue, theme.blueLight]}
+            colors={gradient}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 0 }}
             style={StyleSheet.absoluteFill}
