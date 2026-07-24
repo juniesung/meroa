@@ -1,12 +1,14 @@
 import { and, isNull, sql } from 'drizzle-orm';
 
 import { db } from '../../db/client.ts';
-import { pushTokens, users } from '../../db/schema.ts';
+import { messages, pushTokens, users } from '../../db/schema.ts';
 import { logger } from '../../logger.ts';
-import type { VibePreset } from '../ai/system-prompt.ts';
+import { getOrCreateAppConversation } from '../conversations.ts';
+import { resolveTone } from '../ai/system-prompt.ts';
 import { composeNotificationBody } from './compose.ts';
+import { composeProactiveMessage } from './proactive-message.ts';
 import { alreadySent, isWithinQuietHours, withinFrequencyCap } from './policy.ts';
-import { sendPush } from './send.ts';
+import { claimNotification, deliverPush } from './send.ts';
 import { buildTrigger, type NotifyUser } from './triggers.ts';
 
 // How many opted-in users to scan per tick, and how many to process at once.
@@ -15,12 +17,6 @@ import { buildTrigger, type NotifyUser } from './triggers.ts';
 // only a handful — the pool bounds the worst case (e.g. a first-ever run).
 const SCAN_BATCH = 200;
 const CONCURRENCY = 5;
-
-const VIBES = new Set(['chill', 'supportive', 'direct', 'playful', 'balanced']);
-function styleOf(prefs: Record<string, unknown> | null): VibePreset | undefined {
-  const s = prefs?.communicationStyle;
-  return typeof s === 'string' && VIBES.has(s) ? (s as VibePreset) : undefined;
-}
 
 async function runPool<T>(items: T[], concurrency: number, fn: (item: T) => Promise<void>): Promise<void> {
   let cursor = 0;
@@ -82,15 +78,48 @@ export async function runNotificationTick(now: Date = new Date()): Promise<TickR
       if (!trigger) return;
       if (await alreadySent(user.id, trigger.dedupeKey)) return;
 
-      const body = await composeNotificationBody(trigger, styleOf(user.prefs));
-      const ok = await sendPush(user.id, {
+      const tone = resolveTone(user.prefs);
+      // The short push preview and the full in-chat message, composed together.
+      const [pushBody, chatBody] = await Promise.all([
+        composeNotificationBody(trigger, tone),
+        composeProactiveMessage(trigger, tone),
+      ]);
+
+      // Atomically claim the trigger BEFORE anything user-visible. If a
+      // concurrent tick already claimed it, we produce neither a chat message
+      // nor a push — a missed reach-out is cheaper than a duplicate one.
+      const claimed = await claimNotification(user.id, {
         kind: trigger.kind,
         title: 'Meroa',
-        body,
-        data: trigger.data,
+        body: pushBody,
         dedupeKey: trigger.dedupeKey,
       });
-      if (ok) sent++;
+      if (!claimed) return;
+
+      // Meroa reaches out FIRST: the real message lands in the chat thread, so
+      // opening the app shows it already there. The push is just the alert that
+      // pulls them in to read and reply — the reply is an ordinary turn from
+      // there. The reach-out has succeeded once the message is in the thread,
+      // whether or not push delivery (a blocked dev-build dependency) lands.
+      const conversation = await getOrCreateAppConversation(user.id);
+      // Use `proactiveKind`, NOT `kind`: `meta.kind` is a reserved history
+      // classification field (routes/messages.ts isCardMessage / historyContentFor).
+      // A proactive message is plain prose, so it must not carry a `kind` that
+      // could ever be mistaken for a card/pending marker.
+      await db.insert(messages).values({
+        conversationId: conversation.id,
+        role: 'assistant',
+        content: chatBody,
+        meta: { proactive: true, proactiveKind: trigger.kind },
+      });
+      sent++;
+
+      await deliverPush(user.id, {
+        kind: trigger.kind,
+        title: 'Meroa',
+        body: pushBody,
+        data: trigger.data,
+      });
     } catch (err) {
       // One user's failure never stops the tick for everyone else.
       logger.warn({ err, userId: user.id }, 'notification tick: per-user failure');

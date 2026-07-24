@@ -562,3 +562,57 @@ still-*pending* preview in a suggestion-shaped way that tripped the claim-check
 guard. The version that shipped instead scopes proactive state-citing to **real,
 confirmed** records only — never a pending preview — which is the same "quote only
 what's real" rule every other number and fact in this app already follows.
+
+---
+
+## 13. Addendum — 2026-07-23: voice stance + proactive in-chat messages
+
+A deliberate product shift (founder call, overriding CLAUDE.md §2's earlier
+goal-anchored caution — see the plan under `.claude/plans/`). Two changes, one
+principle each.
+
+**The persona now carries real edge and whole-life companion warmth by default.**
+The baseline `SYSTEM_PROMPT` (`system-prompt.ts`) was rewritten: opinions stated
+plainly, teasing and tough-love accountability, and care about the person's life
+beyond what's tracked. This is a **narrate-pass style** change and nothing more — it
+touches how Meroa *talks*, never what it decides (the act pass never sees the persona
+prose) and never what it may *claim* (every §6/§7/§9 guarantee is untouched, and the
+§12 "firm is never a license to claim an un-confirmed action" tie-in was re-stated).
+Per §0 this is legitimately prompt-tunable — voice is exactly the kind of thing a
+prompt *should* carry — but it is still a suggestion, so it goes through the battery
+and an as-a-user pass like everything else. One hard guarantee sits under the style:
+the edge is **topic-modulated** in the prompt (drops to zero on anything
+sensitive/emotional/crisis), and that boundary is the one place where getting the
+tone wrong is a safety issue, not a style nit.
+
+**Meroa reaches out first, as a real message in the thread.** The proactive engine
+(`lib/notifications/`) previously only sent a push that deep-linked to an *empty*
+chat. It now (workstream B/C of the plan) writes an actual `role: 'assistant'` row
+into the user's app conversation, tagged `meta: { proactive: true, kind }`, and the
+push merely previews it. Consequences for *this* pipeline to keep in mind:
+
+- A proactive message is an assistant turn with **no preceding user turn** — a new
+  shape in history (§5). It is server-authored prose, so it must clear the same bar
+  as a notification body, not a chat reply: every figure grounded and figure-guarded
+  (§9), composed off the critical path, with a deterministic template fallback.
+- It is **not** an action turn — no card, no tool call — so §3's silence rule doesn't
+  apply; prose is the whole point here. But it is still bound by "never invent a
+  number" and "quote only what's real," which is why its facts are built by the same
+  server-side `buildGoalCardSummaries`/records queries the tick already trusts.
+- The user's reply to it is an ordinary turn and needs no special handling — the
+  existing two-pass pipeline takes over from there.
+
+**Tone is now one warmth↔edge slider, not five named vibe presets.** The
+`VibePreset` enum (`chill`/`supportive`/`direct`/`playful`/`balanced`) and
+`PRESET_BLOCKS` were replaced by `ToneLevel` (0 = warmest … 4 = edgiest, 2 =
+the baseline persona unchanged) and `TONE_BLOCKS` in `system-prompt.ts`.
+`resolveTone(prefs)` reads the new numeric `prefs.tone` and maps any legacy
+`communicationStyle` onto the scale, so pre-slider users keep a coherent voice
+and the onboarding root guard (`app/_layout.tsx`) accepts either field. The
+client control is a custom gesture-handler + reanimated slider
+(`features/profile/ToneSlider.tsx`) — no new native module. This retired the
+`chill` lowercase behavior described in §12: `applyStyleCasing` is gone, because
+"lowercase energy" doesn't sit anywhere on a warmth axis. As before, tone touches
+the **narrate pass only** and never the act pass — it changes how Meroa talks,
+never what it decides, and the honesty floor + safety-modulation rule hold at
+every level of the slider.

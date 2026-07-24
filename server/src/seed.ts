@@ -32,7 +32,7 @@ async function main() {
       phoneE164: DEMO_PHONE,
       displayName: 'Alex',
       timezone: 'America/Chicago',
-      prefs: { communicationStyle: 'balanced' },
+      prefs: { tone: 2 },
     })
     .returning();
   if (!user) throw new Error('seed_user_insert_failed');

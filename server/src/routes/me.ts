@@ -93,6 +93,10 @@ const onboardingDraftSchema = z
 // (e.g. communicationStyle) survive a reminders-toggle update untouched.
 const prefsPatchSchema = z.object({
   proactiveCheckins: z.boolean().optional(),
+  // Voice tone slider: 0 = warmest, 4 = edgiest (see lib/ai/system-prompt.ts
+  // resolveTone). `communicationStyle` is kept accepted only so a client mid-
+  // rollout writing a legacy preset doesn't 400 — resolveTone maps it forward.
+  tone: z.number().int().min(0).max(4).optional(),
   communicationStyle: z.enum(['chill', 'supportive', 'direct', 'playful', 'balanced']).optional(),
   styleAdjustments: z
     .object({

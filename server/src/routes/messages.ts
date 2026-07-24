@@ -15,11 +15,11 @@ import { pickTaskCreatedQuip } from '../lib/ai/quips.ts';
 import { buildRecentChangesFeed, renderUndoTarget } from '../lib/ai/recent-changes.ts';
 import { hasValidAiConsent } from '../lib/consent.ts';
 import {
-  applyStyleCasing,
   buildConversationTailBlock,
   buildMemoryFactsText,
   buildTailBlock,
   isStyleAdjustments,
+  resolveTone,
   type ChatUserContext,
 } from '../lib/ai/system-prompt.ts';
 import { computeActiveGoalAllowance, computeTaskCreateAllowance } from '../lib/limits.ts';
@@ -90,8 +90,6 @@ const sendSchema = z.object({ text: z.string().trim().min(1).max(4000) });
 function isChatRole(role: string): role is 'user' | 'assistant' {
   return role === 'user' || role === 'assistant';
 }
-
-const VIBE_PRESETS = new Set(['chill', 'supportive', 'direct', 'playful', 'balanced']);
 
 // An action turn's card IS the assistant's reply — so it has to appear in the
 // model's history as one, or the conversation record lies about what happened.
@@ -262,9 +260,7 @@ messageRoutes.post('/', rateLimit({ windowMs: 60_000, max: 20 }), zValidator('js
     .where(eq(users.id, userId))
     .limit(1);
   const prefs = (user?.prefs ?? {}) as Record<string, unknown>;
-  const style = VIBE_PRESETS.has(prefs.communicationStyle as string)
-    ? (prefs.communicationStyle as ChatUserContext['style'])
-    : undefined;
+  const tone = resolveTone(prefs);
   const styleAdjustments = isStyleAdjustments(prefs.styleAdjustments)
     ? (prefs.styleAdjustments as ChatUserContext['styleAdjustments'])
     : undefined;
@@ -279,7 +275,7 @@ messageRoutes.post('/', rateLimit({ windowMs: 60_000, max: 20 }), zValidator('js
   const userContext: ChatUserContext = {
     displayName: user?.displayName ?? null,
     timezone: user?.timezone ?? null,
-    style,
+    tone,
     styleAdjustments,
     memories: memoryContext,
   };
@@ -514,7 +510,7 @@ messageRoutes.post('/', rateLimit({ windowMs: 60_000, max: 20 }), zValidator('js
         if (event.type === 'delta') {
           await stream.writeSSE({
             event: 'delta',
-            data: JSON.stringify({ text: applyStyleCasing(event.text, userContext.style) }),
+            data: JSON.stringify({ text: event.text }),
           });
         } else if (event.type === 'segment_end') {
           const [assistantMessage] = await db
@@ -522,7 +518,7 @@ messageRoutes.post('/', rateLimit({ windowMs: 60_000, max: 20 }), zValidator('js
             .values({
               conversationId: conversation.id,
               role: 'assistant',
-              content: applyStyleCasing(event.text, userContext.style),
+              content: event.text,
               ...(turnHadAction ? { meta: { actionAck: true } } : {}),
             })
             .returning();
@@ -566,7 +562,7 @@ messageRoutes.post('/', rateLimit({ windowMs: 60_000, max: 20 }), zValidator('js
           // on the task_creation_pending preview path (a different branch
           // entirely), so it never congratulates something not yet saved.
           if (event.toolName === 'create_task' && event.recordKind === 'task_created') {
-            const quip = pickTaskCreatedQuip(style);
+            const quip = pickTaskCreatedQuip(tone);
             if (quip) {
               const [quipMessage] = await db
                 .insert(messages)

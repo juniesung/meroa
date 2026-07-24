@@ -25,25 +25,15 @@ export type PushPayload = {
 };
 
 /**
- * Delivers one proactive push to every live device the user has, records it in
- * notifications_log (for the frequency cap and idempotency), and disables any
- * token Expo reports as unregistered. Returns whether at least one message was
- * accepted for delivery. Quiet-hours and cap gating happen in the tick BEFORE
- * this is called — this is the raw delivery layer.
+ * Atomically claims this proactive reach-out by writing its notifications_log
+ * row — the single source of truth for the frequency cap AND idempotency. If a
+ * dedupeKey collides (another tick already claimed this exact trigger), the
+ * onConflictDoNothing insert returns nothing and this returns false. Callers
+ * MUST claim before doing anything user-visible (delivering a push, writing a
+ * proactive chat message), so a lost race produces neither — "a missed send is
+ * cheaper than a duplicate one" now covers the in-chat message too.
  */
-export async function sendPush(userId: string, payload: PushPayload): Promise<boolean> {
-  const tokens = await db
-    .select()
-    .from(pushTokens)
-    .where(and(eq(pushTokens.userId, userId), isNull(pushTokens.disabledAt)));
-
-  const valid = tokens.filter((t) => Expo.isExpoPushToken(t.token));
-  if (!valid.length) return false;
-
-  // Record the send first, keyed by dedupeKey. If the row already exists
-  // (onConflictDoNothing hit the partial unique index), another tick already
-  // sent this trigger — bail without re-notifying. A missed send is cheaper
-  // than a duplicate one.
+export async function claimNotification(userId: string, payload: PushPayload): Promise<boolean> {
   if (payload.dedupeKey) {
     const inserted = await db
       .insert(notificationsLog)
@@ -58,15 +48,32 @@ export async function sendPush(userId: string, payload: PushPayload): Promise<bo
         target: [notificationsLog.userId, notificationsLog.dedupeKey],
       })
       .returning({ id: notificationsLog.id });
-    if (!inserted.length) return false;
-  } else {
-    await db.insert(notificationsLog).values({
-      userId,
-      kind: payload.kind,
-      title: payload.title,
-      body: payload.body,
-    });
+    return inserted.length > 0;
   }
+  await db.insert(notificationsLog).values({
+    userId,
+    kind: payload.kind,
+    title: payload.title,
+    body: payload.body,
+  });
+  return true;
+}
+
+/**
+ * Delivers one proactive push to every live device the user has and disables any
+ * token Expo reports as unregistered. Returns whether at least one message was
+ * accepted for delivery. This is delivery ONLY — the notifications_log row is
+ * written separately by claimNotification (call it first). Quiet-hours and cap
+ * gating happen in the tick before either.
+ */
+export async function deliverPush(userId: string, payload: PushPayload): Promise<boolean> {
+  const tokens = await db
+    .select()
+    .from(pushTokens)
+    .where(and(eq(pushTokens.userId, userId), isNull(pushTokens.disabledAt)));
+
+  const valid = tokens.filter((t) => Expo.isExpoPushToken(t.token));
+  if (!valid.length) return false;
 
   const messages: ExpoPushMessage[] = valid.map((t) => ({
     to: t.token,

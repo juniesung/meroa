@@ -3,8 +3,19 @@ import OpenAI from 'openai';
 import { env } from '../../env.ts';
 import { logger } from '../../logger.ts';
 import { didMisstateFigure } from '../ai/claim-check.ts';
-import { applyStyleCasing, type VibePreset } from '../ai/system-prompt.ts';
+import { DEFAULT_TONE, type ToneLevel } from '../ai/system-prompt.ts';
 import type { NotificationTrigger } from './triggers.ts';
+
+// A one-word warmth cue for the composer, derived from the tone slider. The
+// push is only 12 words, so tone matters less here than in the in-chat opener,
+// but a warm user still shouldn't get a blunt ping and vice-versa.
+const TONE_CUE: Record<ToneLevel, string> = {
+  0: 'very warm and gentle',
+  1: 'warm',
+  2: 'balanced',
+  3: 'a little blunt, light edge',
+  4: 'blunt and edgy (but never for something heavy)',
+};
 
 const COMPOSE_TIMEOUT_MS = 6000;
 // deepseek-v4-flash reasons before answering (emits reasoning_content first),
@@ -41,12 +52,11 @@ Output ONLY the message text, nothing else.`;
  * it: any figure the model got wrong (or an empty/failed/absent completion)
  * drops the AI copy and returns the deterministic template instead. The result
  * is self-healing — a bad generation degrades to a safe, correct line rather
- * than sending something false. Chill-preset users get the line lowercased at
- * the boundary (applyStyleCasing), the same guarantee-in-code the chat pass uses.
+ * than sending something false.
  */
 export async function composeNotificationBody(
   trigger: NotificationTrigger,
-  style: VibePreset | undefined,
+  tone: ToneLevel | undefined,
 ): Promise<string> {
   const openai = getClient();
   if (!openai) return trigger.templateBody;
@@ -63,7 +73,7 @@ export async function composeNotificationBody(
           { role: 'system', content: SYSTEM_PROMPT },
           {
             role: 'user',
-            content: `Tone preset: ${style ?? 'balanced'}\n\nFACTS (quote any number EXACTLY; never invent one):\n"""\n${trigger.facts}\n"""\n\nWrite the notification now.`,
+            content: `Tone: ${TONE_CUE[tone ?? DEFAULT_TONE]}\n\nFACTS (quote any number EXACTLY; never invent one):\n"""\n${trigger.facts}\n"""\n\nWrite the notification now.`,
           },
         ],
       },
@@ -80,7 +90,7 @@ export async function composeNotificationBody(
       logger.warn({ kind: trigger.kind }, 'composed notification failed figure guard — using template');
       return trigger.templateBody;
     }
-    return applyStyleCasing(text, style);
+    return text;
   } catch (err) {
     logger.warn({ err, kind: trigger.kind }, 'notification compose failed — using template');
     return trigger.templateBody;
