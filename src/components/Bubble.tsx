@@ -33,17 +33,28 @@ export function Bubble({
     marginTop: isFirstInGroup ? 3 : 1,
     marginBottom: isLastInGroup ? 3 : 1,
   };
-  const surface = me ? (
-    <LinearGradient
-      colors={theme.gradient}
-      start={{ x: 0, y: 0 }}
-      end={{ x: 0, y: 1 }}
-      style={[styles.bubble, styles.bubbleMeShadow, isLastInGroup && styles.bubbleMeTail]}
+  // Both senders use a plain View to size the bubble — a View reliably
+  // constrains its child Text to wrap at maxWidth. The blue "me" gradient is an
+  // absolute-fill layer *behind* the text, NOT the sizing container: when the
+  // gradient itself was the surface, it didn't propagate the maxWidth wrap
+  // constraint to the Text, so long messages laid out full-width and got
+  // clipped on the right instead of wrapping.
+  const surface = (
+    <View
+      style={[
+        styles.bubble,
+        me ? styles.bubbleMe : styles.bubbleAI,
+        isLastInGroup && (me ? styles.bubbleMeTail : styles.bubbleAITail),
+      ]}
     >
-      <Text style={styles.bubbleText}>{children}</Text>
-    </LinearGradient>
-  ) : (
-    <View style={[styles.bubble, styles.bubbleAI, isLastInGroup && styles.bubbleAITail]}>
+      {me && (
+        <LinearGradient
+          colors={theme.gradient}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 0, y: 1 }}
+          style={[styles.gradientFill, isLastInGroup && styles.bubbleMeTail]}
+        />
+      )}
       <Text style={styles.bubbleText}>{children}</Text>
     </View>
   );
@@ -67,14 +78,19 @@ const styles = StyleSheet.create({
     paddingVertical: 9,
     borderRadius: radii.bubble,
   },
-  bubbleMeShadow: {
+  // Solid fallback under the gradient so the rounded shadow casts and any
+  // sub-pixel edge reads as blue, never the page background.
+  bubbleMe: {
+    backgroundColor: theme.blueDeep,
     shadowColor: theme.blue,
     shadowOpacity: 0.45,
     shadowRadius: 12,
     shadowOffset: { width: 0, height: 6 },
   },
-  bubbleMeTail: { borderBottomRightRadius: radii.bubbleTail },
   bubbleAI: { backgroundColor: theme.bubbleAI },
+  bubbleMeTail: { borderBottomRightRadius: radii.bubbleTail },
   bubbleAITail: { borderBottomLeftRadius: radii.bubbleTail },
+  // Fills the bubble behind the text; borderRadius matches so the corners round.
+  gradientFill: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, borderRadius: radii.bubble },
   bubbleText: { color: '#fff', fontSize: 15, lineHeight: 20 },
 });
