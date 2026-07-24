@@ -354,7 +354,12 @@ export function TaskCard({
           TemplateRow) rather than a smaller inset box around just the
           icon/title, which used to leave the trailing checkbox and the rest
           of the banner looking unhighlighted and untappable on press. */}
-      <Animated.View pointerEvents="none" style={[styles.rimHighlight, rim.highlightStyle]} />
+      {/* Press highlight matches the card's own accent (its goal color, or
+          blue when unlinked) rather than always blue. */}
+      <Animated.View
+        pointerEvents="none"
+        style={[styles.rimHighlight, { borderColor: accent, backgroundColor: accent + '1A' }, rim.highlightStyle]}
+      />
       <Pressable
         onPress={handleBannerPress}
         onPressIn={rim.onPressIn}

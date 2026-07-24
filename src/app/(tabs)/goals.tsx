@@ -27,9 +27,13 @@ import { useMe } from '@/features/profile/queries';
 import { useTasks } from '@/features/tasks/queries';
 import { useTabBarHeight } from '@/hooks/use-tab-bar-inset';
 import { usePullRefresh } from '@/hooks/use-pull-refresh';
+import { banner3dStyle } from '@/lib/banner';
 import { haptics } from '@/lib/haptics';
 import type { ApiGoal, ApiGoalConsistency, ApiTask } from '@/lib/api/types';
 import { toIconName } from '@/lib/icon';
+
+// The "Today" summary card at the top of the Goals tab wears the app blue.
+const HEADER_BANNER = banner3dStyle(theme.blue, { tint: theme.card });
 
 // One goal in the list — its own tap-scale so the card presses in, instead of
 // a bare Pressable with no feedback. A component (not an inline map body) so it
@@ -210,7 +214,7 @@ export default function GoalsScreen() {
           </View>
         </View>
 
-        <View style={styles.headerCard}>
+        <View style={[styles.headerCard, HEADER_BANNER]}>
           <Ring value={todayPct} size={50} stroke={5} />
           <View style={{ flex: 1 }}>
             <Text style={styles.headerLabel}>Today</Text>
