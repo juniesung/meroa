@@ -115,12 +115,6 @@ const FOCUS_OPTIONS: {
   },
 ];
 
-function reflectionSentence(keys: FocusKey[]): string {
-  const parts = FOCUS_OPTIONS.filter((o) => keys.includes(o.key)).map((o) => o.reflection);
-  if (parts.length === 1) return parts[0];
-  return `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
-}
-
 // The type list and its row rendering are shared with the Goals-tab create
 // sheet (features/goals/goal-type-options.ts, components/GoalTypeOption.tsx)
 // so a goal type reads the same wherever it's picked.
@@ -269,12 +263,9 @@ export default function OnboardingScreen() {
           {step === 0 && (
             <StepFrame>
               <BigStat value="42%" />
-              <Text style={styles.title}>Goals that get written down get reached.</Text>
-              <Text style={styles.subtitle}>
-                People who write their goals down are 42% more likely to reach them (Matthews,
-                2015, n=267). I&apos;m Meroa — here to help you do exactly that. Let&apos;s show you
-                how, then write yours down.
-              </Text>
+              <Text style={styles.title}>Written-down goals get reached.</Text>
+              <Text style={styles.ref}>42% more likely · Matthews, 2015</Text>
+              <Text style={styles.subtitle}>I&apos;m Meroa. Let&apos;s write yours down.</Text>
               <PrimaryButton label="Let's do it" onPress={() => setStep(1)} style={styles.cta} />
             </StepFrame>
           )}
@@ -309,17 +300,11 @@ export default function OnboardingScreen() {
 
           {step === 2 && (
             <StepFrame>
-              <Text style={styles.title}>Talk to me like you would a friend.</Text>
-              <Text style={styles.subtitle}>
-                {focuses.length > 0 ? `You said you want to ${reflectionSentence(focuses)}. ` : ''}
-                No forms, no menus — just tell me what&apos;s going on.
-              </Text>
+              <Text style={styles.title}>Talk to me like a friend.</Text>
+              <Text style={styles.subtitle}>No forms. Just tell me what&apos;s going on.</Text>
               <ChatShowcase />
               <BigStat value="76% vs 43%" small />
-              <Text style={styles.subtitle}>
-                Checking in with someone raises that to 76%, versus 43% alone (same study).
-                That someone&apos;s me — every day.
-              </Text>
+              <Text style={styles.ref}>Reaching a goal, with check-ins vs. alone · Matthews, 2015</Text>
               <PrimaryButton label="Keep going" onPress={() => setStep(3)} style={styles.cta} />
             </StepFrame>
           )}
@@ -328,10 +313,7 @@ export default function OnboardingScreen() {
             <StepFrame>
               <BigStat value="94 studies" small />
               <Text style={styles.title}>I turn &quot;I should&quot; into a next step.</Text>
-              <Text style={styles.subtitle}>
-                Across 94 studies, planning one concrete step beat just meaning to (Gollwitzer
-                &amp; Sheeran, 2006). I turn what you tell me into real tasks.
-              </Text>
+              <Text style={styles.ref}>Planning one step beats intending · Gollwitzer &amp; Sheeran, 2006</Text>
               <TaskShowcase />
               <PrimaryButton label="Keep going" onPress={() => setStep(4)} style={styles.cta} />
             </StepFrame>
@@ -341,10 +323,7 @@ export default function OnboardingScreen() {
             <StepFrame>
               <BigStat value="138 studies" small />
               <Text style={styles.title}>Watching it add up keeps you going.</Text>
-              <Text style={styles.subtitle}>
-                138 studies, ~20,000 people: tracking progress improves your odds — more so when
-                it&apos;s recorded, not just felt (Harkin et al., 2016). I keep the score.
-              </Text>
+              <Text style={styles.ref}>~20,000 people · Harkin et al., 2016</Text>
               <GoalShowcase />
               <PrimaryButton label="Keep going" onPress={() => setStep(5)} style={styles.cta} />
             </StepFrame>
@@ -353,10 +332,7 @@ export default function OnboardingScreen() {
           {step === 5 && (
             <StepFrame>
               <Text style={styles.title}>The right nudge, right when it counts.</Text>
-              <Text style={styles.subtitle}>
-                A reminder works best right when autopilot would take over. I&apos;ll nudge you
-                then — not just whenever.
-              </Text>
+              <Text style={styles.subtitle}>I nudge you when autopilot would take over — not just whenever.</Text>
               <ReminderShowcase />
               <PrimaryButton label="Keep going" onPress={() => setStep(6)} style={styles.cta} />
             </StepFrame>
@@ -366,10 +342,8 @@ export default function OnboardingScreen() {
             <StepFrame>
               <BigStat value="66 days" />
               <Text style={styles.title}>Consistency beats intensity.</Text>
-              <Text style={styles.subtitle}>
-                Real habits take a median of 66 days — not 21 (Lally et al., 2010). Missing one
-                day doesn&apos;t break it; showing up most days does. That&apos;s my job.
-              </Text>
+              <Text style={styles.ref}>Median to a real habit, not 21 · Lally et al., 2010</Text>
+              <Text style={styles.subtitle}>Miss a day, no problem. Show up most days.</Text>
               <ConsistencyShowcase />
               <PrimaryButton label="I'm in" onPress={() => setStep(7)} style={styles.cta} />
             </StepFrame>
@@ -378,9 +352,7 @@ export default function OnboardingScreen() {
           {step === 7 && (
             <StepFrame>
               <Text style={styles.title}>What kind of goal?</Text>
-              <Text style={styles.subtitle}>
-                Pick whichever fits — here&apos;s what each looks like in the app.
-              </Text>
+              <Text style={styles.subtitle}>Pick whichever fits.</Text>
               <View style={styles.optionList}>
                 {GOAL_TYPE_OPTIONS.map((option) => (
                   <GoalTypeOption
@@ -524,10 +496,8 @@ export default function OnboardingScreen() {
 
           {step === 10 && (
             <StepFrame>
-              <Text style={styles.title}>Last thing — how should I talk to you?</Text>
-              <Text style={styles.subtitle}>
-                Slide toward warm or edgy. You can change this any time in the You tab.
-              </Text>
+              <Text style={styles.title}>How should I sound?</Text>
+              <Text style={styles.subtitle}>Slide toward warm or edgy. Change it anytime.</Text>
               <View style={styles.optionList}>
                 <ToneSlider
                   value={tone}
@@ -543,11 +513,7 @@ export default function OnboardingScreen() {
           {step === 11 && (
             <StepFrame>
               <Text style={styles.title}>This is you, committing.</Text>
-              <Text style={styles.subtitle}>
-                The people who show up most days — not perfect days — are the ones who get
-                there. Not because they never miss. Because they never stop. That&apos;s what
-                I&apos;m here for.
-              </Text>
+              <Text style={styles.subtitle}>Show up most days, not perfect days. That&apos;s the whole game.</Text>
               <View style={styles.recap}>
                 {goalName.trim() && <RecapRow text={`Goal: ${goalName.trim()}`} />}
                 {goalType === 'habit'
@@ -908,6 +874,14 @@ const styles = StyleSheet.create({
     lineHeight: 21,
     textAlign: 'center',
     paddingHorizontal: 8,
+  },
+  // Compact source citation under a big stat — the study is referenced, not
+  // explained (keeps the flow stat-forward and un-wordy).
+  ref: {
+    color: theme.faint,
+    fontSize: 12,
+    textAlign: 'center',
+    marginTop: 8,
   },
   optionList: { alignSelf: 'stretch', marginTop: 16 },
   option: {

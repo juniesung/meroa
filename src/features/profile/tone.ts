@@ -18,16 +18,19 @@ export function toneLabel(level: number): string {
   return TONE_STOPS.find((s) => s.level === level)?.label ?? 'Balanced';
 }
 
-// A one-line description under the slider so the setting is more than a word.
-const TONE_BLURB: Record<number, string> = {
-  0: 'Gentle and encouraging. All warmth, no teasing.',
-  1: 'Warm and supportive, with just a little candor.',
-  2: 'A real friend: honest, a little humor, holds you to your word.',
-  3: 'Blunter and more teasing. Calls things as they are.',
-  4: 'Sharp, dry, and a little roast-y. Tough love, full send.',
+// A live example of how Meroa replies at each level — the same situation
+// ("skipped the gym again") answered five ways, so moving the slider shows the
+// voice change instead of describing it. Shown under the slider (ToneSlider).
+export const TONE_EXAMPLE_PROMPT = 'skipped the gym again 😩';
+const TONE_EXAMPLE: Record<number, string> = {
+  0: 'no shame at all, some weeks are just heavy. want to start tiny tomorrow?',
+  1: "hey, it happens. what'd make tomorrow a little easier to show up?",
+  2: "third one this week though. what's actually getting in the way?",
+  3: 'third this week. "tomorrow" isn\'t a plan. what\'s the real blocker?',
+  4: 'you and the gym are basically pen pals now. three skips, quit stalling. what\'s up?',
 };
-export function toneBlurb(level: number): string {
-  return TONE_BLURB[level] ?? TONE_BLURB[DEFAULT_TONE] ?? '';
+export function toneExample(level: number): string {
+  return TONE_EXAMPLE[level] ?? TONE_EXAMPLE[DEFAULT_TONE] ?? '';
 }
 
 // Client mirror of the server's resolveTone: prefer prefs.tone, otherwise map a

@@ -4,7 +4,7 @@ import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { runOnJS, useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
 
 import { radii, theme } from '@/constants/theme';
-import { TONE_MAX, TONE_MIN, TONE_STOPS, toneBlurb, toneLabel } from './tone';
+import { TONE_EXAMPLE_PROMPT, TONE_MAX, TONE_MIN, TONE_STOPS, toneExample, toneLabel } from './tone';
 
 const THUMB = 28;
 const TRACK_H = 6;
@@ -73,7 +73,17 @@ export function ToneSlider({
   return (
     <View>
       <Text style={styles.currentLabel}>{toneLabel(value)}</Text>
-      <Text style={styles.blurb}>{toneBlurb(value)}</Text>
+
+      {/* Live example: the same message answered in the current tone, so moving
+          the slider shows the voice instead of describing it. */}
+      <View style={styles.preview}>
+        <View style={styles.userBubble}>
+          <Text style={styles.userText}>{TONE_EXAMPLE_PROMPT}</Text>
+        </View>
+        <View style={styles.aiBubble}>
+          <Text style={styles.aiText}>{toneExample(value)}</Text>
+        </View>
+      </View>
 
       <View
         style={styles.track}
@@ -105,16 +115,29 @@ export function ToneSlider({
 }
 
 const styles = StyleSheet.create({
-  currentLabel: { color: theme.text, fontSize: 18, fontWeight: '700', textAlign: 'center' },
-  blurb: {
-    color: theme.dim,
-    fontSize: 13,
-    lineHeight: 18,
-    textAlign: 'center',
-    marginTop: 6,
-    marginBottom: 22,
-    minHeight: 36,
+  currentLabel: { color: theme.blue, fontSize: 16, fontWeight: '700', textAlign: 'center' },
+  preview: { marginTop: 14, marginBottom: 24, minHeight: 96, justifyContent: 'center' },
+  userBubble: {
+    alignSelf: 'flex-end',
+    maxWidth: '82%',
+    backgroundColor: theme.blueDeep,
+    borderRadius: radii.bubble,
+    borderBottomRightRadius: radii.bubbleTail,
+    paddingHorizontal: 13,
+    paddingVertical: 8,
+    marginBottom: 6,
   },
+  userText: { color: '#fff', fontSize: 14, lineHeight: 19 },
+  aiBubble: {
+    alignSelf: 'flex-start',
+    maxWidth: '86%',
+    backgroundColor: theme.bubbleAI,
+    borderRadius: radii.bubble,
+    borderBottomLeftRadius: radii.bubbleTail,
+    paddingHorizontal: 13,
+    paddingVertical: 8,
+  },
+  aiText: { color: theme.text, fontSize: 14, lineHeight: 19 },
   track: { height: THUMB, justifyContent: 'center' },
   trackBase: {
     position: 'absolute',
