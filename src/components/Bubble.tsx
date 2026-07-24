@@ -1,5 +1,5 @@
 import { LinearGradient } from 'expo-linear-gradient';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 
 import { radii, theme } from '@/constants/theme';
 
@@ -27,6 +27,14 @@ export function Bubble({
   children: React.ReactNode;
 }) {
   const me = from === 'me';
+  // A FIXED-PIXEL max width, not "78%". A percentage max width can't resolve
+  // against a parent with no definite width — and AI-reportable bubbles are
+  // wrapped in a Pressable (below) that has exactly that, which collapsed the
+  // bubble to ~1 character and broke short words ("Bet." → "B" / "et" / ".")
+  // across lines. A px cap resolves regardless of parent. 14px is the chat's
+  // horizontal padding on each side.
+  const { width } = useWindowDimensions();
+  const maxBubbleWidth = (width - 28) * 0.78;
   const rowStyle = {
     flexDirection: 'row' as const,
     justifyContent: me ? ('flex-end' as const) : ('flex-start' as const),
@@ -43,6 +51,7 @@ export function Bubble({
     <View
       style={[
         styles.bubble,
+        { maxWidth: maxBubbleWidth },
         me ? styles.bubbleMe : styles.bubbleAI,
         isLastInGroup && (me ? styles.bubbleMeTail : styles.bubbleAITail),
       ]}
@@ -73,7 +82,6 @@ export function Bubble({
 
 const styles = StyleSheet.create({
   bubble: {
-    maxWidth: '78%',
     paddingHorizontal: 14,
     paddingVertical: 9,
     borderRadius: radii.bubble,
