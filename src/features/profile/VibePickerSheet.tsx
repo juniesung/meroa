@@ -29,7 +29,7 @@ function TonePickerBody() {
   // slider is short, so rendering it directly lets the sheet size to the whole
   // control.
   return (
-    <View style={{ paddingBottom: 8 }}>
+    <View style={{ paddingTop: 4, paddingBottom: 32 }}>
       <ToneSlider
         value={value}
         onChange={(level) => {
