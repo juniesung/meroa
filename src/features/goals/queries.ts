@@ -148,6 +148,13 @@ export function useArchiveGoal() {
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: goalsQueryKey });
       queryClient.invalidateQueries({ queryKey: archivedGoalsQueryKey });
+      // Archiving a goal soft-deletes its linked tasks (incl. recurring
+      // instances) server-side (archiveGoalCascadeInTx). Without these the
+      // Tasks tab, streak math, and profile keep showing rows that are already
+      // gone — the exact mirror of what useRestoreGoal below already refreshes.
+      queryClient.invalidateQueries({ queryKey: tasksQueryKey });
+      queryClient.invalidateQueries({ queryKey: goalConsistencyQueryKey });
+      queryClient.invalidateQueries({ queryKey: ['profile'] });
     },
   });
 }
