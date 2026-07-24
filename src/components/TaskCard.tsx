@@ -10,6 +10,7 @@ import Animated, {
 import { LinearGradient } from 'expo-linear-gradient';
 
 import { radii, theme } from '@/constants/theme';
+import { banner3dStyle } from '@/lib/banner';
 import { useGoals } from '@/features/goals/queries';
 import { useMe } from '@/features/profile/queries';
 import { useLiveNow } from '@/hooks/use-live-now';
@@ -245,6 +246,11 @@ export function taskProgressFraction(task: ApiTask, now: number = Date.now()): n
   }
 }
 
+// Tasks read blue (the app accent). Keep the dark card surface (tint: card) —
+// only the 3D colored edge + shadow carry the color, so a long task list stays
+// calm rather than a wall of blue tint.
+const TASK_BANNER = banner3dStyle(theme.blue, { tint: theme.card });
+
 export function TaskCard({
   task,
   onToggleComplete,
@@ -342,7 +348,7 @@ export function TaskCard({
   };
 
   return (
-    <View style={styles.card}>
+    <View style={[styles.card, TASK_BANNER]}>
       {/* A direct child of the card, not the Pressable below — sized to hug
           the card's own outer border (same pattern as tasks.tsx's
           TemplateRow) rather than a smaller inset box around just the

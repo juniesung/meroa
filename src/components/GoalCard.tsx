@@ -2,10 +2,21 @@ import type { ReactNode } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { radii, theme } from '@/constants/theme';
+import { banner3dStyle } from '@/lib/banner';
 import type { GoalStreak, GoalTemplateKey } from '@/lib/api/types';
 import { Icon, type IconName } from './Icon';
 import { Progress } from './Progress';
 import { Ring } from './Ring';
+
+// Per-type goal colors — distinct from tasks (blue) and from each other:
+// savings green (money), habit orange (the flame/streak), indirect teal
+// (a tracked metric), milestone purple (staged progress).
+const GOAL_TYPE_ACCENT: Record<GoalTemplateKey, string> = {
+  savings: '#30D158',
+  habit: '#FF9F0A',
+  indirect: '#34C6C6',
+  milestone: '#BF5AF2',
+};
 
 function CardShell({
   icon,
@@ -23,7 +34,10 @@ function CardShell({
   children?: ReactNode;
 }) {
   return (
-    <View style={styles.card}>
+    // Each goal extrudes in its own type accent (the same 3D banner as task
+    // cards and achievement badges); dark surface kept so a goals list stays
+    // calm, only the edge + shadow carry the color.
+    <View style={[styles.card, banner3dStyle(accent ?? theme.blue, { tint: theme.card })]}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
         <View style={[styles.iconChip, { backgroundColor: `${accent ?? theme.blue}22` }]}>
           <Icon name={icon} size={18} color={accent ?? theme.blue} stroke={1.9} />
@@ -98,6 +112,11 @@ export function GoalCard({
   // (or a tab kept mounted behind another) never fakes a finish.
   celebrate?: boolean;
 }) {
+  // Each goal type gets its own color so goals read distinctly from tasks
+  // (blue) and from each other. An explicit `accent` prop still wins.
+  const resolvedAccent = accent ?? GOAL_TYPE_ACCENT[type] ?? theme.blue;
+  accent = resolvedAccent;
+
   if (type === 'habit') {
     const s = streak ?? { current: 0, longest: 0, doneCount: 0 };
     const lit = s.current > 0;

@@ -3,20 +3,20 @@ import { StyleSheet, Text, View } from 'react-native';
 import { Icon, type IconName } from '@/components/Icon';
 import { Progress } from '@/components/Progress';
 import { theme } from '@/constants/theme';
+import { banner3dStyle } from '@/lib/banner';
 import type { ApiAchievementKey, ApiAchievementView } from '@/lib/api/types';
 
-// Per-family identity: icon (mirrors server catalog.ts) + an accent and a
-// darker "deep" shade. The deep shade forms the thicker left+bottom border
-// that gives each earned banner a subtle 3D/extruded look. Colors are chosen
-// so tasks vs goals (and each family) read as distinct at a glance — tasks
-// blue, streak the warm flame, goals started purple, goals finished gold,
-// active days teal.
-const FAMILY: Record<ApiAchievementKey, { icon: IconName; accent: string; deep: string }> = {
-  tasks_completed: { icon: 'check', accent: '#0A84FF', deep: '#0A5FCF' },
-  streak: { icon: 'flame', accent: '#FF9F0A', deep: '#C2760A' },
-  goals_started: { icon: 'sparkle', accent: '#BF5AF2', deep: '#8B3FBF' },
-  goals_finished: { icon: 'crown', accent: '#FFD60A', deep: '#C79E00' },
-  active_days: { icon: 'clock', accent: '#34C6C6', deep: '#1E8F8F' },
+// Per-family identity: icon (mirrors server catalog.ts) + an accent. Colors are
+// chosen so tasks vs goals (and each family) read as distinct at a glance —
+// tasks blue, streak the warm flame, goals started purple, goals finished gold,
+// active days teal. The 3D extrude is the shared banner3dStyle (lib/banner.ts),
+// the same look task and goal cards use.
+const FAMILY: Record<ApiAchievementKey, { icon: IconName; accent: string }> = {
+  tasks_completed: { icon: 'check', accent: '#0A84FF' },
+  streak: { icon: 'flame', accent: '#FF9F0A' },
+  goals_started: { icon: 'sparkle', accent: '#BF5AF2' },
+  goals_finished: { icon: 'crown', accent: '#FFD60A' },
+  active_days: { icon: 'clock', accent: '#34C6C6' },
 };
 
 // A single achievement tile. Earned → the family's accent chip + a 3D banner
@@ -35,26 +35,14 @@ export function AchievementBadge({ badge }: { badge: ApiAchievementView }) {
       : `Maxed out · ${badge.count} ${badge.unit}`
     : `${badge.count} / ${badge.nextThreshold} ${badge.unit}`;
 
-  // The 3D extrude: left + bottom edges are thick and use the deep family
-  // shade (earned) or a plain dark edge (locked); top + right stay hairline.
-  const banner3d = earned
-    ? {
-        backgroundColor: theme.card,
-        borderTopColor: fam.accent + '55',
-        borderRightColor: fam.accent + '55',
-        borderLeftColor: fam.deep,
-        borderBottomColor: fam.deep,
-      }
-    : {
-        backgroundColor: theme.surface,
-        borderTopColor: theme.border,
-        borderRightColor: theme.border,
-        borderLeftColor: theme.card2,
-        borderBottomColor: theme.card2,
-      };
+  // Earned → the shared 3D colored banner; locked → a flat grey teaser so the
+  // earned ones pop.
+  const banner = earned
+    ? banner3dStyle(fam.accent, { tint: fam.accent + '1A' })
+    : styles.tileLockedBanner;
 
   return (
-    <View style={[styles.tile, banner3d]}>
+    <View style={[styles.tile, banner]}>
       <View style={[styles.chip, { backgroundColor: earned ? fam.accent : theme.card2 }]}>
         <Icon name={fam.icon} size={20} color={earned ? '#fff' : theme.faint} stroke={2.2} />
       </View>
@@ -79,8 +67,9 @@ const styles = StyleSheet.create({
   tile: {
     width: '48%',
     borderRadius: 16,
-    // Asymmetric border = the 3D extrude. Left/bottom are the "lit" thick
-    // edges; top/right are hairline.
+    // Asymmetric border widths = the 3D extrude (colors come from the banner
+    // style, earned or locked). Left/bottom are the thick edges; top/right
+    // are hairline.
     borderTopWidth: 1,
     borderRightWidth: 1,
     borderLeftWidth: 3,
@@ -88,6 +77,13 @@ const styles = StyleSheet.create({
     padding: 14,
     paddingBottom: 12,
     gap: 6,
+  },
+  tileLockedBanner: {
+    backgroundColor: theme.surface,
+    borderTopColor: theme.border,
+    borderRightColor: theme.border,
+    borderLeftColor: theme.card2,
+    borderBottomColor: theme.card2,
   },
   chip: {
     width: 40,
