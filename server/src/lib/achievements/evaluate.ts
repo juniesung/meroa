@@ -1,28 +1,28 @@
 import { and, eq, isNull, sql } from 'drizzle-orm';
 
-import { achievements, goals, records } from '../../db/schema.ts';
+import { achievements, goals, records, tasks } from '../../db/schema.ts';
 import { buildGoalConsistency } from '../goals/consistency.ts';
 import type { DbOrTx } from '../usage.ts';
 import { db } from '../../db/client.ts';
 import { type AchievementKey, earnedThresholds } from './catalog.ts';
 
 // --- real counts (the only numbers a badge is ever allowed to reflect) -----
-// Each maps one achievement family to a count over real, non-reverted records
-// (records.revertedAt IS NULL — an undone action must un-count, CLAUDE.md §2).
-// Kept as small named queries so /profile/overview's stat row can reuse the
-// exact same numbers the badges are earned from — one definition, never two.
+// Each maps one achievement family to a real count. Kept as small named
+// queries so /profile/overview's stat row reuses the exact same numbers the
+// badges are earned from — one definition, never two.
 
 export async function countTasksCompleted(executor: DbOrTx, userId: string): Promise<number> {
+  // Count task instances currently in `done` status — NOT task_completion
+  // records. applyProgress writes a task_completion record on every toggle
+  // (including un-checking) and never reverts the prior one, so counting those
+  // records inflates on any check→uncheck→re-check. A recurring task's daily
+  // instances are separate rows, so each done day still counts once; the
+  // template itself is never `done`. Un-checking flips status back to open, so
+  // the count drops honestly (the earned badge row stays — it's append-only).
   const [row] = await executor
     .select({ n: sql<number>`count(*)::int` })
-    .from(records)
-    .where(
-      and(
-        eq(records.userId, userId),
-        eq(records.kind, 'task_completion'),
-        isNull(records.revertedAt),
-      ),
-    );
+    .from(tasks)
+    .where(and(eq(tasks.userId, userId), eq(tasks.status, 'done'), isNull(tasks.deletedAt)));
   return row?.n ?? 0;
 }
 

@@ -80,12 +80,11 @@ export function assembleAchievements(
       : null;
 
     const next = nextTier(family.key, count);
-    // Progress is measured from the previously-earned threshold to the next one
-    // so the bar fills across the current tier band, not from zero every time.
-    const floor = highest?.tier ?? 0;
-    const progressToNext = next
-      ? Math.max(0, Math.min(1, (count - floor) / (next.threshold - floor)))
-      : null;
+    // Progress is absolute (count / next threshold) so the bar matches the
+    // "count / next" label shown on the badge — e.g. "1 / 3" reads as a third
+    // full, not empty (which a band-relative fill would show right after
+    // earning the prior tier).
+    const progressToNext = next ? Math.max(0, Math.min(1, count / next.threshold)) : null;
 
     return {
       key: family.key,
@@ -114,13 +113,20 @@ async function countGoalsActive(userId: string): Promise<number> {
 async function buildMonthRecap(userId: string, tz: string, ym: string): Promise<MonthRecap> {
   const inMonth = sql`to_char(${records.occurredAt} at time zone ${tz}, 'YYYY-MM') = ${ym}`;
 
+  // Tasks completed this month = tasks currently `done` whose completion
+  // record landed this month. Keyed on the task's CURRENT completedRecordId
+  // (one per done task) rather than raw task_completion records, so a
+  // check→uncheck→re-check can't inflate it. AT TIME ZONE via inMonth applies
+  // to records.occurredAt below through the join.
   const [tasksRow] = await db
     .select({ n: sql<number>`count(*)::int` })
-    .from(records)
+    .from(tasks)
+    .innerJoin(records, eq(tasks.completedRecordId, records.id))
     .where(
       and(
-        eq(records.userId, userId),
-        eq(records.kind, 'task_completion'),
+        eq(tasks.userId, userId),
+        eq(tasks.status, 'done'),
+        isNull(tasks.deletedAt),
         isNull(records.revertedAt),
         inMonth,
       ),

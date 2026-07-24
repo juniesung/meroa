@@ -36,11 +36,11 @@ describe('assembleAchievements', () => {
     expect(tasks.nextThreshold).toBe(50);
   });
 
-  it('fills the progress bar across the current tier band, not from zero', () => {
-    // 30 tasks: earned tier 10, next tier 50 → (30-10)/(50-10) = 0.5
+  it('fills the progress bar to count / next threshold (matches the label)', () => {
+    // 30 tasks toward the next tier of 50 → 30/50 = 0.6, matching "30 / 50".
     const rows = [{ key: 'tasks_completed', tier: 10, earnedAt: D }];
     const tasks = assembleAchievements(counts({ tasks_completed: 30 }), rows).find((a) => a.key === 'tasks_completed')!;
-    expect(tasks.progressToNext).toBeCloseTo(0.5, 5);
+    expect(tasks.progressToNext).toBeCloseTo(0.6, 5);
   });
 
   it('nulls the teaser + progress once every tier is earned', () => {
