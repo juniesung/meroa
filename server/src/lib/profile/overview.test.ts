@@ -53,6 +53,19 @@ describe('assembleAchievements', () => {
     expect(finished.progressToNext).toBeNull();
   });
 
+  it('derives earned state from the live count, not stale rows', () => {
+    // A tier-10 row exists (earned when the count was inflated by a bug), but
+    // the honest count is now 3 → the badge must show tier 1, not tier 10.
+    const rows = [
+      { key: 'tasks_completed', tier: 1, earnedAt: D },
+      { key: 'tasks_completed', tier: 10, earnedAt: D },
+    ];
+    const tasks = assembleAchievements(counts({ tasks_completed: 3 }), rows).find((a) => a.key === 'tasks_completed')!;
+    expect(tasks.earnedTier).toBe(1);
+    expect(tasks.earnedLabel).toBe('First step');
+    expect(tasks.nextThreshold).toBe(10);
+  });
+
   it('returns one view per catalog family', () => {
     const views = assembleAchievements(counts({}), []);
     expect(views.map((v) => v.key).sort()).toEqual(

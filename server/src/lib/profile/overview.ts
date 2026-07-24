@@ -6,6 +6,7 @@ import { ymdInTz } from '../tasks/recurrence.ts';
 import {
   ACHIEVEMENT_CATALOG,
   type AchievementKey,
+  earnedThresholds,
   nextTier,
 } from '../achievements/catalog.ts';
 import {
@@ -64,20 +65,20 @@ export function assembleAchievements(
   counts: AchievementCounts,
   earnedRows: { key: string; tier: number; earnedAt: Date }[],
 ): AchievementView[] {
-  const earnedByKey = new Map<string, { tier: number; earnedAt: Date }[]>();
-  for (const r of earnedRows) {
-    const list = earnedByKey.get(r.key) ?? [];
-    list.push({ tier: r.tier, earnedAt: r.earnedAt });
-    earnedByKey.set(r.key, list);
-  }
+  // earnedRows only supply the earned DATE — the earned/locked STATE is derived
+  // live from the real count, so display always reflects the honest number and
+  // self-corrects from any past miscount (a badge earned before a counting fix
+  // never shows as earned once the count no longer supports it).
+  const earnedAtByKeyTier = new Map<string, Date>();
+  for (const r of earnedRows) earnedAtByKeyTier.set(`${r.key}:${r.tier}`, r.earnedAt);
 
   return ACHIEVEMENT_CATALOG.map((family) => {
     const count = counts[family.key];
-    const earned = (earnedByKey.get(family.key) ?? []).sort((a, b) => b.tier - a.tier);
-    const highest = earned[0] ?? null;
-    const highestLabel = highest
-      ? (family.tiers.find((t) => t.threshold === highest.tier)?.label ?? null)
-      : null;
+    const earnedTiers = earnedThresholds(family.key, count);
+    const highestTier = earnedTiers.length ? Math.max(...earnedTiers) : null;
+    const highestLabel =
+      highestTier !== null ? (family.tiers.find((t) => t.threshold === highestTier)?.label ?? null) : null;
+    const earnedAt = highestTier !== null ? earnedAtByKeyTier.get(`${family.key}:${highestTier}`) ?? null : null;
 
     const next = nextTier(family.key, count);
     // Progress is absolute (count / next threshold) so the bar matches the
@@ -90,9 +91,9 @@ export function assembleAchievements(
       key: family.key,
       unit: family.unit,
       count,
-      earnedTier: highest?.tier ?? null,
+      earnedTier: highestTier,
       earnedLabel: highestLabel,
-      earnedAt: highest ? highest.earnedAt.toISOString() : null,
+      earnedAt: earnedAt ? earnedAt.toISOString() : null,
       nextThreshold: next?.threshold ?? null,
       nextLabel: next?.label ?? null,
       progressToNext,
