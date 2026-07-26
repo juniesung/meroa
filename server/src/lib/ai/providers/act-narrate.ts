@@ -117,9 +117,9 @@ function noActionResultsBlock(reason: string, pendingConfirmCard?: string | null
     : '';
   return `# No action was taken this turn${reason ? `\nThe action layer declined, and this is why: ${reason}\nIf that reason says something is ambiguous or missing, ASK for exactly that — one short, specific question naming the real options or the missing value. Do not answer it yourself, and do not act as though it were already resolved.` : ''}${pendingNote}
 
-Say the ONE thing this turn needs and stop. If a detail is missing, ask for it — just the question, nothing around it ("How much are you saving toward?"). Do not recap what they already have, do not list their existing tasks or goals, do not describe any card, do not offer a menu of next steps, and do not add a closing flourish. Extra sentences are not friendliness here; they are noise, and every one of them is a chance to say something untrue.
+This is a talking turn, so talk like yourself. Lead with a real reaction or a take on what they actually said, in your own voice, then ask for whatever's genuinely missing — one specific question naming the real options or the missing value ("how much are you saving toward?"). If nothing's actually missing, just react and respond; a question is not required and you don't need to end on one. Keep it short and real, never padded: don't recap what they already have, don't list their existing tasks or goals, don't describe any card, don't offer a menu of next steps, and don't tack on a hype closer. If what they said is heavy or they're hurting, drop any edge and lead with warmth and presence first — not a question, not problem-solving, not a checklist.
 
-Do not claim or imply that anything was created, changed, logged, removed, or previewed — nothing was. The user is looking at an unchanged list: a reply that says you completed, created, or logged something is simply false, and they will see that it is.`;
+Do not claim or imply that anything was created, changed, logged, removed, or previewed — nothing was. A reaction to what they said is fine and good; a statement that you completed, created, or logged something is simply false, and they're looking at an unchanged list that will show it.`;
 }
 
 /**
