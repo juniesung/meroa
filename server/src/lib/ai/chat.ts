@@ -2,6 +2,7 @@ import { env } from '../../env.ts';
 import type { ChatUserContext } from './system-prompt.ts';
 import { streamChatReplyAnthropic } from './providers/anthropic.ts';
 import { streamChatReplyDeepseek } from './providers/deepseek.ts';
+import { streamChatReplyMistral } from './providers/mistral.ts';
 import { streamChatReplyOpenai } from './providers/openai.ts';
 import type { ChatActionContext, ChatHistoryMessage, ChatStreamEvent } from './providers/shared.ts';
 
@@ -34,5 +35,6 @@ export function streamChatReply(
 ): AsyncGenerator<ChatStreamEvent> {
   if (env.AI_PROVIDER === 'openai') return streamChatReplyOpenai(history, user, tailText, actionCtx, narrateTailText, conversationTailText, stateFactsText);
   if (env.AI_PROVIDER === 'deepseek') return streamChatReplyDeepseek(history, user, tailText, actionCtx, narrateTailText, conversationTailText, stateFactsText);
+  if (env.AI_PROVIDER === 'mistral') return streamChatReplyMistral(history, user, tailText, actionCtx, narrateTailText, conversationTailText, stateFactsText);
   return streamChatReplyAnthropic(history, user, tailText, actionCtx);
 }

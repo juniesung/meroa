@@ -6,13 +6,17 @@ const schema = z.object({
   JWT_SECRET: z.string().min(32, 'JWT_SECRET must be at least 32 characters'),
   PORT: z.coerce.number().int().positive().default(8787),
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
-  AI_PROVIDER: z.enum(['anthropic', 'openai', 'deepseek']).default('anthropic'),
+  AI_PROVIDER: z.enum(['anthropic', 'openai', 'deepseek', 'mistral']).default('anthropic'),
   ANTHROPIC_API_KEY: z.string().min(1, 'ANTHROPIC_API_KEY is required'),
   ANTHROPIC_MODEL: z.string().default('claude-haiku-4-5'),
   OPENAI_API_KEY: z.string().optional(),
   OPENAI_MODEL: z.string().default('gpt-4o-mini'),
   DEEPSEEK_API_KEY: z.string().optional(),
   DEEPSEEK_MODEL: z.string().default('deepseek-v4-flash'),
+  // Mistral (OpenAI-compatible API). Mistral Small 4 = mistral-small-2603 — a
+  // no-training-on-API, EU/GDPR-hosted model; the cost + privacy candidate.
+  MISTRAL_API_KEY: z.string().optional(),
+  MISTRAL_MODEL: z.string().default('mistral-small-2603'),
   // The act/narrate split (providers/act-narrate.ts): an isolated,
   // forced-tool-choice action pass followed by a full-context narrate pass.
   // 'off' falls back to the original single-pass loop for the
@@ -34,6 +38,12 @@ const schema = z.object({
   // is a reasoning model: no `temperature`, `max_completion_tokens`, and it
   // accepts `reasoning_effort` (utility-client sets 'minimal').
   UTILITY_MODEL: z.string().default('gpt-5-nano'),
+  // Reasoning effort for the OpenAI act + narrate passes (GPT-5 reasoning
+  // models). Output/reasoning tokens dominate cost at $2/M on mini, so this is
+  // the main cost dial. The conversation fast path is always 'minimal' (reasoning
+  // buys nothing there). Lower this to trade a little act-pass judgment for a big
+  // cost cut — battery-verify any change.
+  OPENAI_REASONING_EFFORT: z.enum(['minimal', 'low', 'medium', 'high']).default('medium'),
   // Hard paywall (no persistent free tier): a lapsed/never-started user gets
   // zero of everything below until they start a trial or subscribe — see
   // docs/phases/phase-7-premium-billing.md. Overridable for local testing
@@ -83,5 +93,9 @@ export const env = schema
   .refine((e) => e.AI_PROVIDER !== 'deepseek' || !!e.DEEPSEEK_API_KEY, {
     message: 'DEEPSEEK_API_KEY is required when AI_PROVIDER=deepseek',
     path: ['DEEPSEEK_API_KEY'],
+  })
+  .refine((e) => e.AI_PROVIDER !== 'mistral' || !!e.MISTRAL_API_KEY, {
+    message: 'MISTRAL_API_KEY is required when AI_PROVIDER=mistral',
+    path: ['MISTRAL_API_KEY'],
   })
   .parse(process.env);

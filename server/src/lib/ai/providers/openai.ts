@@ -44,6 +44,11 @@ export async function* streamChatReplyOpenai(
   // The act/narrate split is the default — the single-pass loop below is
   // the AI_ACT_NARRATE=off rollback path (see providers/act-narrate.ts).
   if (env.AI_ACT_NARRATE === 'on') {
+    // reasoning_effort is a real OpenAI param (unlike DeepSeek's `thinking`), so
+    // it's safe in these extras. Output/reasoning tokens are the cost driver, so
+    // the act + narrate effort is the tunable dial; the conversation fast path is
+    // always 'minimal' (reasoning buys nothing on a pure-conversation reply).
+    const reasoning = { reasoning_effort: env.OPENAI_REASONING_EFFORT };
     yield* streamChatReplyActNarrate(
       client,
       env.OPENAI_MODEL,
@@ -52,9 +57,9 @@ export async function* streamChatReplyOpenai(
       user,
       tailText,
       actionCtx,
-      {},
-      {},
-      {},
+      reasoning,
+      reasoning,
+      { reasoning_effort: 'minimal' },
       narrateTailText,
       conversationTailText,
       stateFactsText,
