@@ -140,27 +140,42 @@ Meroa Plus — start with a 7-day free trial, then $11.99/month for full access.
 • Payment is charged to your Apple ID at confirmation of purchase.
 • Auto-renews unless turned off at least 24 hours before the period ends.
 • Manage or cancel anytime in your App Store account settings.
-• Terms: https://meroa.app/terms · Privacy: https://meroa.app/privacy
+• Terms: https://meroa-production.up.railway.app/terms · Privacy: https://meroa-production.up.railway.app/privacy
 ```
 
-> ⚠️ Confirm the **Terms/Privacy URLs**, price, and trial length match the live
-> RevenueCat/App Store Connect config. Apple guideline 3.1.2 requires the
-> subscription terms block above — keep it.
+> ✅ **URLs fixed (2026-07-26).** Point at the live served pages
+> (`server/src/routes/legal.ts`) — both `/terms` and `/privacy` return 200.
+> `meroa.app` never resolved. Put the same Privacy URL in App Store Connect's
+> dedicated **Privacy Policy URL** field too. Both are editable later, so a custom
+> domain can swap in post-launch with no resubmit.
+> ⚠️ Still confirm price and trial length match the live RevenueCat / App Store
+> Connect config. Apple guideline 3.1.2 requires the subscription-terms block
+> above — keep it.
 
 ---
 
-## 6. Screenshot captions (OCR-indexed — carry keywords + benefit)
+## 6. Screenshots (produced 2026-07-26 — dark, device-framed, headline + subtitle)
 
-First 3 matter most for ranking. Keep them short and legible.
+Captions are OCR-indexed (lower weight), so the first 3 headlines carry keywords.
+The produced set, in order:
 
-1. **"Your AI accountability partner"** — indexes *accountability partner*
-2. **"Turn a text into a tracked habit"** — *tracked habit*
-3. **"Goals that actually move"** — *goals*
-4. "It checks in when you slip"
-5. "Remembers what matters to you"
-6. "Warm or edgy — you set the tone"
+1. **"Turn goals into daily action"** — *Chat with Meroa and instantly turn intent
+   into a real daily habit.* (chat → habit creation) — indexes *goals, daily*
+2. **"Know exactly what to do today"** — *Meroa turns your goals into a focused
+   daily plan you can actually follow.* (Tasks tab) — indexes *goals, daily, plan*
+3. **"Track every goal in one place"** — *From fitness to savings, Meroa keeps your
+   goals organized and easy to manage.* (Goals tab) — indexes *track, goal, fitness, savings*
+4. **"Stay motivated with streaks & achievements"** — *Celebrate progress, keep
+   streaks alive, and build consistency over time.* (You tab) — indexes *streaks, achievements*
 
-(Screenshots themselves need the running build — captured during #1/#5.)
+> ⛔ **BLOCKER — resolution/aspect.** The exported files are **941×1672**, which is
+> too small AND the wrong aspect ratio for the App Store. Apple requires exact
+> device dimensions; target **1320×2868 (6.9", iPhone 16 Pro Max)** — one set now
+> covers all iPhones. Two fixes needed: (a) render at full resolution (upscaling
+> 941px will look soft), and (b) re-compose in the taller/narrower ~0.46 aspect
+> (these are ~0.56, too wide) so nothing is cropped or letterboxed.
+> Minor polish (optional): the in-app habit reads "Work out everyday" — "everyday"
+> (one word) is an adjective; "every day" is correct. Visible in shots 1–3.
 
 ---
 
