@@ -62,6 +62,15 @@ import { requestNotificationPermission } from '@/lib/notifications';
 // and retry just resends the identical text into the same 400 forever.
 const MAX_MESSAGE_LENGTH = 4000;
 
+// The composer input auto-grows with wrapped lines, between these bounds. Its
+// height is CONTROLLED (driven by onContentSizeChange) rather than left to the
+// native auto-size: on iOS a `multiline` TextInput does not re-measure its
+// content height when the value is cleared programmatically, so after sending a
+// two-plus-line message the box kept its tall frame and left dead space at the
+// bottom. Controlling the height lets sendDraft snap it back to one line.
+const MIN_INPUT_HEIGHT = 36;
+const MAX_INPUT_HEIGHT = 120;
+
 // Bubbles more than a minute apart read as separate turns even if the
 // sender didn't change — a stack shouldn't span a real gap in the
 // conversation.
@@ -773,6 +782,9 @@ export default function ChatScreen() {
   const headerStatus = isReplying ? 'Typing…' : 'Listening';
   const { send, retry } = useSendMessage();
   const [draft, setDraft] = useState('');
+  // Controlled composer height — see MIN/MAX_INPUT_HEIGHT for why it isn't left
+  // to the native auto-size.
+  const [inputHeight, setInputHeight] = useState(MIN_INPUT_HEIGHT);
   const [menuSheetOpen, setMenuSheetOpen] = useState(false);
   const [vibeSheetOpen, setVibeSheetOpen] = useState(false);
   const { data: me } = useMe();
@@ -847,6 +859,7 @@ export default function ChatScreen() {
     isSubmittingRef.current = true;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
     setDraft('');
+    setInputHeight(MIN_INPUT_HEIGHT); // snap the box back to one line, don't leave the tall frame
     void send(text);
     setTimeout(() => {
       isSubmittingRef.current = false;
@@ -972,7 +985,11 @@ export default function ChatScreen() {
             onChangeText={setDraft}
             placeholder="Message Meroa"
             placeholderTextColor={theme.faint}
-            style={styles.input}
+            style={[
+              styles.input,
+              { height: Math.min(Math.max(inputHeight, MIN_INPUT_HEIGHT), MAX_INPUT_HEIGHT) },
+            ]}
+            onContentSizeChange={(e) => setInputHeight(e.nativeEvent.contentSize.height)}
             multiline
             maxLength={MAX_MESSAGE_LENGTH}
             onSubmitEditing={sendDraft}
@@ -1128,8 +1145,7 @@ const styles = StyleSheet.create({
   },
   input: {
     flex: 1,
-    minHeight: 36,
-    maxHeight: 120,
+    // Height is controlled (inputHeight state) — see MIN/MAX_INPUT_HEIGHT.
     color: theme.text,
     fontSize: 15,
     paddingHorizontal: 14,
