@@ -50,6 +50,11 @@ We only collect information you give us by using the app. We collect:
 - **Subscription status.** Whether you have an active subscription (verified through the
   app store and our payments processor).
 - **Diagnostics.** Technical error reports, used to find and fix crashes and bugs.
+- **Notification token.** If you turn on notifications, a device push token so we can
+  deliver reminders and check-ins. It is used only to send you notifications, and you can
+  turn notifications off at any time in your device settings.
+<!-- REVIEW (2026-07-26): push added to v1.0 scope — this notification-token bullet and the
+     push-provider row in §3 are new since the policy was finalized. Re-approve before publish. -->
 
 **What we do not collect.** We do **not** collect location, contacts, photos, your
 microphone or camera, device advertising identifiers, or any product-analytics tracking.
@@ -86,7 +91,17 @@ We share information with a small number of service providers, only as needed to
 | Our AI provider (a third-party AI service) | The content of your messages and related task/goal context | To generate replies |
 | Our payments provider and the app stores (Apple / Google) | Your subscription status and an account identifier | To manage subscriptions |
 | Our error-monitoring provider | Technical error reports | To keep the app working |
+| Our push-notification provider | Your device notification token and the text of the notification to deliver | To send you reminders and check-ins |
 | Our hosting provider | Hosts our servers and database | Infrastructure |
+
+These providers process data **on our behalf** under our instructions; they are not
+permitted to use it for their own purposes.
+<!-- REVIEW (2026-07-26): the "on our behalf / not for their own purposes" claim MUST be
+     true for the AI provider. Verify the AI provider's API terms guarantee no training on,
+     and no independent use/retention of, your message content. If they DON'T, this line is
+     false, this becomes genuine third-party "sharing," and the Google Data Safety form must
+     mark messages as Shared (see docs/google-data-safety-answers.md). This is the single
+     highest-risk sentence in the policy — confirm before publish. -->
 
 We do not otherwise share, rent, or sell your personal information.
 
