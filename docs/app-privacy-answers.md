@@ -1,8 +1,16 @@
 # Apple App Privacy — answer sheet
 
 > **What this is.** The exact answers to enter in App Store Connect →
-> *App Privacy*, transcribed from the code-verified `docs/data-inventory.md`
-> (re-verified 2026-07-26). Enter these as-is unless the code has changed since.
+> *App Privacy*, transcribed from the code-verified `docs/data-inventory.md`.
+> Enter these as-is unless the code has changed since.
+>
+> **Re-verified 2026-07-26** by a live code scan (not just a re-read of the
+> inventory): client SDK dependency scan (only `react-native-purchases` touches
+> data — no analytics/ads/location/contacts/health/camera SDKs), `app.json`
+> plugins + `infoPlist` (no tracking usage-string, no location/photo/mic
+> permissions), push token still minted (`src/lib/push.ts:33`), RevenueCat keyed
+> to our `userId` (`features/billing/purchases.ts:28`), Sentry server-only
+> (`@sentry/node`). No drift from the seven types below.
 >
 > **Not legal advice** — engineering transcription. Judgment calls are flagged
 > `⚠️`; review them before you submit.
@@ -67,7 +75,49 @@ category*, Usage Data, Advertising Data, Audio, Photos, etc.) → **not collecte
 
 ---
 
-## 3. Cross-check before submitting
+## 3. Click-by-click in App Store Connect
+
+App Store Connect → your app → **App Privacy** → **Get Started** (or **Edit**).
+
+**Step 1 — Data Collection question.**
+"Do you or your third-party partners collect data from this app?" → **Yes, we collect data from this app.**
+
+**Step 2 — Select the 7 data types** (Apple category → checkbox):
+- Contact Info → **Phone Number**
+- User Content → **Other User Content**
+- Identifiers → **User ID**
+- Identifiers → **Device ID**  ⚠️ (functional push token — see §2)
+- Purchases → **Purchase History**
+- Diagnostics → **Crash Data**
+- Diagnostics → **Other Diagnostic Data**
+
+Leave every other type unchecked.
+
+**Step 3 — For each selected type, the wizard asks three things. Answers:**
+
+| Data type | Purposes to check | Linked to identity? | Used to track? |
+|---|---|---|---|
+| Phone Number | App Functionality | **Yes** | **No** |
+| Other User Content | App Functionality, **Product Personalization** | **Yes** | **No** |
+| User ID | App Functionality | **Yes** | **No** |
+| Device ID | App Functionality | **Yes** | **No** |
+| Purchase History | App Functionality | **Yes** | **No** |
+| Crash Data | App Functionality | **Yes** | **No** |
+| Other Diagnostic Data | App Functionality | **Yes** | **No** |
+
+Rules that hold for **all seven**: Linked = **Yes**, Tracking = **No**, and the
+only purpose is **App Functionality** — *except* Other User Content, which also
+gets **Product Personalization** (memories + tone personalize replies). Never
+check **Analytics**, **Developer's Advertising or Marketing**, or **Third-Party
+Advertising** on anything — there is no analytics SDK and no ads. If ASC
+pre-checks any of them, uncheck them.
+
+**Step 4 — Publish.** Review the summary, then **Publish**. (This can be saved and
+published independently of a build/version submission.)
+
+---
+
+## 4. Cross-check before submitting
 
 1. Re-run the `data-inventory.md` verification (SDKs move).
 2. Confirm push is still in the build (`src/lib/push.ts` `getExpoPushTokenAsync`);
