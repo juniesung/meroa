@@ -26,55 +26,71 @@
 
 ---
 
-## 1. Category  ⚠️ strategic decision
+## 1. Category  ✅ decided (2026-07-26)
 
 - **Primary: Productivity.** Highest commercial intent for the core value (turn
-  talk → tracked tasks/goals/accountability) and where paying "coach/accountability"
-  searchers live. Crowded, but the AI-companion + accountability angle is
-  differentiated.
-- **Secondary: Health & Fitness** (habits, self-improvement, coaching) — or
-  **Lifestyle** if you want a less-saturated browse field.
+  talk → tracked tasks/goals/accountability), best keyword-relevance match for
+  "coach / goal / task" searchers, and where the app's identity is clearest.
+  Carries the algorithmic weight.
+- **Secondary: Health & Fitness.** A reach play, not an identity claim: it's the
+  less-saturated shelf of the options AND where Apple's editors run the constant
+  "build better habits / self-improvement / new-year" features — the biggest
+  single reach lever for an indie app. Habits/goals/follow-through is a legit fit
+  for that self-improvement sub-space (Fabulous, Finch — companion apps, not
+  fitness apps — both live in Health & Fitness). No health claims are made, so
+  the extra Health & Fitness review scrutiny doesn't apply.
+- Considered **Lifestyle** for the secondary (cleaner taxonomy fit) but chose
+  Health & Fitness for the featuring + lower-saturation reach upside.
 - Deliberately **not** Entertainment/Social — that's the "AI girlfriend" bucket,
-  wrong intent and worse monetization for a productivity companion.
+  wrong intent and worse monetization.
 
 ---
 
-## 2. App Name (30 max)
+## 2. App Name (30 max)  ✅ chosen
 
-**Primary → `Meroa: AI Accountability Coach`**  *(30/30)*
-Brand + the strongest winnable intent phrase. Indexes: `ai`, `accountability`, `coach`.
+**`Meroa: AI Habit & Goal Coach`**  *(28/30)*
+Indexes: `ai`, `habit`, `goal`, `coach` — high-volume intent terms in the
+strongest field. Frees `accountability` to anchor the subtitle (below).
 
-Alternatives:
-- `Meroa: AI Habit & Goal Coach` *(28)* — trades "accountability" for higher-volume `habit`/`goal` in the title.
-- `Meroa: Accountability Partner` *(29)* — leans companion over coach.
+Alternatives (not chosen):
+- `Meroa: AI Accountability Coach` *(30)* — more differentiated, less habit/goal volume.
+- `Meroa: Accountability Partner` *(29)* — companion lean.
 
 ---
 
 ## 3. Subtitle (30 max)
 
-**Primary → `Habit & goal buddy that texts`**  *(29/30)*
-New indexed words (no title overlap): `habit`, `goal`, `buddy`, `texts`. Also
-sells the differentiator — it reaches out first.
+Title already used habit/goal/coach — so the subtitle must add **new** words.
+The highest-value one now free is `accountability`; the subtitle is a "premium"
+indexed slot, so spend it on the best phrase.
+
+**Primary → `Your accountability partner`**  *(27/30)*
+Indexes two high-value terms: `accountability`, `partner`. The "texts first /
+reaches out" differentiator is carried by the screenshots + description instead.
 
 Alternatives:
-- `Habits, goals & follow-through` *(30)* — benefit-led; indexes `habit`, `goal`.
-- `Your AI habit & goal tracker` *(27)* — adds `tracker`, but repeats `ai` from the title (wasteful) — only use with the `Meroa: Accountability Partner` name.
+- `The friend who texts you first` *(30)* — distinctive + on-brand, but only indexes `friend`; move `accountability`/`partner` to the keyword field. Choose this if you value the tagline's punch over the search-reach of "accountability partner."
+- `Accountability that texts you` *(30)* — splits the difference: indexes `accountability` + hints the hook.
 
 ---
 
 ## 4. Keyword field (100 max, no spaces)
 
-Assumes the **primary** name + subtitle above (so it excludes: ai, accountability,
-coach, habit, goal, buddy, texts).
+Deduped against the chosen name (`ai`, `habit`, `goal`, `coach`) and primary
+subtitle (`accountability`, `partner`) — so those are **excluded** here.
 
 ```
-partner,companion,friend,discipline,routine,motivation,planner,task,reminder,streak,tracker,mentor
+companion,friend,buddy,discipline,routine,motivation,planner,task,reminder,streak,tracker,journal
 ```
-*(98/100)*
+*(97/100)*
 
-Phrases this lets Apple build with the title/subtitle: *accountability partner ·
-ai companion · ai friend · ai mentor · habit tracker · habit routine · habit
-streak · goal planner · goal tracker · daily reminder · task …*
+Phrases this lets Apple build across all three fields: *ai companion · ai friend ·
+accountability buddy · habit tracker · habit routine · habit streak · goal
+planner · goal tracker · goal journal · daily reminder · task · self-discipline*.
+
+> If you switch the subtitle to `The friend who texts you first`, add
+> `accountability,partner` back here and drop `friend` (it'd be in the subtitle) —
+> e.g. `accountability,partner,companion,buddy,discipline,routine,motivation,planner,task,reminder,streak` *(99)*.
 
 > ⚠️ **Validate volumes before launch.** I picked these for strategic coverage, not
 > measured search volume (I can't pull live data). Run them through App Store
