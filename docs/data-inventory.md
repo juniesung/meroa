@@ -7,9 +7,9 @@
 > (`docs/legal/privacy-draft.md`), and the private **App Review Notes**
 > (`docs/app-review-notes.md`).
 >
-> **Verified against code** on 2026-07-20 (Phase 8 partial). Re-verify before any store
-> submission — SDKs and data flows move. Line references are to the state of the repo on
-> that date.
+> **Verified against code** on 2026-07-26 (re-verification for submission; supersedes the
+> 2026-07-20 pass — see §6). Re-verify again before any store submission — SDKs and data
+> flows move.
 >
 > **Not legal advice.** This is an engineering inventory. The user-facing legal copy
 > derived from it is separately marked review-required.
@@ -33,7 +33,7 @@
 ## 2. Data collected — Postgres (single source of truth)
 
 All application data lives in one PostgreSQL database hosted on **Railway** (see §3).
-Schema: `server/src/db/schema.ts` — 12 tables.
+Schema: `server/src/db/schema.ts` — 16 tables.
 
 | # | Table | Data | Linked to user? | Purpose | Retention |
 |---|---|---|---|---|---|
@@ -49,10 +49,14 @@ Schema: `server/src/db/schema.ts` — 12 tables.
 | 10 | `memories` | Free-text facts Meroa remembers (preference / trait / relationship / situation), a **`sensitive`** flag, a suppression flag, source (told / extracted / manual) | Yes | Personalization + continuity ("remembers the person") | Until account deletion or per-memory deletion by the user |
 | 11 | `memory_extraction_state` | Watermark (last processed message id) per user | Yes | Bookkeeping for the background memory extractor | Until account deletion |
 | 12 | `entitlements` | Plan (`free` / `plus`), source, expiry | Yes | Server-side subscription truth | Until account deletion |
+| 13 | `push_tokens` | **Expo push token** (per device), platform, optional device label, timestamps, disabled flag | Yes | Deliver reminder / proactive **push notifications** | Until account deletion or token disable |
+| 14 | `notifications_log` | Server-authored notification **kind, title, body**, dedupe key, sent / opened timestamps | Yes | Frequency-cap + idempotency for proactive pushes; open tracking | Until account deletion |
+| 15 | `achievements` | Earned badge key, tier, earned / announced timestamps | Yes | Profile badges (derived from real recorded activity) | Until account deletion |
+| 16 | `message_reports` | User id, reported message id, optional reason, timestamp — a user flagging an AI response as offensive | Yes | Google AI-content policy; review record | Until account deletion (in deletion cascade + export) |
 
-**Added in Phase 8, Item 2:** `message_reports` (user id, reported message id, optional
-reason, timestamp) — records a user flagging an AI response as offensive. Linked to user;
-retained until account deletion; included in the deletion cascade and the data export.
+> **Drift note (2026-07-26).** Rows 13–15 were added *after* the original 2026-07-20
+> inventory and are the reason it needed re-verification. `push_tokens` in particular
+> reverses the old §4 claim that no push token is collected — see §4.
 
 **Sensitive data note (CLAUDE.md §2).** Message content and memories can contain health,
 financial, or emotional information. Memories carry an explicit `sensitive` flag and a
@@ -70,6 +74,7 @@ entered.
 | **Apple / Google** (platform billing) | Handled entirely by the OS billing sheet; the **real subscription lives with the store**, not us | Store account, not our identity | Purchase, renewal, cancellation | Client billing (Phase 7) |
 | **Sentry** (server-side only) | **Error diagnostics** — exception objects + `environment` tag | Not message content by design; a stack trace/error context could *incidentally* contain a fragment | Crash / error monitoring | `server/src/index.ts`, `providers/*.ts` (`Sentry.captureException`) |
 | **Railway** | Hosts the server and the Postgres database (i.e. *all* of §2) | All application data, as the infrastructure host | Hosting / database | Deployment (Docker on Railway) |
+| **Expo push service** (`exp.host` → Apple APNs / Google FCM) | The device **push token** and the **notification title/body** to deliver | Push token (device-level); **no phone, no user id** | Delivering reminder / proactive push notifications to the device | `src/lib/push.ts` (token mint), `server/src/lib/notifications/send.ts` (`expo-server-sdk`) |
 | **SMS provider** | *Nothing yet* — Phase 9, currently a stub | — | Pre-install / re-engagement texts (future) | `server/src/sms/sender.ts` (not implemented) |
 
 **Server-side SDKs** (from `server/package.json`): `@anthropic-ai/sdk`, `openai` (the
@@ -90,11 +95,10 @@ Stated explicitly because store forms ask, and "we don't" is an answer that must
 - **No analytics / tracking SDK** on the client — no Amplitude, Segment, Firebase Analytics,
   PostHog, or similar (`package.json`).
 - **No client-side Sentry** — error reporting is server-side only.
-- **No push tokens.** `expo-notifications` is used for **local** notifications only
-  (`Notifications.scheduleNotificationAsync`); no `getExpoPushToken` call exists, so no push
-  token is generated or sent to the server (`src/lib/notifications.ts`).
-- **No device identifiers.** `expo-device` is installed but **unused**; `sessions.deviceLabel`
-  is never populated.
+- **No advertising / tracking device identifiers.** `expo-device` is installed but **unused**;
+  `sessions.deviceLabel` is never populated; there is no IDFA / advertising id collection.
+  The one device-scoped value we do store is the **Expo push token** (see next bullet) —
+  used solely to deliver notifications, never for tracking or advertising.
 - **No location, contacts, photos, microphone, or camera access.** (The dead mic/paperclip
   composer controls are removed in Item 6; no speech or attachment feature exists.)
 - **No advertising, no data sold or shared for ads, no cross-app tracking.**
@@ -111,6 +115,7 @@ Stated explicitly because store forms ask, and "we don't" is an answer that must
 | **User Content → Other User Content** (chat messages) | `messages` | Yes | No |
 | **User Content → Other User Content** (tasks, goals, memories) | tasks/goals/records/memories | Yes | No |
 | **Identifiers → User ID** | internal `userId` UUID (sent to RevenueCat) | Yes | No |
+| **Identifiers → Device ID** | Expo **push token** (`push_tokens`) — *[judgment call: a functional push identifier, not an advertising ID; declared conservatively because we store it linked to the user]* | Yes | No |
 | **Purchases → Purchase History** | `entitlements` / RevenueCat | Yes | No |
 | **Diagnostics → Crash Data / Other Diagnostic Data** | Sentry errors | Linked (server) | No |
 
@@ -123,6 +128,7 @@ Product-interaction / usage-data analytics: **None collected** (no analytics SDK
 | **Personal info → Phone number** | `users.phoneE164` | Yes | No | Account management |
 | **Messages → Other in-app messages** | `messages` | Yes | Yes → AI provider (content) | App functionality (chat) |
 | **App activity → Other user-generated content** | tasks/goals/memories | Yes | No | App functionality |
+| **Device or other IDs** | Expo **push token** (`push_tokens`) | Yes | Yes → Expo push service (delivery) | App functionality (notifications) |
 | **App info & performance → Crash logs / Diagnostics** | Sentry | Yes | Yes → Sentry | App functionality / monitoring |
 | **Financial info → Purchase history** | `entitlements` / RevenueCat | Yes | Yes → RevenueCat/store | Subscriptions |
 
@@ -135,5 +141,11 @@ Product-interaction / usage-data analytics: **None collected** (no analytics SDK
 
 ## 6. Change log
 
+- **2026-07-26** — Re-verified against the current `phase-8-partial` branch for submission.
+  Added `push_tokens`, `notifications_log`, `achievements` to §2 (16 tables total). Corrected
+  §4: the app **does** now collect an Expo **push token** (`src/lib/push.ts` calls
+  `getExpoPushTokenAsync` → `POST /me/push-token`), reversing the 2026-07-20 "local only"
+  claim. Added **Expo push service** as a subprocessor (§3) and the push token to both store
+  mappings (§5). Push is in scope for v1.0 (founder decision, 2026-07-26).
 - **2026-07-20** — Initial inventory, code-verified against the Phase 8-partial branch.
   Author: Phase 8 implementation. Re-verify before store submission.
