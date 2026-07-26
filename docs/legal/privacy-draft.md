@@ -96,12 +96,11 @@ We share information with a small number of service providers, only as needed to
 
 These providers process data **on our behalf** under our instructions; they are not
 permitted to use it for their own purposes.
-<!-- REVIEW (2026-07-26): the "on our behalf / not for their own purposes" claim MUST be
-     true for the AI provider. Verify the AI provider's API terms guarantee no training on,
-     and no independent use/retention of, your message content. If they DON'T, this line is
-     false, this becomes genuine third-party "sharing," and the Google Data Safety form must
-     mark messages as Shared (see docs/google-data-safety-answers.md). This is the single
-     highest-risk sentence in the policy — confirm before publish. -->
+<!-- REVIEW (2026-07-26, RESOLVED): the "on our behalf / not for their own purposes" claim is
+     now TRUE for the AI provider. Production uses OpenAI (gpt-5-mini + gpt-5-nano), which does
+     not train on API data by default and processes in the US. DeepSeek — whose API terms
+     allowed training + PRC retention — was replaced precisely so this line holds. Re-verify
+     only if the AI provider changes. -->
 
 We do not otherwise share, rent, or sell your personal information.
 
@@ -170,10 +169,9 @@ from them.
 ## 8. International users and data transfers
 
 Meroa is operated from the United States, and your information is stored and processed in
-the **United States** (our servers and database are hosted in a US-West region). We do not
-store your information outside the United States, though some of our service providers — for
-example, the third-party AI service that generates replies — may process the data they
-receive in other locations.
+the **United States** (our servers and database are hosted in a US-West region, and the
+third-party AI service that generates replies also processes your messages in the United
+States).
 
 If you access Meroa from outside the United States, you understand that your information
 will be transferred to, stored, and processed in the United States, where data-protection
@@ -181,7 +179,7 @@ laws may differ from those in your country. Where a transfer of personal informa
 subject to laws requiring a specific safeguard, we will take steps to provide an appropriate
 one.
 
-<!-- REVIEW: international/data-transfer clause drafted; still requires counsel review (not legal advice). Note the AI provider may process message content outside the US — confirm this is acceptable for your target markets. -->
+<!-- REVIEW: international/data-transfer clause drafted; still requires counsel review (not legal advice). AI provider is now OpenAI (US-processed), so the earlier "message content processed outside the US / PRC" concern no longer applies. -->
 
 
 ## 9. Changes to this policy

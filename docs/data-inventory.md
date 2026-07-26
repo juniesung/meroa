@@ -69,7 +69,7 @@ entered.
 
 | Recipient | What it receives | Identifiers included? | Why | Code |
 |---|---|---|---|---|
-| **DeepSeek** (`api.deepseek.com`) — third-party AI provider | The user's **message content** and server-computed state blocks (task/goal **titles**, counts, streaks) | **No.** No phone number and no user identifier is placed in the model request. (`userId` appears only in internal server logs / Sentry context, never in the provider payload.) | Generates Meroa's chat replies and extracts structured actions | `server/src/lib/ai/providers/deepseek.ts` (payload at `messages: turnMessages`, `baseURL: 'https://api.deepseek.com'`) |
+| **OpenAI** (`api.openai.com`) — third-party AI provider, **no-training-by-default, US-processed** → a data **processor**, not a third party using data for its own ends | The user's **message content** and server-computed state blocks (task/goal **titles**, counts, streaks); the memory extractor also sends **raw messages** | **No.** No phone number and no user identifier is placed in the model request. (`userId` appears only in internal server logs / Sentry context, never in the provider payload.) | Generates chat replies, runs the claim-check guards, extracts memories, composes notifications | `providers/openai.ts` (chat) + `lib/ai/utility-client.ts` (guards / extractor / compose) |
 | **RevenueCat** (`api.revenuecat.com`) | Our internal **`userId` (UUID)** as the app-user id | UUID only — **no phone, no message content** | Subscription receipt verification / entitlement state | `server/src/lib/billing/revenuecat.ts` |
 | **Apple / Google** (platform billing) | Handled entirely by the OS billing sheet; the **real subscription lives with the store**, not us | Store account, not our identity | Purchase, renewal, cancellation | Client billing (Phase 7) |
 | **Sentry** (server-side only) | **Error diagnostics** — exception objects + `environment` tag | Not message content by design; a stack trace/error context could *incidentally* contain a fragment | Crash / error monitoring | `server/src/index.ts`, `providers/*.ts` (`Sentry.captureException`) |
@@ -77,14 +77,18 @@ entered.
 | **Expo push service** (`exp.host` → Apple APNs / Google FCM) | The device **push token** and the **notification title/body** to deliver | Push token (device-level); **no phone, no user id** | Delivering reminder / proactive push notifications to the device | `src/lib/push.ts` (token mint), `server/src/lib/notifications/send.ts` (`expo-server-sdk`) |
 | **SMS provider** | *Nothing yet* — Phase 9, currently a stub | — | Pre-install / re-engagement texts (future) | `server/src/sms/sender.ts` (not implemented) |
 
-**Server-side SDKs** (from `server/package.json`): `@anthropic-ai/sdk`, `openai` (the
-DeepSeek provider uses the OpenAI-compatible client pointed at `api.deepseek.com`),
-`@sentry/node`. RevenueCat is called via plain REST `fetch` (no SDK).
+**Server-side SDKs** (from `server/package.json`): `@anthropic-ai/sdk`, `openai` (the OpenAI
+provider + the shared utility client both use it against `api.openai.com`), `@sentry/node`.
+RevenueCat is called via plain REST `fetch` (no SDK).
 
-> **AI provider is swappable.** `AI_PROVIDER` can be `anthropic` | `openai` | `deepseek`;
-> production is **deepseek-v4-flash**. The privacy policy therefore names a generic
-> "third-party AI service" (per store research); the *specific* current provider
-> (DeepSeek) is named only in the private App Review Notes.
+> **AI provider — OpenAI (switched off DeepSeek 2026-07-26 for privacy).** `AI_PROVIDER=openai`,
+> `OPENAI_MODEL=gpt-5-mini` (chat), `UTILITY_MODEL=gpt-5-nano` (guards/extractor/compose via
+> `utility-client.ts`). OpenAI does **not** train on API data by default and processes in the
+> US, so every AI call — including the extractor's raw messages — is a **processor**
+> relationship, not third-party "sharing." DeepSeek was rejected because its public API terms
+> allow training + open-ended PRC retention (verified 2026-07-26). The public privacy policy
+> names a generic "third-party AI service"; the specific provider (OpenAI) is named only in the
+> private App Review Notes. The dispatcher still supports anthropic/deepseek for rollback.
 
 ---
 
@@ -126,7 +130,7 @@ Product-interaction / usage-data analytics: **None collected** (no analytics SDK
 | Google category | Meroa data | Collected | Shared w/ 3rd party | Purpose |
 |---|---|---|---|---|
 | **Personal info → Phone number** | `users.phoneE164` | Yes | No | Account management |
-| **Messages → Other in-app messages** | `messages` | Yes | Yes → AI provider (content) | App functionality (chat) |
+| **Messages → Other in-app messages** | `messages` | Yes | **No** — the AI provider (OpenAI) is a no-training **processor** (see §3); processor transfers are excluded from Google "sharing" | App functionality (chat) |
 | **App activity → Other user-generated content** | tasks/goals/memories | Yes | No | App functionality |
 | **Device or other IDs** | Expo **push token** (`push_tokens`) | Yes | Yes → Expo push service (delivery) | App functionality (notifications) |
 | **App info & performance → Crash logs / Diagnostics** | Sentry | Yes | Yes → Sentry | App functionality / monitoring |
@@ -134,8 +138,9 @@ Product-interaction / usage-data analytics: **None collected** (no analytics SDK
 
 - Data is **encrypted in transit** (HTTPS) and **encrypted at rest** (managed Postgres).
 - Users **can request deletion** (in-app `DELETE /me` and the web deletion path, Item 5).
-- Data is **not sold**; message content **is shared** with the AI provider strictly to
-  generate replies.
+- Data is **not sold**. Message content is **sent to the AI provider (OpenAI), a no-training
+  processor acting on our behalf** strictly to generate replies — this is processing, not
+  third-party "sharing" under Google's definition.
 
 ---
 
@@ -147,5 +152,11 @@ Product-interaction / usage-data analytics: **None collected** (no analytics SDK
   `getExpoPushTokenAsync` → `POST /me/push-token`), reversing the 2026-07-20 "local only"
   claim. Added **Expo push service** as a subprocessor (§3) and the push token to both store
   mappings (§5). Push is in scope for v1.0 (founder decision, 2026-07-26).
+- **2026-07-26 (later, same day)** — **AI provider switched from DeepSeek to OpenAI** for
+  privacy (DeepSeek API allows training + PRC retention; verified). All AI calls — chat
+  (gpt-5-mini) and the guards/extractor/compose (gpt-5-nano via `utility-client.ts`) — now
+  run on OpenAI, a no-training-by-default US processor. §3 provider row + swappable note
+  updated; §5 Messages flips from "shared → AI provider" to **not shared** (processor). This
+  is the clean processor story the earlier DeepSeek-era flags anticipated.
 - **2026-07-20** — Initial inventory, code-verified against the Phase 8-partial branch.
   Author: Phase 8 implementation. Re-verify before store submission.

@@ -31,14 +31,14 @@ Google's **"Data shared"** = user data transferred to a **third party**. It
 behalf under your instructions*. It also excludes transfers that are user-initiated,
 for legal reasons, or of anonymized data.
 
-**All of Meroa's recipients are service providers** (DeepSeek/AI, RevenueCat,
+**All of Meroa's recipients are service providers** (OpenAI/AI, RevenueCat,
 Sentry, Expo push, Railway) — they process on our behalf. So under Google's
-definition, the correct answer for those is **Collected = Yes, Shared = No**,
-*provided* each relationship is a genuine processor relationship (standard API
-terms / a DPA). ⚠️ **This is the opposite of the conservative "shared" column in
-`data-inventory.md §5`** — that column listed the *recipient*; this form asks the
-narrower legal question. Confirm the processor terms below, then answer per this
-section.
+definition, the correct answer for all of them is **Collected = Yes, Shared = No**.
+The AI provider is **OpenAI**, which does not train on API data by default and
+processes in the US, so it's a genuine processor — this was the previously-open
+question (DeepSeek would *not* have qualified, which is why it was replaced,
+2026-07-26). This form asks the narrow legal "sharing" question, so it answers
+**No** across the board.
 
 ---
 
@@ -50,7 +50,7 @@ without it; "Required" = core.
 | Google category → data type | Collected | Shared | Purpose(s) | Req/Opt | Notes |
 |---|---|---|---|---|---|
 | **Personal info → Phone number** | Yes | No | Account management, App functionality | Required | Login identity + OTP |
-| **Messages → Other in-app messages** | Yes | **No ⚠️** | App functionality | Required | ⚠️ Shared flips to **Yes** if the AI provider uses message content for its **own** purposes (training/retention). See §3. |
+| **Messages → Other in-app messages** | Yes | **No** | App functionality | Required | AI provider (OpenAI) is a no-training processor → not "sharing" (resolved 2026-07-26). |
 | **App activity → Other user-generated content** | Yes | No | App functionality | Required | tasks, goals, records, memories |
 | **Financial info → Purchase history** | Yes | No | App functionality (subscription) | Required | `entitlements` via RevenueCat (processor) + the store handles the actual purchase (user-initiated) |
 | **App info & performance → Crash logs** | Yes | No | App functionality | Required | Sentry (processor) |
@@ -66,13 +66,11 @@ advertising ID. **No data is used for advertising or tracking.**
 
 ## 3. Judgment calls & must-verify
 
-- **⚠️ Messages → "Shared" hinges on the AI provider's data terms.** If the AI
-  provider's API guarantees it does **not** train on or independently use/retain
-  your content, it's a processor → **Shared = No**. If it may use the content for
-  its own purposes, → **Shared = Yes** (and the privacy-policy "on our behalf"
-  line must change — same flag as `privacy-draft.md §3`). **Verify the provider's
-  API data policy before submitting.** This is the one answer most likely to be
-  wrong.
+- **✅ Messages → "Shared = No" (resolved 2026-07-26).** The AI provider is
+  **OpenAI**, which does not train on API data by default and processes in the US
+  → a processor → not "sharing." (DeepSeek was replaced precisely because its API
+  terms allowed training + PRC retention, which would have forced **Shared = Yes**.)
+  Re-confirm the provider hasn't changed before submitting.
 - **⚠️ Push token as "Device or other IDs."** Declared conservatively because we
   store it linked to the user. Optional (notification-permission-gated). Never
   used for tracking/ads.
