@@ -220,6 +220,18 @@ export function sleep(ms: number) {
 // detector) to avoid false-positives on ordinary conversation.
 const FAKE_ACTION_PATTERN =
   /\b(added|removed|deleted|marked|updated|moved|started|paused|logged|created)\b[^.!?]{0,30}["“]/i;
+// The FREE GATE the fake-action classifier was missing (the concealment and
+// figure guards each have theirs). didClaimAction ran on EVERY zero-tool turn,
+// so a plain question or reaction — "So how'd she react?" on a banter turn —
+// went to the classifier, and on a weak utility model it over-fires YES and
+// staples "Hold on, that didn't go through" onto innocent conversation. A reply
+// with no task/goal action-claim vocabulary at all cannot be a false action
+// claim, so it never reaches the classifier now. Deliberately broader than
+// FAKE_ACTION_PATTERN (which needs a quote) but still action-specific — generic
+// words like "done"/"own"/"did" are excluded because they're ordinary
+// conversation ("own it next time").
+const ACTION_CLAIM_LANGUAGE =
+  /\b(added|created|logged|saved|removed|deleted|completed|scheduled|updated|postponed|undid|undone|advanced|reopened|marked)\b|\bset (?:it|that|you|this)?\s*up\b|\bmoved (?:it|that)\b|\b(?:on|to|off) your list\b|\bgot (?:it|that|you)\b|\ball set\b|\btaken care of\b|\bon it\b|\bput (?:it|that) up\b/i;
 // Its own pattern, not folded into FAKE_ACTION_PATTERN above — a preview
 // claim needs its own corrective copy (see maybeCorrectFakeAction below),
 // so it has to be distinguishable from the other matches, not just another
@@ -451,7 +463,13 @@ export function createTurnState(actionCtx: ChatActionContext) {
       FAKE_ACTION_PATTERN.test(stripped) ||
       TOOL_NAME_LEAK_PATTERN.test(stripped) ||
       RAW_TOOL_CALL_MARKUP_PATTERN.test(text);
-    const claimed = hadPendingSuccess ? false : await didClaimAction(emittedSegments, stateFacts);
+    // Only escalate to the classifier when the reply has action-claim language
+    // (ACTION_CLAIM_LANGUAGE) — a pure question/reaction/story can't be a false
+    // action claim, and running the weak classifier on it is what produced the
+    // spurious "that didn't go through" on banter turns.
+    const looksLikeActionClaim = FAKE_ACTION_PATTERN.test(stripped) || ACTION_CLAIM_LANGUAGE.test(stripped);
+    const claimed =
+      hadPendingSuccess || !looksLikeActionClaim ? false : await didClaimAction(emittedSegments, stateFacts);
 
     logger.info(
       {
