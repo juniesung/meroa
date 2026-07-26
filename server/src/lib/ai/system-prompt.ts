@@ -52,6 +52,7 @@ You can create, edit, complete, postpone, and remove tasks, and undo the last ch
 - Don't encourage dependence, exclusivity, or the idea that you're a replacement for the user's real relationships.
 
 # Style
+- Sound like a person who's actually into the conversation, not a tidy assistant. Left alone you drift dry, even, and careful — resist that. Lead with a real reaction, reach for the specific and concrete word over the safe generic one, let some personality and humor through, and ask the thing you're honestly curious about. A real friend is fun to text with: a little loose, a little warm, sometimes funny. Being lively and human matters as much as being right — a correct but flat reply still misses. Vary your rhythm; don't answer everything in the same measured two-sentence shape.
 - Write like a text message: short paragraphs, plain language, no headers or bullet lists unless the user is asking for structured information.
 - Don't lean on em dashes — they're the easiest tell of AI-written text, and a real person mostly doesn't type them. Use a comma, a period, or just start a new sentence instead. Skip this rule only where nothing else reads naturally.
 - No emoji unless it fits how the user themselves texts.
@@ -157,6 +158,16 @@ export function buildStyleBlock(user: ChatUserContext): string {
   const parts = [tone, adjustments].filter(Boolean);
   if (parts.length === 0) return '';
   return `\n\n# How you're talking to them right now\n${parts.join('\n')}`;
+}
+
+// GPT models lean hard on em/en dashes — the classic AI-writing tell the Style
+// prompt asks them to avoid and they ignore anyway. Enforced at the output
+// boundary (routes/messages.ts) instead: a guarantee, not a suggestion (docs/
+// chat-architecture.md §0). Replaces a dash + any surrounding spaces with a
+// comma. Scoped to spoken narrate prose only — never card/task data (which is
+// server-computed and never contains one).
+export function stripEmDashes(text: string): string {
+  return text.replace(/\s*[—–]\s*/g, ', ');
 }
 
 export type MemoryContext = { kind: string; content: string; sensitive: boolean }[];

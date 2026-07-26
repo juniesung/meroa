@@ -20,6 +20,7 @@ import {
   buildTailBlock,
   isStyleAdjustments,
   resolveTone,
+  stripEmDashes,
   type ChatUserContext,
 } from '../lib/ai/system-prompt.ts';
 import { computeActiveGoalAllowance, computeTaskCreateAllowance } from '../lib/limits.ts';
@@ -510,7 +511,7 @@ messageRoutes.post('/', rateLimit({ windowMs: 60_000, max: 20 }), zValidator('js
         if (event.type === 'delta') {
           await stream.writeSSE({
             event: 'delta',
-            data: JSON.stringify({ text: event.text }),
+            data: JSON.stringify({ text: stripEmDashes(event.text) }),
           });
         } else if (event.type === 'segment_end') {
           const [assistantMessage] = await db
@@ -518,7 +519,7 @@ messageRoutes.post('/', rateLimit({ windowMs: 60_000, max: 20 }), zValidator('js
             .values({
               conversationId: conversation.id,
               role: 'assistant',
-              content: event.text,
+              content: stripEmDashes(event.text),
               ...(turnHadAction ? { meta: { actionAck: true } } : {}),
             })
             .returning();

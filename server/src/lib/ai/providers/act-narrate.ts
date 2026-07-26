@@ -723,14 +723,24 @@ export async function* streamChatReplyActNarrate(
     }
 
     // Backstop for turns with no real mutation — the narrate pass has no
-    // tools, so a claimed action there is always false. Always call this;
-    // maybeCorrectFakeAction's own gate (toolCallLog has a non-pending
-    // success) is what actually decides whether a real mutation happened —
-    // gating on toolCallLog.length here too would wrongly skip a turn whose
-    // only successful calls were pending-confirmation cards (see its
-    // comment). no_action deliberately doesn't count as a real call either
-    // way.
-    yield* maybeCorrectFakeAction(stateFactsText);
+    // tools, so a claimed action there is always false. maybeCorrectFakeAction's
+    // own gate (toolCallLog has a non-pending success) decides whether a real
+    // mutation happened; gating on toolCallLog.length here would wrongly skip a
+    // turn whose only successful calls were pending-confirmation cards.
+    //
+    // EXCEPT a genuine pure-conversation turn: the SAME two keys as the fast
+    // path (§8) — the act pass declared no_action intent 'conversation' AND the
+    // user's own message has no action content. On such a turn the user asked
+    // for nothing, so there is no action to fake, and this guard only ever
+    // mis-fires: the nonsensical "Hold on, that didn't go through" stapled onto
+    // an ordinary chit-chat / advice reply. Both keys are required because the
+    // act pass alone mislabels "saved my $5 today" as conversation; the regex
+    // catches that. Anything with a request in flight ('unfulfilled') keeps the
+    // guard.
+    const pureConversation = noActionIntent === 'conversation' && mayBeConversational;
+    if (!pureConversation) {
+      yield* maybeCorrectFakeAction(stateFactsText);
+    }
     // The other half of the same guarantee. maybeCorrectFakeAction returns
     // the instant a real mutation exists, so it has never once looked at an
     // action turn's narration — and the reply passing a fresh action off as
