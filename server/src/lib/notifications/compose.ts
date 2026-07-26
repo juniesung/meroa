@@ -1,9 +1,7 @@
-import OpenAI from 'openai';
-
-import { env } from '../../env.ts';
 import { logger } from '../../logger.ts';
 import { didMisstateFigure } from '../ai/claim-check.ts';
 import { DEFAULT_TONE, type ToneLevel } from '../ai/system-prompt.ts';
+import { getUtilityClient, UTILITY_MODEL, utilityParams } from '../ai/utility-client.ts';
 import type { NotificationTrigger } from './triggers.ts';
 
 // A one-word warmth cue for the composer, derived from the tone slider. The
@@ -23,12 +21,9 @@ const COMPOSE_TIMEOUT_MS = 6000;
 // lesson as claim-check.ts's CLASSIFIER_MAX_TOKENS. Leave real headroom.
 const COMPOSE_MAX_TOKENS = 400;
 
-let client: OpenAI | null = null;
-function getClient(): OpenAI | null {
-  if (!env.DEEPSEEK_API_KEY) return null;
-  if (!client) client = new OpenAI({ apiKey: env.DEEPSEEK_API_KEY, baseURL: 'https://api.deepseek.com' });
-  return client;
-}
+// Notification copy runs on the shared OpenAI utility client
+// (lib/ai/utility-client.ts) — off DeepSeek (2026-07-26 privacy fix). A null
+// client (no key) falls back to the deterministic template, same as before.
 
 // A notification is pure prose with no card beneath it to ground it (docs/chat-
 // architecture.md §3) — so the discipline is stricter than chat, not looser:
@@ -58,7 +53,7 @@ export async function composeNotificationBody(
   trigger: NotificationTrigger,
   tone: ToneLevel | undefined,
 ): Promise<string> {
-  const openai = getClient();
+  const openai = getUtilityClient();
   if (!openai) return trigger.templateBody;
 
   const controller = new AbortController();
@@ -66,9 +61,8 @@ export async function composeNotificationBody(
   try {
     const completion = await openai.chat.completions.create(
       {
-        model: env.DEEPSEEK_MODEL,
-        max_tokens: COMPOSE_MAX_TOKENS,
-        temperature: 0.7,
+        model: UTILITY_MODEL,
+        ...utilityParams(COMPOSE_MAX_TOKENS),
         messages: [
           { role: 'system', content: SYSTEM_PROMPT },
           {

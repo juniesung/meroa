@@ -1,12 +1,11 @@
 import { and, asc, eq, gt, sql } from 'drizzle-orm';
-import OpenAI from 'openai';
 import { z } from 'zod';
 
-import { env } from '../../env.ts';
 import { logger } from '../../logger.ts';
 import { db } from '../../db/client.ts';
 import { conversations, memoryExtractionState, messages } from '../../db/schema.ts';
 import { isMemoryGrounded } from './claim-check.ts';
+import { getUtilityClient, UTILITY_MODEL, utilityParams } from './utility-client.ts';
 import {
   createMemory,
   getMemory,
@@ -97,12 +96,10 @@ Rules:
 - Never a task, a to-do, or a trackable number — this app tracks those separately; you are only capturing context about who the person is.
 - sensitive: true for anything touching health, money, or emotional wellbeing. When genuinely unsure, prefer true.`;
 
-let client: OpenAI | null = null;
-function getClient(): OpenAI | null {
-  if (!env.DEEPSEEK_API_KEY) return null;
-  if (!client) client = new OpenAI({ apiKey: env.DEEPSEEK_API_KEY, baseURL: 'https://api.deepseek.com' });
-  return client;
-}
+// Runs on the shared OpenAI utility client (lib/ai/utility-client.ts) so the
+// RAW user messages this reads are NOT sent to DeepSeek — the highest-value
+// part of the 2026-07-26 privacy fix. Null client (no key) → no extraction,
+// same graceful skip as before.
 
 const LOCK_NAMESPACE = 'memory:';
 
@@ -183,7 +180,7 @@ async function runExtraction(
   batch: ClaimedBatch['messages'],
   existing: { id: string; kind: string; content: string }[],
 ): Promise<z.infer<typeof extractionResponseSchema>['ops']> {
-  const openai = getClient();
+  const openai = getUtilityClient();
   if (!openai) return [];
 
   const controller = new AbortController();
@@ -191,9 +188,8 @@ async function runExtraction(
   try {
     const completion = await openai.chat.completions.create(
       {
-        model: env.CLAIM_CHECK_MODEL,
-        max_tokens: EXTRACTION_MAX_TOKENS,
-        temperature: 0,
+        model: UTILITY_MODEL,
+        ...utilityParams(EXTRACTION_MAX_TOKENS),
         response_format: { type: 'json_object' },
         messages: [
           { role: 'system', content: EXTRACTION_SYSTEM_PROMPT },

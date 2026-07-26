@@ -1,7 +1,5 @@
-import OpenAI from 'openai';
-
-import { env } from '../../env.ts';
 import { logger } from '../../logger.ts';
+import { getUtilityClient, UTILITY_MODEL, utilityParams } from './utility-client.ts';
 
 // env.CLAIM_CHECK_MODEL's default (deepseek-v4-flash) reasons before
 // answering — it always emits chain-of-thought as a separate
@@ -85,20 +83,10 @@ NO — everything else. Crucially:
 
 Do not judge tone, confidence, or phrasing. Judge only truth against the state. If the reply says nothing the state contradicts, answer NO.`;
 
-// Lazy singleton — most requests never hit this (see the toolCallLog.length
-// guard in providers/shared.ts), so there's no reason to construct a client
-// that's never used. Always talks to DeepSeek directly regardless of the
-// conversation's own AI_PROVIDER (env.CLAIM_CHECK_MODEL's default is a
-// DeepSeek model, chosen for cost — a yes/no call, not a reply, even though
-// the default model's own reasoning overhead means it isn't as cheap or
-// fast in practice as that framing suggests; see the comment above
-// CLASSIFIER_TIMEOUT_MS).
-let client: OpenAI | null = null;
-function getClient(): OpenAI | null {
-  if (!env.DEEPSEEK_API_KEY) return null;
-  if (!client) client = new OpenAI({ apiKey: env.DEEPSEEK_API_KEY, baseURL: 'https://api.deepseek.com' });
-  return client;
-}
+// These guards run on the shared OpenAI utility client (lib/ai/utility-client.ts)
+// so the reply text + task/goal facts they send don't go to DeepSeek — same
+// privacy fix as the rest of the AI calls (2026-07-26). Fail-open on a null
+// client (no key) exactly as before.
 
 /**
  * Cheap, non-streamed backstop for the "announced or claimed a task action
@@ -120,7 +108,7 @@ export async function didClaimAction(segments: string[], stateFacts: string): Pr
   const text = segments.join(' ').trim();
   if (!text) return false;
 
-  const openai = getClient();
+  const openai = getUtilityClient();
   if (!openai) return false;
 
   const controller = new AbortController();
@@ -128,9 +116,8 @@ export async function didClaimAction(segments: string[], stateFacts: string): Pr
   try {
     const completion = await openai.chat.completions.create(
       {
-        model: env.CLAIM_CHECK_MODEL,
-        max_tokens: CLASSIFIER_MAX_TOKENS,
-        temperature: 0,
+        model: UTILITY_MODEL,
+        ...utilityParams(CLASSIFIER_MAX_TOKENS),
         messages: [
           { role: 'system', content: CLASSIFIER_SYSTEM_PROMPT },
           {
@@ -190,7 +177,7 @@ When genuinely unsure whether a detail was really said or was quietly added, ans
  * unverifiable claim is treated the same as a false one: dropped.
  */
 export async function isMemoryGrounded(content: string, sourceText: string): Promise<boolean> {
-  const openai = getClient();
+  const openai = getUtilityClient();
   if (!openai) return false;
 
   const controller = new AbortController();
@@ -198,9 +185,8 @@ export async function isMemoryGrounded(content: string, sourceText: string): Pro
   try {
     const completion = await openai.chat.completions.create(
       {
-        model: env.CLAIM_CHECK_MODEL,
-        max_tokens: CLASSIFIER_MAX_TOKENS,
-        temperature: 0,
+        model: UTILITY_MODEL,
+        ...utilityParams(CLASSIFIER_MAX_TOKENS),
         messages: [
           { role: 'system', content: MEMORY_GROUNDING_SYSTEM_PROMPT },
           {
@@ -314,7 +300,7 @@ export async function didMisstateFigure(segments: string[], groundingFacts: stri
   const text = segments.join(' ').trim();
   if (!text || !groundingFacts.trim()) return false;
 
-  const openai = getClient();
+  const openai = getUtilityClient();
   if (!openai) return false;
 
   const controller = new AbortController();
@@ -322,9 +308,8 @@ export async function didMisstateFigure(segments: string[], groundingFacts: stri
   try {
     const completion = await openai.chat.completions.create(
       {
-        model: env.CLAIM_CHECK_MODEL,
-        max_tokens: CLASSIFIER_MAX_TOKENS,
-        temperature: 0,
+        model: UTILITY_MODEL,
+        ...utilityParams(CLASSIFIER_MAX_TOKENS),
         messages: [
           { role: 'system', content: FIGURE_SYSTEM_PROMPT },
           {
@@ -357,7 +342,7 @@ export async function didConcealAction(segments: string[], actionFacts: string[]
   const text = segments.join(' ').trim();
   if (!text || !actionFacts.length) return false;
 
-  const openai = getClient();
+  const openai = getUtilityClient();
   if (!openai) return false;
 
   const controller = new AbortController();
@@ -365,9 +350,8 @@ export async function didConcealAction(segments: string[], actionFacts: string[]
   try {
     const completion = await openai.chat.completions.create(
       {
-        model: env.CLAIM_CHECK_MODEL,
-        max_tokens: CLASSIFIER_MAX_TOKENS,
-        temperature: 0,
+        model: UTILITY_MODEL,
+        ...utilityParams(CLASSIFIER_MAX_TOKENS),
         messages: [
           { role: 'system', content: CONCEALMENT_SYSTEM_PROMPT },
           {

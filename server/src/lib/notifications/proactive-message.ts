@@ -1,9 +1,7 @@
-import OpenAI from 'openai';
-
-import { env } from '../../env.ts';
 import { logger } from '../../logger.ts';
 import { didMisstateFigure } from '../ai/claim-check.ts';
 import { DEFAULT_TONE, type ToneLevel } from '../ai/system-prompt.ts';
+import { getUtilityClient, UTILITY_MODEL, utilityParams } from '../ai/utility-client.ts';
 import type { NotificationTrigger } from './triggers.ts';
 
 const COMPOSE_TIMEOUT_MS = 8000;
@@ -11,12 +9,8 @@ const COMPOSE_TIMEOUT_MS = 8000;
 // headroom or the actual line gets truncated — same lesson as compose.ts.
 const COMPOSE_MAX_TOKENS = 600;
 
-let client: OpenAI | null = null;
-function getClient(): OpenAI | null {
-  if (!env.DEEPSEEK_API_KEY) return null;
-  if (!client) client = new OpenAI({ apiKey: env.DEEPSEEK_API_KEY, baseURL: 'https://api.deepseek.com' });
-  return client;
-}
+// Runs on the shared OpenAI utility client (lib/ai/utility-client.ts) — off
+// DeepSeek (2026-07-26 privacy fix). Null client (no key) → template fallback.
 
 // This composes the actual message Meroa drops into the chat thread when it
 // reaches out first — NOT the 12-word push (that's compose.ts). It's real
@@ -63,7 +57,7 @@ export async function composeProactiveMessage(
   trigger: NotificationTrigger,
   tone: ToneLevel | undefined,
 ): Promise<string> {
-  const openai = getClient();
+  const openai = getUtilityClient();
   if (!openai) return trigger.templateBody;
 
   const controller = new AbortController();
@@ -72,9 +66,8 @@ export async function composeProactiveMessage(
     const hint = TONE_HINT[tone ?? DEFAULT_TONE];
     const completion = await openai.chat.completions.create(
       {
-        model: env.DEEPSEEK_MODEL,
-        max_tokens: COMPOSE_MAX_TOKENS,
-        temperature: 0.8,
+        model: UTILITY_MODEL,
+        ...utilityParams(COMPOSE_MAX_TOKENS),
         messages: [
           { role: 'system', content: SYSTEM_PROMPT },
           {

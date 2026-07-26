@@ -23,7 +23,17 @@ const schema = z.object({
   // DeepSeek regardless of AI_PROVIDER — cheapest option for a ~100-token
   // yes/no call that runs on every zero-tool-call turn. Falls back to the
   // regex-only result if DEEPSEEK_API_KEY isn't set.
+  // NOTE: superseded by UTILITY_MODEL below (2026-07-26 provider switch) — the
+  // guard/extractor/compose calls now use the OpenAI utility client so user
+  // data (incl. raw messages in the extractor) doesn't go to DeepSeek. Kept for
+  // the deepseek rollback path only.
   CLAIM_CHECK_MODEL: z.string().default('deepseek-v4-flash'),
+  // The small model for the non-conversational AI calls (claim-check guards,
+  // memory extraction, notification composition) via lib/ai/utility-client.ts.
+  // Runs on OpenAI (OPENAI_API_KEY) to keep user data off DeepSeek. gpt-5-nano
+  // is a reasoning model: no `temperature`, `max_completion_tokens`, and it
+  // accepts `reasoning_effort` (utility-client sets 'minimal').
+  UTILITY_MODEL: z.string().default('gpt-5-nano'),
   // Hard paywall (no persistent free tier): a lapsed/never-started user gets
   // zero of everything below until they start a trial or subscribe — see
   // docs/phases/phase-7-premium-billing.md. Overridable for local testing
