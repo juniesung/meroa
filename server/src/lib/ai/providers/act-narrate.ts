@@ -754,9 +754,24 @@ export async function* streamChatReplyActNarrate(
     // the server actually did this turn, and the user's own recent words (not just
     // the newest message — see recentUserMessages above). A figure that can't be
     // justified from these was invented.
-    yield* maybeCorrectFabricatedFigure(
-      [stateFactsText, ...actionFacts, recentUserMessages].filter(Boolean).join('\n'),
-    );
+    //
+    // Gated on !pureConversation for the SAME reason as maybeCorrectFakeAction
+    // above: this guard only understands APP figures (savings totals, streaks,
+    // counts — the numbers the server computes and the model must quote). On a
+    // genuine whole-life-companion chat turn the reply legitimately contains
+    // numbers from the WORLD, not the app — a restaurant's street address, a zip,
+    // a year, a track count — none of which live in the grounding facts, so the
+    // guard flagged them and appended its "scratch that number, check your Goals
+    // tab" retraction against a restaurant address (seen live, account
+    // 9168463503). A pure-conversation turn quotes no app state (its narrate pass
+    // gets only the clock), so there is no app figure here to protect and this
+    // guard can only misfire. Status/recap reads ("how much have I saved") are
+    // NOT pureConversation — they hit the status pattern — so they stay guarded.
+    if (!pureConversation) {
+      yield* maybeCorrectFabricatedFigure(
+        [stateFactsText, ...actionFacts, recentUserMessages].filter(Boolean).join('\n'),
+      );
+    }
     logTurn();
     yield { type: 'stream_end' };
   } catch (err) {
