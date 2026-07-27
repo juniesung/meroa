@@ -8,9 +8,12 @@
 
 ## 0. The ASO rules this draft follows
 
-- **Only 3 fields are indexed for search:** app name (30), subtitle (30), keyword
-  field (100). **The description is NOT indexed by Apple** — so it's written for
-  *conversion*, not keywords.
+- **Apple indexes SIX surfaces for search (2026):** app name (30), subtitle (30),
+  keyword field (100), **IAP display names**, **in-app event titles**, and
+  **screenshot-caption OCR**. The **description is NOT indexed** — it's written for
+  *conversion*, not keywords. §1–6 optimize name/subtitle/keywords/captions; the
+  IAP-name + in-app-event surfaces and **cross-locale keyword expansion** (the
+  single biggest untapped lever) are in **§8**.
 - **Apple de-duplicates:** a word already in the name or subtitle is wasted in
   the keyword field. Every indexed word appears **once**, total.
 - **Keyword field format:** single words, comma-separated, **no spaces after
@@ -64,11 +67,14 @@ Title already used habit/goal/coach — so the subtitle must add **new** words.
 The highest-value one now free is `accountability`; the subtitle is a "premium"
 indexed slot, so spend it on the best phrase.
 
-**Primary → `Your accountability partner`**  *(27/30)*
-Indexes two high-value terms: `accountability`, `partner`. The "texts first /
-reaches out" differentiator is carried by the screenshots + description instead.
+**Primary → `Daily accountability partner`**  *(28/30)*
+Indexes three high-value terms: `daily`, `accountability`, `partner` (and Apple
+builds `daily habit` / `daily goal` by combining with the title). This reclaims
+the slot the earlier `Your accountability partner` spent on **`Your`**, which
+indexes nothing — a free extra keyword for the same read.
 
 Alternatives:
+- `Your accountability partner` *(27)* — warmer, but `Your` is dead weight (indexes nothing). Choose only if the warmth matters more than the extra keyword.
 - `The friend who texts you first` *(30)* — distinctive + on-brand, but only indexes `friend`; move `accountability`/`partner` to the keyword field. Choose this if you value the tagline's punch over the search-reach of "accountability partner."
 - `Accountability that texts you` *(30)* — splits the difference: indexes `accountability` + hints the hook.
 
@@ -80,13 +86,17 @@ Deduped against the chosen name (`ai`, `habit`, `goal`, `coach`) and primary
 subtitle (`accountability`, `partner`) — so those are **excluded** here.
 
 ```
-companion,friend,buddy,discipline,routine,motivation,planner,task,reminder,streak,tracker,journal
+companion,friend,buddy,discipline,routine,motivation,planner,task,reminder,streak,tracker,checklist
 ```
-*(97/100)*
+*(99/100)*
+
+Swapped `journal` → `checklist`: journaling isn't a Meroa feature (so `journal`
+was low-relevance and risked matching poorly), while **checklists are a real task
+type** — higher relevance, honest match.
 
 Phrases this lets Apple build across all three fields: *ai companion · ai friend ·
 accountability buddy · habit tracker · habit routine · habit streak · goal
-planner · goal tracker · goal journal · daily reminder · task · self-discipline*.
+planner · goal tracker · goal checklist · daily reminder · task · self-discipline*.
 
 > If you switch the subtitle to `The friend who texts you first`, add
 > `accountability,partner` back here and drop `friend` (it'd be in the subtitle) —
@@ -189,6 +199,66 @@ habits & goals, texts first when you slip, and remembers what matters. 7 days fr
 
 ---
 
+## 8. Expansion levers (the other indexed surfaces) — biggest untapped ASO gains
+
+§1–7 optimize one locale's name/subtitle/keywords/captions. These add indexed
+keyword real estate on top, at near-zero effort and no rebuild.
+
+### 8a. Cross-localization — the single biggest lever
+
+Apple indexes keywords **per storefront from more than one locale**, and keywords
+**do not cross-pollinate** between locales — so each extra locale you fill is a
+*fresh* 30 (name) + 30 (subtitle) + 100 (keywords) indexed set. The trick: put
+**additional English keywords** in the secondary locale (the app is English-only,
+so non-English locale users get an English app anyway).
+
+**⚠️ Correction to the earlier cloud plan:** it claimed adding *English (UK/AU/CA)*
+expands the **US** ranking. That's wrong. Each storefront indexes a **specific**
+pair of locales:
+- **US storefront indexes `English (U.S.)` + `Spanish (Mexico)`.** To grow US
+  keywords, fill **Spanish (Mexico)** metadata with *more English terms* — they
+  rank for US searchers. This is the US lever.
+- `English (UK)` / `(AU)` / `(CA)` help the **UK / AU / CA** storefronts (which we
+  DO ship — only the EU was dropped), **not** the US. Worth doing for those markets;
+  just don't expect US lift from them.
+
+**Ready-to-paste `Spanish (Mexico)` keyword field** — fresh terms, none repeated
+from the en-US name/subtitle/keywords (repeats add nothing in the pooled index):
+```
+productivity,self,improvement,mindset,focus,consistency,procrastination,mentor,growth,todo,timer
+```
+*(96/100)* — unlocks *self improvement · productivity · focus · beat
+procrastination · daily timer*, plus combinations with the en-US title Apple pools
+for US search. Its name/subtitle slots can carry more English terms too (optional);
+just don't duplicate words already used in the en-US set or within es-MX itself.
+For UK/AU/CA: clone the en-US metadata (or vary it) into `English (UK/AU/CA)`.
+
+### 8b. IAP display name — a wasted indexed slot
+
+The subscription's **display name** is indexed and currently `Meroa Plus` (indexes
+nothing useful). Make it carry a fresh keyword while staying legible at the
+purchase sheet, e.g. **`Meroa Plus: Productivity Coach`** *(30/30)* — adds
+`productivity`. Safe to change: RevenueCat maps on the **product ID**
+(`meroa_monthly`), not the display name, so this doesn't touch entitlements. Set it
+in App Store Connect → Subscriptions → localization; keep ≤30 chars.
+
+### 8c. In-app event titles — recurring indexed surface (post-launch)
+
+In-App Events' titles are indexed **and** are an editorial-featuring surface. A
+periodic event (e.g. a "7-Day Accountability Challenge" or "New Year Goal Reset")
+carries keywords and can win a Search/Today placement. More effort than 8a/8b and
+needs the app live — a post-launch lever, not a submit-blocker.
+
+### 8d. Conversion levers that feed ranking indirectly (other launch items)
+
+Not keyword surfaces, but tap-through + retention are ranking inputs: an **app
+preview video** (needs the running build), and a deliberate **ratings prompt**
+(review volume/velocity is among the heaviest non-keyword ranking factors — wire
+StoreKit `requestReview` to fire after a genuine win, never on launch). Track these
+under the dev-build / Phase-8 items, not here.
+
+---
+
 ## Sources
 
 - [App Store indexed fields map (2026)](https://appscreenshotstudio.com/tools/app-store-indexed-fields)
@@ -197,3 +267,6 @@ habits & goals, texts first when you slip, and remembers what matters. 7 days fr
 - [Singular vs plural keywords](https://www.apptweak.com/en/aso-blog/do-singular-or-plural-keywords-rank-differently-in-aso)
 - [iOS keyword field optimization](https://www.apptweak.com/en/aso-blog/how-to-optimize-your-ios-keyword-field)
 - [App category ranking 2026](https://asoworld.com/en/blog/app-category-ranking-factors-2026-how-ai-powered-curation-is-changing-the-game/)
+- [Cross-localization: US indexes en-US + es-MX](https://www.mobileaction.co/blog/app-store-cross-localization/)
+- [Cross-localization guide: double your keywords](https://aso.dev/metadata/cross-localization/)
+- [App Store localization 2026 playbook](https://appfollow.io/blog/app-store-optimization-localization)
