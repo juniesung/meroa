@@ -13,6 +13,7 @@ import { evaluateAchievements, markAnnounced, mostSignificant } from '../lib/ach
 import { congratsLine } from '../lib/achievements/copy.ts';
 import { pickTaskCreatedQuip } from '../lib/ai/quips.ts';
 import { buildRecentChangesFeed, renderUndoTarget } from '../lib/ai/recent-changes.ts';
+import { isUnderMinAge } from '../lib/age.ts';
 import { hasValidAiConsent } from '../lib/consent.ts';
 import {
   buildConversationTailBlock,
@@ -234,6 +235,11 @@ messageRoutes.post('/', rateLimit({ windowMs: 60_000, max: 20 }), zValidator('js
     .where(eq(users.id, userId))
     .limit(1);
   if (!consentUser) return c.json({ error: 'not_found' }, 404);
+  // Age gate (min 13) — enforced here, in code, so an under-13 user can't reach
+  // the model even via an old build or a bypassed nav guard (lib/age.ts).
+  if (isUnderMinAge(consentUser.prefs)) {
+    return c.json({ error: 'age_restricted' }, 403);
+  }
   if (!hasValidAiConsent(consentUser.prefs)) {
     return c.json({ error: 'ai_consent_required' }, 403);
   }

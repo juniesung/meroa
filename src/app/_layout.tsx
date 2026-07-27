@@ -14,6 +14,7 @@ import { consentGranted } from '@/features/profile/ai-consent';
 import { OnboardingDraftFlush } from '@/features/profile/OnboardingDraftFlush';
 import { useMe } from '@/features/profile/queries';
 import { theme } from '@/constants/theme';
+import { hasDob, isUnderMinAge } from '@/lib/age';
 import { AuthProvider, useAuth } from '@/lib/auth/AuthProvider';
 import { queryClient } from '@/lib/query-client';
 
@@ -112,6 +113,10 @@ function RootNavigator() {
   // slider aren't sent back through it. Gated ahead of the paywall: signup →
   // onboarding → paywall → tabs.
   const prefs = me?.user.prefs;
+  // Age gate (min 13) — takes precedence over EVERY other screen. A user with no
+  // dob yet answers it once; an under-13 dob is a permanent block. Enforced
+  // server-side too on every send (lib/age.ts); this is the surface.
+  const needsAgeGate = status === 'signedIn' && (!hasDob(prefs) || isUnderMinAge(prefs));
   const needsOnboarding =
     typeof prefs?.tone !== 'number' && typeof prefs?.communicationStyle !== 'string';
   // Apple 5.1.2(i): after onboarding and the paywall, an entitled user must have
@@ -120,8 +125,8 @@ function RootNavigator() {
   // account (none has consent yet, so → consent → tabs on next launch). Revoking
   // in the You tab flips this back and re-shows the screen. The server enforces
   // the same predicate on every send (lib/consent.ts) — this is just the surface.
-  const needsAiConsent = !needsOnboarding && hasAccess && !consentGranted(me?.user.prefs);
-  const canUseTabs = status === 'signedIn' && !needsOnboarding && hasAccess && !needsAiConsent;
+  const needsAiConsent = !needsAgeGate && !needsOnboarding && hasAccess && !consentGranted(me?.user.prefs);
+  const canUseTabs = status === 'signedIn' && !needsAgeGate && !needsOnboarding && hasAccess && !needsAiConsent;
 
   useEffect(() => {
     if (status !== 'loading') {
@@ -140,7 +145,10 @@ function RootNavigator() {
       {status === 'signedIn' && <OnboardingDraftFlush />}
       {canUseTabs && <NotificationRouter />}
       <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: theme.bg } }}>
-        <Stack.Protected guard={status === 'signedIn' && needsOnboarding}>
+        <Stack.Protected guard={needsAgeGate}>
+          <Stack.Screen name="age-gate" options={{ gestureEnabled: false }} />
+        </Stack.Protected>
+        <Stack.Protected guard={status === 'signedIn' && !needsAgeGate && needsOnboarding}>
           <Stack.Screen name="onboarding" options={{ gestureEnabled: false }} />
         </Stack.Protected>
         <Stack.Protected guard={status === 'signedIn' && needsAiConsent}>
@@ -153,7 +161,7 @@ function RootNavigator() {
           <Stack.Screen name="memories" options={{ presentation: 'card' }} />
           <Stack.Screen name="settings" options={{ presentation: 'card' }} />
         </Stack.Protected>
-        <Stack.Protected guard={status === 'signedIn' && !needsOnboarding}>
+        <Stack.Protected guard={status === 'signedIn' && !needsAgeGate && !needsOnboarding}>
           {/* Declared once, always reachable while signed in — 'card' with no
               tab bar underneath when it's the mandatory hard-paywall landing
               screen (!hasAccess), 'modal' over the tabs for the existing

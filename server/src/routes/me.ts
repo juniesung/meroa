@@ -129,6 +129,14 @@ const prefsPatchSchema = z.object({
   // (`granted: false`) is a first-class action — the message endpoint blocks
   // sends whenever consent isn't valid for the current version (lib/consent.ts).
   aiConsent: z.object({ granted: z.boolean() }).optional(),
+  // Date of birth (YYYY-MM-DD) for the age gate. Minimum age is 13 (COPPA
+  // floor + Terms). Stored so it survives reinstall (the account is phone-keyed)
+  // and an under-13 user stays blocked. The hard block is enforced server-side
+  // on the message endpoint (lib/age.ts), not just the client nav guard.
+  dob: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
 });
 
 // Captured once at OTP verify, but a device's timezone can drift from that
