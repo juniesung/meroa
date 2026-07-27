@@ -10,12 +10,14 @@ export function ChatMenuSheet({
   toneName,
   onSelectTone,
   onSelectMemory,
+  onSelectClear,
 }: {
   visible: boolean;
   onClose: () => void;
   toneName: string;
   onSelectTone: () => void;
   onSelectMemory: () => void;
+  onSelectClear: () => void;
 }) {
   return (
     <Sheet visible={visible} onClose={onClose}>
@@ -27,6 +29,7 @@ export function ChatMenuSheet({
           onPress={onSelectTone}
         />
         <Row icon="book" label="Memory" onPress={onSelectMemory} />
+        <Row icon="trash" label="Clear conversation" onPress={onSelectClear} />
       </View>
     </Sheet>
   );

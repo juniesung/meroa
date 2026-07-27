@@ -50,6 +50,19 @@ export function useReportMessage() {
   });
 }
 
+// "Clear conversation" — wipes the chat thread (server deletes messages only;
+// tasks/goals/memories survive). Empties the local cache immediately on success
+// so the thread reads clean without a refetch.
+export function useClearConversation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.clearConversation(),
+    onSuccess: () => {
+      queryClient.setQueryData<{ messages: ChatMessage[] }>(messagesQueryKey, { messages: [] });
+    },
+  });
+}
+
 export function useSendMessage() {
   const queryClient = useQueryClient();
 

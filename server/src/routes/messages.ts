@@ -1,6 +1,6 @@
 import { zValidator } from '@hono/zod-validator';
 import * as Sentry from '@sentry/node';
-import { and, desc, eq, gt, isNull, sql } from 'drizzle-orm';
+import { and, desc, eq, gt, inArray, isNull, sql } from 'drizzle-orm';
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { z } from 'zod';
@@ -57,6 +57,28 @@ messageRoutes.get('/', zValidator('query', listQuerySchema), async (c) => {
   const { cursor, limit } = c.req.valid('query');
   const rows = await getRecentMessages(userId, limit ?? 50, cursor ? new Date(cursor) : undefined);
   return c.json({ messages: rows });
+});
+
+// "Clear conversation / start fresh" — a middle ground between doing nothing and
+// full account deletion, and one of the chat-surface user controls App Store
+// review expects for a UGC/chat feature (Guideline 1.2). Deletes the user's chat
+// MESSAGES only; the durable records (tasks, goals, progress, memories) survive
+// untouched, because every FK from those into `messages` is ON DELETE SET NULL
+// (source_message_id / created_from_message_id / last_message_id) — see
+// db/schema.ts. Scoped to the caller's own conversations via userId, so it can
+// never touch another user's thread. message_reports cascade away with their
+// messages, which is correct.
+messageRoutes.delete('/', async (c) => {
+  const userId = c.get('userId');
+  const convos = await db
+    .select({ id: conversations.id })
+    .from(conversations)
+    .where(eq(conversations.userId, userId));
+  const ids = convos.map((row) => row.id);
+  if (ids.length > 0) {
+    await db.delete(messages).where(inArray(messages.conversationId, ids));
+  }
+  return c.json({ ok: true });
 });
 
 // Google Play AI-Generated Content policy: an in-app way to flag an offensive

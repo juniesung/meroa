@@ -254,6 +254,11 @@ export const api = {
 
   // Sending a message streams via SSE — see lib/api/stream.ts's `streamMessage`.
 
+  // "Clear conversation / start fresh" — deletes the user's chat messages only;
+  // tasks, goals, progress, and memories survive (server: DELETE handler).
+  clearConversation: () =>
+    request<{ ok: true }>('/conversations/current/messages', { method: 'DELETE' }),
+
   // Flag an assistant reply as offensive (Google AI-content policy). No model
   // call; idempotent per message server-side.
   reportMessage: (id: string, reason?: string) =>

@@ -37,7 +37,7 @@ import { radii, theme } from '@/constants/theme';
 import { banner3dStyle } from '@/lib/banner';
 import { goalAccent } from '@/features/goals/goal-accent';
 import { ChatMenuSheet } from '@/features/chat/ChatMenuSheet';
-import { type ChatMessage, useMessages, useReportMessage, useSendMessage } from '@/features/chat/queries';
+import { type ChatMessage, useClearConversation, useMessages, useReportMessage, useSendMessage } from '@/features/chat/queries';
 import {
   useBulkDeleteTasks,
   useCompleteTask,
@@ -880,6 +880,7 @@ export default function ChatScreen() {
   };
 
   const reportMessage = useReportMessage();
+  const clearConversation = useClearConversation();
   const handleReport = (message: ChatMessage) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     Alert.alert(
@@ -919,6 +920,29 @@ export default function ChatScreen() {
   const openMemoryFromMenu = () => {
     setMenuSheetOpen(false);
     setTimeout(() => router.push('/memories'), ANIM_DURATION);
+  };
+  const clearFromMenu = () => {
+    setMenuSheetOpen(false);
+    setTimeout(() => {
+      Alert.alert(
+        'Clear conversation?',
+        'This wipes your chat with Meroa and starts fresh. Your tasks, goals, and progress are kept.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Clear',
+            style: 'destructive',
+            onPress: () => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+              clearConversation.mutate(undefined, {
+                onError: () =>
+                  Alert.alert('Something went wrong', "Couldn't clear the conversation. Please try again."),
+              });
+            },
+          },
+        ],
+      );
+    }, ANIM_DURATION);
   };
 
   return (
@@ -962,6 +986,7 @@ export default function ChatScreen() {
         toneName={communicationStyle}
         onSelectTone={openToneFromMenu}
         onSelectMemory={openMemoryFromMenu}
+        onSelectClear={clearFromMenu}
       />
       <VibePickerSheet visible={vibeSheetOpen} onClose={() => setVibeSheetOpen(false)} />
 
