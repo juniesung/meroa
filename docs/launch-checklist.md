@@ -1,6 +1,6 @@
 # Launch checklist
 
-Living list of everything between here and a submitted app. Last updated **2026-07-21**.
+Living list of everything between here and a submitted app. Last updated **2026-07-26**.
 
 Ordered by what unblocks what — the critical path is **§1 → §2**. Sections 3–6 are
 parallelizable, but none of them close a Definition of Done the way the device test does.
@@ -73,21 +73,37 @@ not the App Store. Trial eligibility is per-account and sticks — mint a fresh
 
 ## 4. Store portal
 
-- [ ] **DSA trader declaration** — unresolved. Non-trader ⇒ must also remove the 27 EU
-      territories in Pricing and Availability. Reversible later; trader status requires
-      publishing a real address on the product page.
+- [x] **DSA trader declaration** — **RESOLVED (2026-07-26): drop EU.** Meroa is a paid
+      sub ⇒ a trader, so the choice was declare-trader (publish a verified address on EU
+      product pages) or drop the EU. Decided to drop the **27 EU member states** in
+      Pricing and Availability (no address published anywhere; fully reversible later).
+      *Remaining ASC action:* deselect those territories when setting Pricing & Availability.
 - [ ] Subscription **review screenshot** + review notes (needed to submit, not to test)
 - [ ] App listing: name, subtitle, description, keywords, screenshots, support URL,
       privacy URL, age rating
-- [ ] **App Privacy questionnaire** (Apple) + **Data Safety** (Google) — the mapping is
-      already done in `docs/data-inventory.md`
+      - [x] Copy finalized — name/subtitle/keywords/description/promo, category, captions
+        in `docs/app-store-listing.md` (ASO-optimized, 2026-07-26).
+      - [x] Support/Privacy URLs fixed → live Railway pages (`/support`, `/privacy`,
+        `/terms` all return 200); dead `meroa.app` links removed.
+      - [ ] ⚠ Screenshots need re-export — the four produced are 941×1672 (too small +
+        wrong aspect); re-render at **1320×2868 (6.9")**, taller ~0.46 composition.
+      - [ ] Enter it all in App Store Connect + set age rating.
+- [ ] **App Privacy questionnaire** (Apple) + **Data Safety** (Google) — mapping done in
+      `docs/data-inventory.md`
+      - [x] Apple answers finalized + click-by-click in `docs/app-privacy-answers.md`,
+        re-verified against live code (2026-07-26). *Remaining:* enter in ASC (publishable
+        independent of a build).
 - [ ] Export-compliance / encryption declaration
 
 ## 5. Legal review gate — blocks public launch
 
-- [ ] Review `docs/legal/*-draft.md`; fill the `[PLACEHOLDER]` tokens (legal entity name)
-- [ ] Scope CORS in `server/src/routes/legal.ts` — currently `*`, dev-only
-- [ ] Deploy /privacy /terms /support publicly
+- [x] Review `docs/legal/*-draft.md`; fill the `[PLACEHOLDER]` tokens — **done**: no real
+      placeholders remain (grep hits are just header instructions), entity = Jun Kwon
+      individual, DeepSeek→OpenAI story clean, founder-reviewed (`legal-copy-decisions`).
+      *Still advisable:* attorney review before a large-scale launch (not a submit blocker).
+- [x] Scope CORS — **already done**: `server/src/index.ts` denies all cross-origin in
+      production (`CORS_ORIGINS` allowlist, empty by default); `*` only in non-prod. Stale item.
+- [x] Deploy /privacy /terms /support publicly — **live** on Railway, all return 200.
 
 ## 6. Housekeeping
 
