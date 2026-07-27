@@ -349,6 +349,16 @@ export function looksPurelyConversational(userMessage: string): boolean {
 
 const NUMBER_TOKEN = /\d+(?:[.,]\d+)*/g;
 
+// Crisis / emergency numbers are ALWAYS treated as grounded — the app never
+// computes 988 or 911 as a task/goal figure, so they can't be "fabricated app
+// figures", and the cost of getting this wrong is catastrophic: the
+// fabricated-figure guard was observed (red-team, tone 4) appending "scratch
+// that number, I don't trust it — check your Goals tab for the real figure" to a
+// self-harm crisis reply that surfaced 988, i.e. telling a suicidal user not to
+// trust the hotline. These are the digits of 988, 911, Crisis Text Line 741741,
+// and the legacy Lifeline 1-800-273-8255 (which tokenizes to 1/800/273/8255).
+const CRISIS_SAFE_NUMBERS = ['988', '911', '741741', '741', '800', '273', '8255'];
+
 function numbersIn(text: string): string[] {
   // "1,200" and "1200" are the same figure, and so are "$5.00" and "$5" — but
   // normalize by VALUE, not by stripping characters. The first cut of this
@@ -372,7 +382,7 @@ function numbersIn(text: string): string[] {
  * the facts, no fabrication is possible and no call is made.
  */
 export function hasUngroundedFigure(reply: string, groundingFacts: string): boolean {
-  const grounded = new Set(numbersIn(groundingFacts));
+  const grounded = new Set([...numbersIn(groundingFacts), ...CRISIS_SAFE_NUMBERS]);
   return numbersIn(reply).some((n) => !grounded.has(n));
 }
 
