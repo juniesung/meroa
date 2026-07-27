@@ -14,6 +14,7 @@ import { congratsLine } from '../lib/achievements/copy.ts';
 import { pickTaskCreatedQuip } from '../lib/ai/quips.ts';
 import { buildRecentChangesFeed, renderUndoTarget } from '../lib/ai/recent-changes.ts';
 import { isUnderMinAge } from '../lib/age.ts';
+import { CRISIS_RESPONSE, detectCrisis } from '../lib/ai/crisis.ts';
 import { hasValidAiConsent } from '../lib/consent.ts';
 import {
   buildConversationTailBlock,
@@ -562,6 +563,34 @@ messageRoutes.post('/', rateLimit({ windowMs: 60_000, max: 20 }), zValidator('js
       if (disclosureMessage) {
         await stream.writeSSE({ event: 'segment', data: JSON.stringify({ message: disclosureMessage }) });
       }
+    }
+
+    // Crisis protocol (CA SB 243 / NY GBL §1700): if the user's message is a
+    // genuine self-harm / suicide crisis, REPLACE Meroa's reply with a fixed,
+    // deterministic crisis response + 988 — the model is never called at all, so
+    // no generated text can undercut it. Detection is a cheap pre-filter + a
+    // nano confirm (lib/ai/crisis.ts) that runs a model call only on a keyword
+    // match, so ordinary turns pay nothing. Anything the detector misses still
+    // gets the model's own handling, which red-teamed strong. The referral event
+    // is logged (anonymized) for CA's 2027 OSP annual report — a durable
+    // crisis_events table is a fast-follow; the structured log line is the
+    // interim record. Published protocol: GET /safety (routes/legal.ts).
+    if (await detectCrisis(text)) {
+      logger.warn(
+        { userId, sourceMessageId: userMessage.id, event: 'crisis_referral' },
+        'crisis referral surfaced — replaced model reply with fixed crisis response',
+      );
+      for (const segment of CRISIS_RESPONSE) {
+        const [crisisMessage] = await db
+          .insert(messages)
+          .values({ conversationId: conversation.id, role: 'assistant', content: segment, meta: { kind: 'crisis' } })
+          .returning();
+        if (crisisMessage) {
+          await stream.writeSSE({ event: 'segment', data: JSON.stringify({ message: crisisMessage }) });
+        }
+      }
+      await stream.writeSSE({ event: 'stream_end', data: JSON.stringify({}) });
+      return;
     }
 
     // Hono's streamSSE only console.errors an uncaught throw — it never

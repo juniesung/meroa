@@ -262,16 +262,49 @@ const SUPPORT_BODY = `
   <h3>How do I cancel my subscription?</h3>
   <p>Subscriptions are billed by the App Store or Google Play. Cancel in your store account settings. Deleting your Meroa account does not cancel a store subscription.</p>
   <h3>Is Meroa a real person?</h3>
-  <p>No — Meroa is an AI companion, always identified as AI. It is not a therapist, doctor, or financial adviser. If you're in crisis or have an emergency, contact your local emergency services or a qualified professional.</p>
+  <p>No — Meroa is an AI companion, always identified as AI. It is not a therapist, doctor, or financial adviser. If you're in crisis, call or text <strong>988</strong> (the Suicide &amp; Crisis Lifeline, US) — see our <a href="/safety">Safety &amp; crisis support</a> page for more.</p>
   <h3>How do I report an offensive AI response?</h3>
   <p>In chat, long-press the AI message and choose <strong>Report this response</strong>.</p>
   <h3>How is my data used?</h3>
   <p>See our <a href="/privacy">Privacy Policy</a>. In short: your messages are sent to a third-party AI service to generate replies (with your consent), and we don't sell your data or track you across other apps.</p>
 `;
 
+// Published crisis protocol — required to be public by CA SB 243. Also the page
+// the in-app + server crisis handling points to (lib/ai/crisis.ts).
+const SAFETY_BODY = `
+  <span class="eyebrow">Meroa</span>
+  <h1>Safety &amp; crisis support</h1>
+  <p>Meroa is an AI companion, always identified as AI. It is <strong>not</strong> a therapist, doctor, counselor, or emergency service, and it cannot provide mental-health treatment or keep you safe in an emergency.</p>
+
+  <div class="card">
+    <h3>If you're in crisis or thinking about self-harm</h3>
+    <p>Please reach out to a real person who can help, right now:</p>
+    <p><strong>Call or text 988</strong> — the 988 Suicide &amp; Crisis Lifeline (US), free and confidential, 24/7.</p>
+    <p><strong>Text HOME to 741741</strong> — the Crisis Text Line.</p>
+    <p><strong>Call 911</strong> (or your local emergency number) if you or someone else is in immediate danger.</p>
+    <p class="muted">Outside the US, please contact your local emergency services or a local crisis line.</p>
+  </div>
+
+  <h2>How Meroa handles crisis conversations</h2>
+  <p>We take expressions of suicidal thoughts or self-harm seriously. When a message indicates a possible self-harm or suicide crisis, Meroa is designed to:</p>
+  <ul>
+    <li>Recognize the message and respond with care, without judgment.</li>
+    <li>Surface crisis resources — the 988 Suicide &amp; Crisis Lifeline and the Crisis Text Line — clearly and immediately, rather than continuing as an ordinary chat.</li>
+    <li>Never provide instructions or methods for self-harm, under any framing, including fiction or role-play.</li>
+    <li>Encourage reaching out to trained people and, where relevant, emergency services.</li>
+  </ul>
+  <p>Meroa also tells you at the start of a conversation, and periodically during long sessions, that you are talking to an AI and not a human.</p>
+
+  <h2>For younger users</h2>
+  <p>Meroa is intended for people aged 13 and older. Companion AI may not be suitable for all minors.</p>
+
+  <p class="muted">Questions about our safety practices? Email <a href="mailto:${SUPPORT_EMAIL}">${SUPPORT_EMAIL}</a>.</p>
+`;
+
 legalRoutes.get('/privacy', (c) => c.html(page('Privacy Policy', PRIVACY_BODY)));
 legalRoutes.get('/terms', (c) => c.html(page('Terms of Use', TERMS_BODY)));
 legalRoutes.get('/support', (c) => c.html(page('Support', SUPPORT_BODY)));
+legalRoutes.get('/safety', (c) => c.html(page('Safety & crisis support', SAFETY_BODY)));
 
 // ── Web account deletion (Google Play requirement) ───────────────────────────
 // A server-rendered 3-step OTP flow — no app, no browser session. It reuses the
