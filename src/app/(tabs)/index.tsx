@@ -719,6 +719,19 @@ function MessageRow({
   if (isStreamingEmpty) return <TypingDots />;
 
   const kind = message.role === 'assistant' ? message.meta?.kind : undefined;
+
+  // Recurring AI-disclosure notice (NY GBL §1700 / CA SB 243) — rendered as a
+  // quiet centered divider, not a chat bubble, so it reads as a system notice
+  // rather than something Meroa "said". Injected server-side every ~3h of
+  // continuing interaction (routes/messages.ts).
+  if (kind === 'ai_disclosure') {
+    return (
+      <Animated.View entering={animate ? FadeInDown.duration(300) : undefined} style={styles.disclosureRow}>
+        <Text style={styles.disclosureText}>{message.content}</Text>
+      </Animated.View>
+    );
+  }
+
   const Card = typeof kind === 'string' ? CARD_BY_KIND[kind] : undefined;
   if (Card) {
     // Meroa's action cards glide in when they land — a card is created once
@@ -914,7 +927,14 @@ export default function ChatScreen() {
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
           <MeroaMark size={26} glow mood={headerMood} />
           <View>
-            <Text style={styles.title}>Meroa</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <Text style={styles.title}>Meroa</Text>
+              {/* Persistent AI disclosure — conspicuous at the start of every
+                  conversation (NY GBL §1700 / CA SB 243). Always visible, not a
+                  one-time onboarding line. The recurring 3-hour reminder is
+                  injected into the thread server-side (routes/messages.ts). */}
+              <Text style={styles.aiTag}>AI</Text>
+            </View>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
               <View style={styles.dot} />
               <Text style={styles.subtitle}>{headerStatus}</Text>
@@ -1094,7 +1114,23 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: theme.border,
   },
+  // Recurring AI-disclosure notice — quiet, centered, non-bubble.
+  disclosureRow: { alignItems: 'center', paddingVertical: 10, paddingHorizontal: 24 },
+  disclosureText: { color: theme.faint, fontSize: 11.5, textAlign: 'center', lineHeight: 16 },
   title: { color: theme.text, fontSize: 16, fontWeight: '700', letterSpacing: -0.2 },
+  // Small persistent "AI" disclosure pill next to the title.
+  aiTag: {
+    color: theme.dim,
+    fontSize: 9,
+    fontWeight: '700',
+    letterSpacing: 0.6,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    borderRadius: 5,
+    borderWidth: 1,
+    borderColor: theme.border,
+    overflow: 'hidden',
+  },
   subtitle: { color: theme.dim, fontSize: 11 },
   hint: { color: theme.dim, fontSize: 12, fontWeight: '600' },
   dot: { width: 6, height: 6, borderRadius: 999, backgroundColor: theme.success },

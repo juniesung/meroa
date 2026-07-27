@@ -170,6 +170,7 @@ export async function* streamChatReplyActNarrate(
     toolCallLog,
     emittedSegments,
     logTurn,
+    recordUsage,
     maybeCorrectFakeAction,
     maybeCorrectConcealedAction,
     maybeCorrectFabricatedFigure,
@@ -279,6 +280,7 @@ export async function* streamChatReplyActNarrate(
           .create({
             model,
             stream: true,
+            stream_options: { include_usage: true },
             ...maxTokens(NARRATE_MAX_OUTPUT_TOKENS),
             messages: [
               ...buildTailedMessages(buildSystemPrompt(user) + buildMemoryBlock(user.memories ?? []), conversationTailText + buildStyleBlock(user), conversationHistory),
@@ -323,6 +325,10 @@ export async function* streamChatReplyActNarrate(
           ...actExtra,
         } as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming);
       }
+
+      // Act pass is non-streamed — usage is on the completion directly. Summed
+      // across iterations by recordUsage (docs/prelaunch-audit.md item 8).
+      recordUsage('act', completion.usage);
 
       const message = completion.choices[0]?.message;
       const calls = message?.tool_calls ?? [];
@@ -622,6 +628,7 @@ export async function* streamChatReplyActNarrate(
       stream = await client.chat.completions.create({
         model,
         stream: true,
+        stream_options: { include_usage: true },
         ...maxTokens(NARRATE_MAX_OUTPUT_TOKENS),
         // A fast-path turn that lost its speculation still gets the clean
         // conversational context, not the state-laden one.
@@ -652,6 +659,9 @@ export async function* streamChatReplyActNarrate(
     }
 
     for await (const chunk of stream) {
+      // The final usage chunk (stream_options.include_usage) carries an EMPTY
+      // choices array, so read it before the choice guard below or it's lost.
+      if (chunk.usage) recordUsage('narrate', chunk.usage);
       const choice = chunk.choices[0];
       if (!choice) continue;
       if (choice.finish_reason) finishReason = choice.finish_reason;

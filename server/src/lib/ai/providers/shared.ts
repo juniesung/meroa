@@ -408,9 +408,53 @@ export function createTurnState(actionCtx: ChatActionContext) {
   // reads as a malfunction, not as honesty.
   let corrected = false;
 
+  // Per-turn token accounting — the ONLY place $/user can be computed from
+  // (docs/prelaunch-audit.md item 8: cost was previously unobservable). The
+  // act pass is non-streamed so its `completion.usage` is read directly; the
+  // narrate pass streams, so callers must request `stream_options:{include_
+  // usage:true}` and hand the final usage-only chunk here. Reasoning tokens
+  // (gpt-5-mini bills these) are broken out because they're the invisible line
+  // item that quietly dominates cost. Summed across the act pass's iterations
+  // and the narrate pass into one per-turn total.
+  const tokens = { actIn: 0, actOut: 0, actReasoning: 0, narrateIn: 0, narrateOut: 0, narrateReasoning: 0 };
+  type OpenAiUsage = {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    completion_tokens_details?: { reasoning_tokens?: number } | null;
+  } | null | undefined;
+  function recordUsage(pass: 'act' | 'narrate', usage: OpenAiUsage) {
+    if (!usage) return;
+    const reasoning = usage.completion_tokens_details?.reasoning_tokens ?? 0;
+    if (pass === 'act') {
+      tokens.actIn += usage.prompt_tokens ?? 0;
+      tokens.actOut += usage.completion_tokens ?? 0;
+      tokens.actReasoning += reasoning;
+    } else {
+      tokens.narrateIn += usage.prompt_tokens ?? 0;
+      tokens.narrateOut += usage.completion_tokens ?? 0;
+      tokens.narrateReasoning += reasoning;
+    }
+  }
+
   function logTurn() {
+    const totalIn = tokens.actIn + tokens.narrateIn;
+    const totalOut = tokens.actOut + tokens.narrateOut;
     logger.info(
-      { userId: actionCtx.userId, sourceMessageId: actionCtx.sourceMessageId, toolCalls: toolCallLog },
+      {
+        userId: actionCtx.userId,
+        sourceMessageId: actionCtx.sourceMessageId,
+        toolCalls: toolCallLog,
+        // Flat + broken-out so a log query can sum totals or attribute cost to
+        // the act vs. narrate pass and to reasoning specifically.
+        tokens: {
+          in: totalIn,
+          out: totalOut,
+          total: totalIn + totalOut,
+          reasoning: tokens.actReasoning + tokens.narrateReasoning,
+          act: { in: tokens.actIn, out: tokens.actOut, reasoning: tokens.actReasoning },
+          narrate: { in: tokens.narrateIn, out: tokens.narrateOut, reasoning: tokens.narrateReasoning },
+        },
+      },
       'chat turn finished',
     );
   }
@@ -640,6 +684,7 @@ export function createTurnState(actionCtx: ChatActionContext) {
     toolCallLog,
     emittedSegments,
     logTurn,
+    recordUsage,
     maybeCorrectFakeAction,
     maybeCorrectConcealedAction,
     maybeCorrectFabricatedFigure,

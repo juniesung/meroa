@@ -1,6 +1,6 @@
 import { zValidator } from '@hono/zod-validator';
 import * as Sentry from '@sentry/node';
-import { and, eq, gt, isNull } from 'drizzle-orm';
+import { and, desc, eq, gt, isNull, sql } from 'drizzle-orm';
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { z } from 'zod';
@@ -175,6 +175,17 @@ function isActionAckMessage(m: { meta: unknown }): boolean {
   return meta?.actionAck === true;
 }
 
+// The recurring "you're talking to an AI" disclosure injected every ~3h of
+// continuing interaction (NY GBL §1700 / CA SB 243). It is a compliance notice
+// rendered to the USER, not conversational content — so it must never reach
+// either model pass (the act pass would try to act on it; the narrate pass
+// would react to it). Filtered out of the model-facing history below, same as
+// a card.
+function isDisclosureMessage(m: { meta: unknown }): boolean {
+  const meta = m.meta as { kind?: string } | null;
+  return meta?.kind === 'ai_disclosure';
+}
+
 function historyContentFor(m: { content: string; meta: unknown }): string {
   const meta = m.meta as { kind?: string; preview?: { name?: string } } | null;
   switch (meta?.kind) {
@@ -286,6 +297,9 @@ messageRoutes.post('/', rateLimit({ windowMs: 60_000, max: 20 }), zValidator('js
   const history = await getRecentMessages(userId, 50);
   const chatHistory: ChatHistoryMessage[] = history
     .filter((m): m is typeof m & { role: 'user' | 'assistant' } => isChatRole(m.role))
+    // AI-disclosure notices are user-facing compliance text, never conversation
+    // — keep them out of both model passes (see isDisclosureMessage).
+    .filter((m) => !isDisclosureMessage(m))
     // `isCard` marks an assistant turn that was a CARD rather than spoken words.
     // The conversation fast path drops these entirely (providers/act-narrate.ts):
     // on a plain "What's up dawg" the model has no business narrating a task, and
@@ -483,6 +497,44 @@ messageRoutes.post('/', rateLimit({ windowMs: 60_000, max: 20 }), zValidator('js
 
   return streamSSE(c, async (stream) => {
     await stream.writeSSE({ event: 'user_message', data: JSON.stringify(userMessage) });
+
+    // Recurring AI disclosure (NY GBL §1700 / CA SB 243): every ~3h of
+    // continuing interaction, resurface that Meroa is an AI. Server-side and
+    // migration-free — the window is anchored on the last disclosure already in
+    // this conversation, or the conversation's creation if none. A returning
+    // user whose last disclosure was >3h ago is effectively starting a new
+    // continuing interaction, so re-disclosing then is correct too. The
+    // persistent header "AI" pill covers the always-on at-start disclosure; this
+    // is only the periodic reminder. Rendered as a subtle divider client-side
+    // (meta.kind 'ai_disclosure'), and kept out of the model via
+    // isDisclosureMessage above.
+    const DISCLOSURE_INTERVAL_MS = 3 * 60 * 60 * 1000;
+    const [lastDisclosure] = await db
+      .select({ createdAt: messages.createdAt })
+      .from(messages)
+      .where(
+        and(
+          eq(messages.conversationId, conversation.id),
+          sql`${messages.meta}->>'kind' = 'ai_disclosure'`,
+        ),
+      )
+      .orderBy(desc(messages.createdAt))
+      .limit(1);
+    const disclosureAnchor = lastDisclosure?.createdAt ?? conversation.createdAt;
+    if (Date.now() - disclosureAnchor.getTime() >= DISCLOSURE_INTERVAL_MS) {
+      const [disclosureMessage] = await db
+        .insert(messages)
+        .values({
+          conversationId: conversation.id,
+          role: 'assistant',
+          content: "Quick reminder: you're chatting with Meroa, an AI, not a human.",
+          meta: { kind: 'ai_disclosure' },
+        })
+        .returning();
+      if (disclosureMessage) {
+        await stream.writeSSE({ event: 'segment', data: JSON.stringify({ message: disclosureMessage }) });
+      }
+    }
 
     // Hono's streamSSE only console.errors an uncaught throw — it never
     // notifies the client. Without this try/catch, a DB error mid-segment
