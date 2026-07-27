@@ -41,11 +41,11 @@ surfaces as `introPrice`, that `REVENUECAT_ENTITLEMENT_ID=plus` took on Railway.
 
 ## 1. Code — do first (small)
 
-- [ ] **`userExists` UUID guard** — `server/src/routes/billing.ts:26` passes
-      `app_user_id` straight into a `uuid` equality check, so a non-UUID id throws a
-      500 instead of being skipped. Breaks RevenueCat's "Send test event" button and
-      risks retry-backoff marking the webhook unhealthy. The anonymous-id case is
-      already guarded at line 70 — this is the same class of defect, unhandled variant.
+- [x] **`userExists` UUID guard** — **already fixed** in commit `49a5174` (same
+      commit that scoped CORS). `billing.ts` now guards with `UUID_RE.test()` before
+      the `users.id` query, and the webhook only syncs after `userExists` + the
+      anonymous-id check pass, so a non-UUID `app_user_id` (RevenueCat's "Send test
+      event") is skipped, never 500s. This item was stale. No code change needed.
 
 ## 2. Dev build — unblocks the most
 
