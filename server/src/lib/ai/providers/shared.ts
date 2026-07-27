@@ -359,31 +359,79 @@ const NUMBER_TOKEN = /\d+(?:[.,]\d+)*/g;
 // and the legacy Lifeline 1-800-273-8255 (which tokenizes to 1/800/273/8255).
 const CRISIS_SAFE_NUMBERS = ['988', '911', '741741', '741', '800', '273', '8255'];
 
-function numbersIn(text: string): string[] {
+function normalizeNumber(raw: string): string {
   // "1,200" and "1200" are the same figure, and so are "$5.00" and "$5" — but
   // normalize by VALUE, not by stripping characters. The first cut of this
   // stripped trailing zeros to fold "5.00" into "5", which also silently turned
   // "10" into "1" and "300" into "3" — so a reply claiming "$10" matched the "1"
   // in a ref like "G1" and the guard went blind to the exact fabrication it
   // exists to catch. The unit test caught it; the arithmetic here is the point.
-  return (text.match(NUMBER_TOKEN) ?? []).map((raw) => {
-    const value = Number(raw.replace(/,/g, ''));
-    return Number.isFinite(value) ? String(value) : raw;
-  });
+  const value = Number(raw.replace(/,/g, ''));
+  return Number.isFinite(value) ? String(value) : raw;
+}
+
+function numbersIn(text: string): string[] {
+  return (text.match(NUMBER_TOKEN) ?? []).map(normalizeNumber);
+}
+
+// TYPED FIGURES. The guard exists to catch the model INVENTING an app figure — a
+// savings total, a goal amount, a streak, a progress count, a logged measurement
+// — every one of which is server-computed and present in the state facts, so a
+// fabricated one is a number stated AS an app figure that the facts don't
+// support ("you're at $10" against a real $5).
+//
+// It must NOT police every digit. Now that Meroa is a whole-life companion its
+// replies legitimately contain WORLD numbers — a street address, a zip, a year,
+// a clock time, "a 10-minute playlist", a phone/crisis number — none of which
+// are app figures, and flagging them produced repeated user-visible false
+// "scratch that number, check your Goals tab" retractions on ordinary chat
+// (a restaurant address, a 988 crisis line, a gym playlist — three live sightings).
+//
+// So a reply number counts only when it's PRESENTED as an app figure: a currency
+// amount, a progress fraction, a streak/count, or a tracked measurement with a
+// unit. Deliberately excludes bare durations in minutes/hours (incidental) — a
+// real duration TASK target is quoted from the grounded facts anyway, so it's
+// never flagged; only an invented one would be, and that's a rarer, lower-harm
+// miss than the false positives this removes.
+const APP_FIGURE_PATTERNS: RegExp[] = [
+  /[$£€]\s?(\d[\d,]*(?:\.\d+)?)/g, // $5, $1,200, $5.00
+  /(\d[\d,]*(?:\.\d+)?)\s?(?:dollars?|bucks|usd)\b/gi, // 5 dollars
+  /(\d[\d,]*(?:\.\d+)?)\s*(?:\/|of|out of)\s*(\d[\d,]*(?:\.\d+)?)/gi, // 5/300, 5 of 300
+  /(\d[\d,]*)\s*-?\s*(?:day|week|month)s?\s+(?:streak|straight|in a row)/gi, // 4 day streak
+  /streak[^.\d]{0,10}(\d[\d,]*)/gi, // streak: 4
+  /(\d[\d,]*)(?:st|nd|rd|th)\s+(?:time|day)\b/gi, // 4th time
+  /(?:saved|spent|logged|banked|contributed|put in)\s+(?:[$£€]\s?)?(\d[\d,]*(?:\.\d+)?)/gi, // saved 5
+  /(\d[\d,]*(?:\.\d+)?)\s?(?:lbs?|kg|kgs|glasses|cups|steps|reps?|sets?|pages|miles|km)\b/gi, // 185 lb, 10 glasses, 3 sets
+];
+
+export function appFigureNumbersIn(text: string): string[] {
+  const out: string[] = [];
+  for (const re of APP_FIGURE_PATTERNS) {
+    for (const match of text.matchAll(re)) {
+      // Every capture group that grabbed a number is an app figure (a fraction
+      // pattern captures both the value and the target).
+      for (let i = 1; i < match.length; i++) {
+        if (match[i]) out.push(normalizeNumber(match[i]!));
+      }
+    }
+  }
+  return out;
 }
 
 /**
- * The free tier of the figure check: does the reply contain a number that does
- * NOT appear anywhere in the facts the model was given? Cheap, and deliberately
- * over-eager — a legitimately DERIVED figure ("$295 to go" from "$5 / $300")
- * trips this too, and that is fine: this only decides whether a classifier call
- * is worth making, and didMisstateFigure is what actually judges. What it buys
- * is the opposite guarantee — if every number in the reply already appears in
+ * The free tier of the figure check: does the reply state an APP figure (see
+ * appFigureNumbersIn — currency / progress / streak / measurement, never an
+ * incidental world number) that does NOT appear anywhere in the facts the model
+ * was given? Cheap, and deliberately over-eager on the app-figure numbers it DOES
+ * consider — a legitimately DERIVED figure ("$295 to go" from "$5 / $300") trips
+ * this too, and that is fine: this only decides whether a classifier call is
+ * worth making, and didMisstateFigure is what actually judges. What it buys is
+ * the opposite guarantee — if every app figure in the reply already appears in
  * the facts, no fabrication is possible and no call is made.
  */
 export function hasUngroundedFigure(reply: string, groundingFacts: string): boolean {
   const grounded = new Set([...numbersIn(groundingFacts), ...CRISIS_SAFE_NUMBERS]);
-  return numbersIn(reply).some((n) => !grounded.has(n));
+  return appFigureNumbersIn(reply).some((n) => !grounded.has(n));
 }
 
 // `pending` marks a successful call whose recordKind is a tap-to-confirm
