@@ -17,7 +17,9 @@ import { env } from '../../env.ts';
 let client: OpenAI | null = null;
 export function getUtilityClient(): OpenAI | null {
   if (!env.OPENAI_API_KEY) return null;
-  if (!client) client = new OpenAI({ apiKey: env.OPENAI_API_KEY });
+  // Explicit client timeout in addition to the per-call AbortControllers the
+  // callers already set — belt and suspenders against the SDK's 10-min default.
+  if (!client) client = new OpenAI({ apiKey: env.OPENAI_API_KEY, timeout: 20_000 });
   return client;
 }
 

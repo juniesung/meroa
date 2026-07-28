@@ -235,7 +235,8 @@ async function applyOps(
         // doc comment for the live incident this closes. Checked against the
         // real text of the cited message, not the model's own paraphrase of it.
         if (!(await isMemoryGrounded(op.content, sourceText))) {
-          logger.warn({ userId, content: op.content, sourceMessageId: op.sourceMessageId }, 'memory extraction — create not grounded in its cited message, dropped');
+          // Don't log `op.content` — it's extracted-from-chat text (sensitive). Metadata only.
+          logger.warn({ userId, sourceMessageId: op.sourceMessageId }, 'memory extraction — create not grounded in its cited message, dropped');
           continue;
         }
         if (liveCount === null) liveCount = (await listMemories(userId, { includeSuppressed: true })).length;

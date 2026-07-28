@@ -19,3 +19,11 @@ const queryClient = postgres(env.DATABASE_URL, {
 });
 
 export const db = drizzle(queryClient, { schema });
+
+// Drain + close the connection pool on shutdown (SIGTERM on every Railway
+// deploy) so in-flight queries finish and sockets close cleanly instead of
+// being severed mid-flight. `timeout` bounds how long we wait for in-flight
+// queries before force-closing.
+export async function closePool(): Promise<void> {
+  await queryClient.end({ timeout: 5 });
+}

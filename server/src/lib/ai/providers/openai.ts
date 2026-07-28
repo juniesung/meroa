@@ -21,7 +21,10 @@ import {
   type ChatStreamEvent,
 } from './shared.ts';
 
-const client = new OpenAI({ apiKey: env.OPENAI_API_KEY });
+// Explicit timeout — the SDK default is 10 minutes, so a hung upstream call
+// would hold a Node request (and, on a chat turn, an open SSE stream) open that
+// whole time. 60s is well past a normal streamed reply; past that it's stalled.
+const client = new OpenAI({ apiKey: env.OPENAI_API_KEY, timeout: 60_000 });
 
 // delta.tool_calls arrives in fragments — first chunk carries {index, id,
 // function:{name, arguments:''}}, later chunks for the same index append

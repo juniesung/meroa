@@ -597,7 +597,9 @@ export function createTurnState(actionCtx: ChatActionContext) {
     corrected = true;
 
     logger.warn(
-      { userId: actionCtx.userId, sourceMessageId: actionCtx.sourceMessageId, segments: emittedSegments },
+      // NB: never log `emittedSegments` — that's the assistant's reply text, and
+      // for a companion app chat content is sensitive (CLAUDE.md §2). Metadata only.
+      { userId: actionCtx.userId, sourceMessageId: actionCtx.sourceMessageId },
       'chat turn self-corrected a likely unconfirmed action',
     );
     // A preview/card claim gets a truthful, specific correction instead of
@@ -666,7 +668,9 @@ export function createTurnState(actionCtx: ChatActionContext) {
     corrected = true;
 
     logger.warn(
-      { userId: actionCtx.userId, sourceMessageId: actionCtx.sourceMessageId, segments: emittedSegments, actionFacts },
+      // `actionFacts` are server-computed action summaries (kept for debugging);
+      // `emittedSegments` (the reply text) is dropped — see the note above.
+      { userId: actionCtx.userId, sourceMessageId: actionCtx.sourceMessageId, actionFacts },
       'chat turn concealed a real action — correcting',
     );
     // Say the quiet part: it happened, and it happened NOW. The action card
@@ -724,7 +728,9 @@ export function createTurnState(actionCtx: ChatActionContext) {
     corrected = true;
 
     logger.warn(
-      { userId: actionCtx.userId, sourceMessageId: actionCtx.sourceMessageId, segments: emittedSegments },
+      // NB: never log `emittedSegments` — that's the assistant's reply text, and
+      // for a companion app chat content is sensitive (CLAUDE.md §2). Metadata only.
+      { userId: actionCtx.userId, sourceMessageId: actionCtx.sourceMessageId },
       'chat turn stated a figure the facts do not support — correcting',
     );
     // Deliberately does NOT try to restate the right number. The model that just

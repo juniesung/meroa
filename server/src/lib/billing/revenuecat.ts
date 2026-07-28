@@ -16,7 +16,12 @@ export async function fetchSubscriberEntitlement(appUserId: string): Promise<Rev
 
   const res = await fetch(
     `https://api.revenuecat.com/v1/subscribers/${encodeURIComponent(appUserId)}`,
-    { headers: { Authorization: `Bearer ${env.REVENUECAT_SECRET_API_KEY}` } },
+    {
+      headers: { Authorization: `Bearer ${env.REVENUECAT_SECRET_API_KEY}` },
+      // A hung RC call here blocks the interactive /billing/sync AND the webhook
+      // handler; bound it so a RC stall can't tie up a request indefinitely.
+      signal: AbortSignal.timeout(10_000),
+    },
   );
 
   if (!res.ok) {
@@ -50,7 +55,11 @@ export async function deleteSubscriber(appUserId: string): Promise<boolean> {
 
   const res = await fetch(
     `https://api.revenuecat.com/v1/subscribers/${encodeURIComponent(appUserId)}`,
-    { method: 'DELETE', headers: { Authorization: `Bearer ${env.REVENUECAT_SECRET_API_KEY}` } },
+    {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${env.REVENUECAT_SECRET_API_KEY}` },
+      signal: AbortSignal.timeout(10_000),
+    },
   );
   // 404 means there was no subscriber record to begin with — that's success for
   // our purposes (nothing left to resurrect us).
