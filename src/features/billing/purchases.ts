@@ -1,4 +1,4 @@
-import Purchases from 'react-native-purchases';
+import Purchases, { LOG_LEVEL } from 'react-native-purchases';
 
 // Public by design (EXPO_PUBLIC_ vars ship in the bundle) — a RevenueCat SDK
 // key only authorizes purchase requests, the same trust level as a Stripe
@@ -25,6 +25,12 @@ export async function configurePurchases(userId: string): Promise<void> {
   if (!REVENUECAT_IOS_KEY || configuredUserId === userId) return;
 
   if (configuredUserId === null) {
+    // Quiet the SDK's verbose logging — it routes benign events (notably a
+    // user-cancelled purchase) through console.error, which dev LogBox paints as
+    // a red error box. The app already handles cancellation gracefully
+    // (features/billing/queries.ts); WARN just stops the noise. Set once, before
+    // configure.
+    Purchases.setLogLevel(LOG_LEVEL.WARN);
     Purchases.configure({ apiKey: REVENUECAT_IOS_KEY, appUserID: userId });
   } else {
     await Purchases.logIn(userId);
