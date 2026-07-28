@@ -1,39 +1,45 @@
-import { router } from 'expo-router';
+import * as AppleAuthentication from 'expo-apple-authentication';
 import { useState } from 'react';
-import { KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { MeroaMark } from '@/components/MeroaMark';
-import { PrimaryButton } from '@/components/PrimaryButton';
 import { radii, theme } from '@/constants/theme';
-import { ApiError, api } from '@/lib/api/client';
+import { api } from '@/lib/api/client';
+import { useAuth } from '@/lib/auth/AuthProvider';
 
+// Sign in with Apple is the login. The server still supports a phone/OTP path
+// (routes/auth.ts) for later/dev, but there's no live SMS sender, so Apple is
+// the only user-facing sign-in. Signing in flips the nav guard (_layout.tsx) —
+// this screen never navigates itself.
 export default function SignInScreen() {
-  const [phone, setPhone] = useState('');
+  const { signIn } = useAuth();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const submit = async () => {
+  const signInWithApple = async () => {
     if (loading) return;
-    const trimmed = phone.trim();
-    if (trimmed.length < 7) {
-      setError('Enter your phone number.');
-      return;
-    }
-
-    setLoading(true);
     setError(null);
+    setLoading(true);
     try {
-      await api.requestOtp(trimmed);
-      router.push({ pathname: '/(auth)/verify', params: { phone: trimmed } });
+      const credential = await AppleAuthentication.signInAsync({
+        requestedScopes: [
+          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+          AppleAuthentication.AppleAuthenticationScope.EMAIL,
+        ],
+      });
+      if (!credential.identityToken) throw new Error('no_identity_token');
+      // Apple returns the name only on the FIRST sign-in — forward it so the
+      // server can store it; undefined afterward.
+      const fullName =
+        [credential.fullName?.givenName, credential.fullName?.familyName].filter(Boolean).join(' ') ||
+        undefined;
+      const result = await api.appleSignIn(credential.identityToken, fullName);
+      await signIn(result);
     } catch (err) {
-      if (err instanceof ApiError && err.status === 429) {
-        setError('Too many attempts — give it a minute and try again.');
-      } else if (err instanceof ApiError && err.status === 400) {
-        setError("That phone number doesn't look right.");
-      } else {
-        setError('Something went wrong. Check your connection and try again.');
-      }
+      // Tapping Cancel on the Apple sheet is not an error.
+      if ((err as { code?: string }).code === 'ERR_REQUEST_CANCELED') return;
+      setError('Could not sign in. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -41,41 +47,28 @@ export default function SignInScreen() {
 
   return (
     <SafeAreaView style={styles.safe}>
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <View style={styles.content}>
-          <MeroaMark size={56} glow />
-          <Text style={styles.title}>Meroa</Text>
-          <Text style={styles.subtitle}>
-            Your number keeps one relationship with Meroa — in the app or by text.
-          </Text>
+      <View style={styles.content}>
+        <MeroaMark size={56} glow />
+        <Text style={styles.title}>Meroa</Text>
+        <Text style={styles.subtitle}>
+          The AI friend that actually keeps you honest. Sign in to get started.
+        </Text>
 
-          <View style={styles.field}>
-            <Text style={styles.label}>PHONE NUMBER</Text>
-            <TextInput
-              value={phone}
-              onChangeText={(t) => {
-                setPhone(t);
-                setError(null);
-              }}
-              placeholder="(555) 555-0100"
-              placeholderTextColor={theme.faint}
-              keyboardType="phone-pad"
-              autoComplete="tel"
-              textContentType="telephoneNumber"
-              style={styles.input}
-              onSubmitEditing={submit}
-            />
-          </View>
-
-          {error ? <Text style={styles.error}>{error}</Text> : null}
-
-          <PrimaryButton label={loading ? 'Sending…' : 'Continue'} onPress={submit} style={styles.button} />
-
-          <Text style={styles.disclaimer}>
-            Meroa is an AI. We&rsquo;ll text you a code to verify it&rsquo;s you.
-          </Text>
+        <View style={styles.buttonWrap}>
+          <AppleAuthentication.AppleAuthenticationButton
+            buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN}
+            buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.WHITE}
+            cornerRadius={radii.control}
+            style={styles.appleButton}
+            onPress={signInWithApple}
+          />
+          {loading ? <ActivityIndicator style={styles.spinner} color={theme.dim} /> : null}
         </View>
-      </KeyboardAvoidingView>
+
+        {error ? <Text style={styles.error}>{error}</Text> : null}
+
+        <Text style={styles.disclaimer}>Meroa is an AI companion, always clearly identified as AI.</Text>
+      </View>
     </SafeAreaView>
   );
 }
@@ -85,19 +78,9 @@ const styles = StyleSheet.create({
   content: { flex: 1, justifyContent: 'center', paddingHorizontal: 28, gap: 8 },
   title: { color: theme.text, fontSize: 28, fontWeight: '700', letterSpacing: -0.5, marginTop: 16 },
   subtitle: { color: theme.dim, fontSize: 15, lineHeight: 21, marginBottom: 24, maxWidth: 320 },
-  field: { marginBottom: 4 },
-  label: { color: theme.dim, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, marginBottom: 8 },
-  input: {
-    color: theme.text,
-    fontSize: 17,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    backgroundColor: theme.surface,
-    borderRadius: radii.control,
-    borderWidth: 1,
-    borderColor: theme.border,
-  },
-  error: { color: theme.danger, fontSize: 13, marginTop: 4 },
-  button: { marginTop: 20 },
-  disclaimer: { color: theme.faint, fontSize: 12, marginTop: 16, lineHeight: 17, maxWidth: 320 },
+  buttonWrap: { marginTop: 8 },
+  appleButton: { width: '100%', height: 50 },
+  spinner: { position: 'absolute', right: 16, top: 15 },
+  error: { color: theme.danger, fontSize: 13, marginTop: 12 },
+  disclaimer: { color: theme.faint, fontSize: 12, marginTop: 20, lineHeight: 17, maxWidth: 320 },
 });

@@ -206,6 +206,19 @@ export const api = {
       body: JSON.stringify({ phone, code, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone }),
     }),
 
+  // Sign in with Apple — the client-obtained identity token is verified
+  // server-side (routes/auth.ts). `fullName` is Apple's one-time first-sign-in
+  // name (undefined on later sign-ins). Same timezone-forwarding as verifyOtp.
+  appleSignIn: (identityToken: string, fullName?: string) =>
+    request<VerifyOtpResponse>('/auth/apple', {
+      method: 'POST',
+      body: JSON.stringify({
+        identityToken,
+        fullName,
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      }),
+    }),
+
   logout: async () => {
     const refreshToken = getCachedRefreshToken();
     if (refreshToken) {

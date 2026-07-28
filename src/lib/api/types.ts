@@ -1,6 +1,8 @@
 export type ApiUser = {
   id: string;
-  phoneE164: string;
+  // Null for accounts created via Sign in with Apple (identified by an Apple
+  // user id server-side, no phone).
+  phoneE164: string | null;
   displayName: string | null;
   timezone: string | null;
   prefs: Record<string, unknown>;
