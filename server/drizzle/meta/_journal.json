@@ -71,6 +71,13 @@
       "when": 1784851753722,
       "tag": "0009_worthless_kat_farrell",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1785273238958,
+      "tag": "0010_colorful_lady_mastermind",
+      "breakpoints": true
     }
   ]
 }

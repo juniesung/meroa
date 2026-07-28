@@ -19,7 +19,12 @@ import { sql } from 'drizzle-orm';
 // resolves to the same user as any pre-install SMS-side identity (Phase 9).
 export const users = pgTable('users', {
   id: uuid('id').primaryKey().defaultRandom(),
-  phoneE164: text('phone_e164').notNull().unique(),
+  // An account is identified by EITHER a verified phone (SMS/OTP path) OR an
+  // Apple user id (Sign in with Apple). Both are nullable + unique now that Apple
+  // is a first-class login — a given account has one or the other (or both, if we
+  // ever link them). Application code guarantees at least one is set at creation.
+  phoneE164: text('phone_e164').unique(),
+  appleUserId: text('apple_user_id').unique(),
   displayName: text('display_name'),
   timezone: text('timezone'),
   prefs: jsonb('prefs').notNull().default({}),

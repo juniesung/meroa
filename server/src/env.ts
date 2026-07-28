@@ -66,6 +66,10 @@ const schema = z.object({
   // Sentry.init only runs when this is set (index.ts), so the server boots
   // fine without error reporting configured.
   SENTRY_DSN: z.string().optional(),
+  // The app's bundle id — the `aud` an Apple "Sign in with Apple" identity token
+  // must carry (lib/apple-auth.ts verifies against this). Public value, defaulted
+  // so it works without config; override only if the bundle id ever changes.
+  APPLE_BUNDLE_ID: z.string().default('com.meroa.app'),
   // Comma-separated allow-list of browser origins permitted cross-origin in
   // production (index.ts). Unset ⇒ none, which is correct today: the native
   // app sends no Origin and the legal pages are same-origin.

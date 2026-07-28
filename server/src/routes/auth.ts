@@ -5,6 +5,7 @@ import { z } from 'zod';
 
 import { db } from '../db/client.ts';
 import { conversations, entitlements, messages, sessions, users } from '../db/schema.ts';
+import { verifyAppleIdentityToken } from '../lib/apple-auth.ts';
 import { REFRESH_TOKEN_TTL_DAYS, WELCOME_MESSAGE } from '../lib/constants.ts';
 import { generateRefreshToken, hashWithPepper } from '../lib/crypto.ts';
 import { signAccessToken } from '../lib/jwt.ts';
@@ -15,8 +16,48 @@ import { smsSender } from '../sms/sender.ts';
 
 export const authRoutes = new Hono();
 
+type UserRow = typeof users.$inferSelect;
+
 function refreshExpiry(): Date {
   return new Date(Date.now() + REFRESH_TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000);
+}
+
+// A brand-new user's starting state — free entitlement + a welcome conversation
+// with Meroa's first message. Shared by every sign-in path (phone OTP + Apple)
+// so a new account is provisioned identically however they got here.
+async function provisionNewUser(userId: string): Promise<void> {
+  await db.insert(entitlements).values({ userId, plan: 'free' });
+  const [conversation] = await db
+    .insert(conversations)
+    .values({ userId, channel: 'app' })
+    .returning();
+  if (!conversation) throw new Error('conversation_insert_failed');
+  await db.insert(messages).values({
+    conversationId: conversation.id,
+    role: 'assistant',
+    content: WELCOME_MESSAGE,
+  });
+}
+
+// Mint an access token + a rotating refresh token and record the session.
+async function createSession(userId: string): Promise<{ accessToken: string; refreshToken: string }> {
+  const accessToken = await signAccessToken(userId);
+  const refreshToken = generateRefreshToken();
+  await db.insert(sessions).values({
+    userId,
+    refreshTokenHash: hashWithPepper(refreshToken),
+    expiresAt: refreshExpiry(),
+  });
+  return { accessToken, refreshToken };
+}
+
+function authResponse(user: UserRow, isNewUser: boolean, tokens: { accessToken: string; refreshToken: string }) {
+  return {
+    accessToken: tokens.accessToken,
+    refreshToken: tokens.refreshToken,
+    isNewUser,
+    user: { id: user.id, phoneE164: user.phoneE164, displayName: user.displayName },
+  };
 }
 
 const requestSchema = z.object({ phone: z.string().min(3) });
@@ -78,20 +119,7 @@ authRoutes.post('/otp/verify', zValidator('json', verifySchema), async (c) => {
     if (created) {
       isNewUser = true;
       user = created;
-
-      await db.insert(entitlements).values({ userId: user.id, plan: 'free' });
-
-      const [conversation] = await db
-        .insert(conversations)
-        .values({ userId: user.id, channel: 'app' })
-        .returning();
-      if (!conversation) throw new Error('conversation_insert_failed');
-
-      await db.insert(messages).values({
-        conversationId: conversation.id,
-        role: 'assistant',
-        content: WELCOME_MESSAGE,
-      });
+      await provisionNewUser(user.id);
     } else {
       // Lost the race: another concurrent verify already created this user
       // (and their entitlement/welcome conversation) — just sign them in.
@@ -109,21 +137,71 @@ authRoutes.post('/otp/verify', zValidator('json', verifySchema), async (c) => {
     if (updated) user = updated;
   }
 
-  const accessToken = await signAccessToken(user.id);
-  const refreshToken = generateRefreshToken();
+  const tokens = await createSession(user.id);
+  return c.json(authResponse(user, isNewUser, tokens));
+});
 
-  await db.insert(sessions).values({
-    userId: user.id,
-    refreshTokenHash: hashWithPepper(refreshToken),
-    expiresAt: refreshExpiry(),
-  });
+// Sign in with Apple. The client (expo-apple-authentication) does the actual
+// sign-in and sends us Apple's signed identity token; we verify it
+// (lib/apple-auth.ts — no Apple server secret needed for login) and key the
+// account on Apple's stable `sub`. Same session + new-user provisioning as the
+// phone path. `fullName` is Apple's one-time first-sign-in name (client forwards
+// it); after that Apple never sends it again, so we only set it on creation.
+const appleSchema = z.object({
+  identityToken: z.string().min(1),
+  fullName: z.string().trim().min(1).max(100).optional(),
+  timezone: ianaTimezoneSchema.optional(),
+});
 
-  return c.json({
-    accessToken,
-    refreshToken,
-    isNewUser,
-    user: { id: user.id, phoneE164: user.phoneE164, displayName: user.displayName },
-  });
+authRoutes.post('/apple', zValidator('json', appleSchema), async (c) => {
+  const { identityToken, fullName, timezone } = c.req.valid('json');
+
+  let identity: Awaited<ReturnType<typeof verifyAppleIdentityToken>>;
+  try {
+    identity = await verifyAppleIdentityToken(identityToken);
+  } catch {
+    return c.json({ error: 'invalid_apple_token' }, 401);
+  }
+
+  let [user] = await db.select().from(users).where(eq(users.appleUserId, identity.appleUserId)).limit(1);
+  let isNewUser = false;
+
+  if (!user) {
+    // Same race-safe upsert as the phone path: two concurrent first sign-ins for
+    // the same Apple id must resolve to one account, not a unique-constraint 500.
+    const [created] = await db
+      .insert(users)
+      .values({
+        appleUserId: identity.appleUserId,
+        displayName: fullName ?? null,
+        prefs: {},
+        timezone: timezone ?? null,
+      })
+      .onConflictDoNothing({ target: users.appleUserId })
+      .returning();
+
+    if (created) {
+      isNewUser = true;
+      user = created;
+      await provisionNewUser(user.id);
+    } else {
+      const [existing] = await db
+        .select()
+        .from(users)
+        .where(eq(users.appleUserId, identity.appleUserId))
+        .limit(1);
+      if (!existing) throw new Error('apple_user_insert_failed');
+      user = existing;
+    }
+  }
+
+  if (!isNewUser && timezone && timezone !== user.timezone) {
+    const [updated] = await db.update(users).set({ timezone }).where(eq(users.id, user.id)).returning();
+    if (updated) user = updated;
+  }
+
+  const tokens = await createSession(user.id);
+  return c.json(authResponse(user, isNewUser, tokens));
 });
 
 const refreshSchema = z.object({ refreshToken: z.string().min(10) });

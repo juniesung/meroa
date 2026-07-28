@@ -29,7 +29,11 @@ export async function hardDeleteUser(userId: string): Promise<boolean> {
       .limit(1);
     if (!user) return false;
 
-    await tx.delete(otpCodes).where(eq(otpCodes.phoneE164, user.phoneE164));
+    // otp_codes is keyed by phone; an Apple-only account has none, so skip the
+    // cleanup when there's no phone (nothing orphaned to remove).
+    if (user.phoneE164) {
+      await tx.delete(otpCodes).where(eq(otpCodes.phoneE164, user.phoneE164));
+    }
     await tx.delete(users).where(eq(users.id, userId));
     return true;
   });
