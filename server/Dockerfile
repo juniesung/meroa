@@ -19,4 +19,11 @@ COPY tsconfig.json ./
 COPY src ./src
 COPY drizzle ./drizzle
 EXPOSE 8787
-CMD ["npx", "tsx", "src/index.ts"]
+# Apply pending migrations, THEN start the server. drizzle tracks applied
+# migrations in __drizzle_migrations, so re-running on a plain restart is a
+# fast no-op; a genuinely new migration is applied before traffic. If a
+# migration fails, the server never starts and the deploy fails loudly — the
+# right behavior. NOTE: this runs per-container, so it's correct for a SINGLE
+# replica (the current setup). If you ever scale to 2+ replicas, move this to a
+# run-once Railway pre-deploy command so replicas don't race to migrate.
+CMD ["sh", "-c", "npm run db:migrate && npx tsx src/index.ts"]
