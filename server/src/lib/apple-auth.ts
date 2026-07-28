@@ -1,6 +1,7 @@
-import { createRemoteJWKSet, jwtVerify } from 'jose';
+import { createRemoteJWKSet, importPKCS8, jwtVerify, SignJWT } from 'jose';
 
 import { env } from '../env.ts';
+import { logger } from '../logger.ts';
 
 // Verifies a "Sign in with Apple" identity token. The client (expo-apple-
 // authentication) performs the actual sign-in and hands us Apple's signed
@@ -36,4 +37,84 @@ export async function verifyAppleIdentityToken(idToken: string): Promise<AppleId
   }
   const email = typeof payload.email === 'string' ? payload.email : null;
   return { appleUserId: sub, email };
+}
+
+// ── Token revocation (Apple guideline 5.1.1(v): revoke on account deletion) ──
+// These need the Sign in with Apple server key (env APPLE_TEAM_ID / APPLE_KEY_ID
+// / APPLE_PRIVATE_KEY). Optional + graceful: everything degrades to a no-op with
+// a log when they're unset, so login is unaffected until they're configured.
+
+export function appleRevocationConfigured(): boolean {
+  return Boolean(env.APPLE_TEAM_ID && env.APPLE_KEY_ID && env.APPLE_PRIVATE_KEY);
+}
+
+// The short-lived ES256 client_secret JWT Apple's token + revoke endpoints
+// require, signed with the .p8 key.
+async function appleClientSecret(): Promise<string> {
+  // Railway/env often stores the .p8 with escaped newlines — restore real ones.
+  const pkcs8 = (env.APPLE_PRIVATE_KEY ?? '').replace(/\\n/g, '\n');
+  const key = await importPKCS8(pkcs8, 'ES256');
+  return new SignJWT({})
+    .setProtectedHeader({ alg: 'ES256', kid: env.APPLE_KEY_ID ?? '' })
+    .setIssuer(env.APPLE_TEAM_ID ?? '')
+    .setIssuedAt()
+    .setExpirationTime('5m')
+    .setAudience(APPLE_ISSUER)
+    .setSubject(env.APPLE_BUNDLE_ID)
+    .sign(key);
+}
+
+// Exchange the sign-in authorization code for Apple's refresh token — kept solely
+// to revoke on deletion. Returns null (not configured / failure) so login never
+// breaks over this.
+export async function exchangeAppleAuthCode(code: string): Promise<string | null> {
+  if (!appleRevocationConfigured()) return null;
+  try {
+    const secret = await appleClientSecret();
+    const res = await fetch(`${APPLE_ISSUER}/auth/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: env.APPLE_BUNDLE_ID,
+        client_secret: secret,
+        grant_type: 'authorization_code',
+        code,
+      }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!res.ok) {
+      logger.warn({ status: res.status }, 'apple auth-code exchange failed');
+      return null;
+    }
+    const json = (await res.json()) as { refresh_token?: string };
+    return json.refresh_token ?? null;
+  } catch (err) {
+    logger.warn({ err }, 'apple auth-code exchange threw');
+    return null;
+  }
+}
+
+// Best-effort revoke of a user's Apple refresh token on account deletion.
+export async function revokeAppleRefreshToken(refreshToken: string): Promise<void> {
+  if (!appleRevocationConfigured()) {
+    logger.warn('apple revocation not configured — skipping token revoke on deletion');
+    return;
+  }
+  try {
+    const secret = await appleClientSecret();
+    const res = await fetch(`${APPLE_ISSUER}/auth/revoke`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: env.APPLE_BUNDLE_ID,
+        client_secret: secret,
+        token: refreshToken,
+        token_type_hint: 'refresh_token',
+      }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!res.ok) logger.warn({ status: res.status }, 'apple token revoke failed');
+  } catch (err) {
+    logger.warn({ err }, 'apple token revoke threw');
+  }
 }

@@ -5,7 +5,7 @@ import { z } from 'zod';
 
 import { db } from '../db/client.ts';
 import { conversations, entitlements, messages, sessions, users } from '../db/schema.ts';
-import { verifyAppleIdentityToken } from '../lib/apple-auth.ts';
+import { exchangeAppleAuthCode, verifyAppleIdentityToken } from '../lib/apple-auth.ts';
 import { REFRESH_TOKEN_TTL_DAYS, WELCOME_MESSAGE } from '../lib/constants.ts';
 import { generateRefreshToken, hashWithPepper } from '../lib/crypto.ts';
 import { signAccessToken } from '../lib/jwt.ts';
@@ -149,12 +149,15 @@ authRoutes.post('/otp/verify', zValidator('json', verifySchema), async (c) => {
 // it); after that Apple never sends it again, so we only set it on creation.
 const appleSchema = z.object({
   identityToken: z.string().min(1),
+  // Apple's one-time authorization code — exchanged server-side for a refresh
+  // token we keep ONLY to revoke on account deletion (guideline 5.1.1(v)).
+  authorizationCode: z.string().min(1).optional(),
   fullName: z.string().trim().min(1).max(100).optional(),
   timezone: ianaTimezoneSchema.optional(),
 });
 
 authRoutes.post('/apple', zValidator('json', appleSchema), async (c) => {
-  const { identityToken, fullName, timezone } = c.req.valid('json');
+  const { identityToken, authorizationCode, fullName, timezone } = c.req.valid('json');
 
   let identity: Awaited<ReturnType<typeof verifyAppleIdentityToken>>;
   try {
@@ -162,6 +165,10 @@ authRoutes.post('/apple', zValidator('json', appleSchema), async (c) => {
   } catch {
     return c.json({ error: 'invalid_apple_token' }, 401);
   }
+
+  // Exchange the auth code for a refresh token (no-op until the Apple server key
+  // is configured). Never blocks sign-in — a null just means no revoke-on-delete.
+  const appleRefreshToken = authorizationCode ? await exchangeAppleAuthCode(authorizationCode) : null;
 
   let [user] = await db.select().from(users).where(eq(users.appleUserId, identity.appleUserId)).limit(1);
   let isNewUser = false;
@@ -173,6 +180,7 @@ authRoutes.post('/apple', zValidator('json', appleSchema), async (c) => {
       .insert(users)
       .values({
         appleUserId: identity.appleUserId,
+        appleRefreshToken,
         displayName: fullName ?? null,
         prefs: {},
         timezone: timezone ?? null,
@@ -198,6 +206,11 @@ authRoutes.post('/apple', zValidator('json', appleSchema), async (c) => {
   if (!isNewUser && timezone && timezone !== user.timezone) {
     const [updated] = await db.update(users).set({ timezone }).where(eq(users.id, user.id)).returning();
     if (updated) user = updated;
+  }
+
+  // Keep the stored Apple refresh token current so deletion can always revoke.
+  if (!isNewUser && appleRefreshToken && appleRefreshToken !== user.appleRefreshToken) {
+    await db.update(users).set({ appleRefreshToken }).where(eq(users.id, user.id));
   }
 
   const tokens = await createSession(user.id);

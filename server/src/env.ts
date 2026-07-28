@@ -70,6 +70,13 @@ const schema = z.object({
   // must carry (lib/apple-auth.ts verifies against this). Public value, defaulted
   // so it works without config; override only if the bundle id ever changes.
   APPLE_BUNDLE_ID: z.string().default('com.meroa.app'),
+  // Sign in with Apple server credentials — ONLY needed to revoke a user's Apple
+  // token on account deletion (Apple guideline 5.1.1(v)). Optional + graceful:
+  // login works without them; revocation is skipped (logged) until they're set.
+  // APPLE_PRIVATE_KEY is the full .p8 contents.
+  APPLE_TEAM_ID: z.string().optional(),
+  APPLE_KEY_ID: z.string().optional(),
+  APPLE_PRIVATE_KEY: z.string().optional(),
   // Comma-separated allow-list of browser origins permitted cross-origin in
   // production (index.ts). Unset ⇒ none, which is correct today: the native
   // app sends no Origin and the legal pages are same-origin.

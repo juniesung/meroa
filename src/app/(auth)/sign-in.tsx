@@ -34,7 +34,11 @@ export default function SignInScreen() {
       const fullName =
         [credential.fullName?.givenName, credential.fullName?.familyName].filter(Boolean).join(' ') ||
         undefined;
-      const result = await api.appleSignIn(credential.identityToken, fullName);
+      const result = await api.appleSignIn(
+        credential.identityToken,
+        credential.authorizationCode ?? undefined,
+        fullName,
+      );
       await signIn(result);
     } catch (err) {
       // Tapping Cancel on the Apple sheet is not an error.

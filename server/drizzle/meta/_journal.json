@@ -78,6 +78,13 @@
       "when": 1785273238958,
       "tag": "0010_colorful_lady_mastermind",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1785273980473,
+      "tag": "0011_wise_slapstick",
+      "breakpoints": true
     }
   ]
 }

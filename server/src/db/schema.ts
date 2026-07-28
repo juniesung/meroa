@@ -25,6 +25,10 @@ export const users = pgTable('users', {
   // ever link them). Application code guarantees at least one is set at creation.
   phoneE164: text('phone_e164').unique(),
   appleUserId: text('apple_user_id').unique(),
+  // Apple's refresh token, obtained by exchanging the sign-in authorization code.
+  // Stored ONLY so we can revoke it on account deletion (Apple guideline
+  // 5.1.1(v)). Null for phone accounts / until an auth-code exchange succeeds.
+  appleRefreshToken: text('apple_refresh_token'),
   displayName: text('display_name'),
   timezone: text('timezone'),
   prefs: jsonb('prefs').notNull().default({}),

@@ -2,6 +2,7 @@ import { eq } from 'drizzle-orm';
 
 import { db } from '../db/client.ts';
 import { otpCodes, users } from '../db/schema.ts';
+import { revokeAppleRefreshToken } from './apple-auth.ts';
 import { deleteSubscriber } from './billing/revenuecat.ts';
 import { withUserLock } from './usage.ts';
 import { logger } from '../logger.ts';
@@ -21,13 +22,13 @@ import { logger } from '../logger.ts';
 //
 // Returns false if there was no such user (already gone / never existed).
 export async function hardDeleteUser(userId: string): Promise<boolean> {
-  const deleted = await withUserLock(userId, async (tx) => {
+  const outcome = await withUserLock(userId, async (tx) => {
     const [user] = await tx
-      .select({ phoneE164: users.phoneE164 })
+      .select({ phoneE164: users.phoneE164, appleRefreshToken: users.appleRefreshToken })
       .from(users)
       .where(eq(users.id, userId))
       .limit(1);
-    if (!user) return false;
+    if (!user) return null;
 
     // otp_codes is keyed by phone; an Apple-only account has none, so skip the
     // cleanup when there's no phone (nothing orphaned to remove).
@@ -35,10 +36,11 @@ export async function hardDeleteUser(userId: string): Promise<boolean> {
       await tx.delete(otpCodes).where(eq(otpCodes.phoneE164, user.phoneE164));
     }
     await tx.delete(users).where(eq(users.id, userId));
-    return true;
+    // Carry the Apple refresh token out so we can revoke it after commit.
+    return { appleRefreshToken: user.appleRefreshToken };
   });
 
-  if (!deleted) return false;
+  if (!outcome) return false;
 
   // Best-effort, and deliberately AFTER the local delete has committed: removing
   // RC's subscriber record stops a later webhook from resurrecting an
@@ -49,6 +51,16 @@ export async function hardDeleteUser(userId: string): Promise<boolean> {
     await deleteSubscriber(userId);
   } catch (err) {
     logger.error({ err, userId }, 'revenuecat subscriber delete failed after account deletion');
+  }
+
+  // Apple guideline 5.1.1(v): revoke the user's Apple token on deletion.
+  // Best-effort + graceful (no-op until the Apple server key is configured).
+  if (outcome.appleRefreshToken) {
+    try {
+      await revokeAppleRefreshToken(outcome.appleRefreshToken);
+    } catch (err) {
+      logger.error({ err, userId }, 'apple token revoke failed after account deletion');
+    }
   }
 
   return true;
