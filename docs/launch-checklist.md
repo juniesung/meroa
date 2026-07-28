@@ -1,9 +1,32 @@
 # Launch checklist
 
-Living list of everything between here and a submitted app. Last updated **2026-07-26**.
+Living list of everything between here and a submitted app. Last updated **2026-07-28**.
 
 Ordered by what unblocks what — the critical path is **§1 → §2**. Sections 3–6 are
 parallelizable, but none of them close a Definition of Done the way the device test does.
+
+---
+
+## Done 2026-07-28 (this session) — the hard engineering gates are cleared
+
+- **Auth: Sign in with Apple, live on device.** SMS-OTP login was a console stub
+  (no one could sign in); pivoted off Firebase (blocked on a $50 Blaze hold) to
+  Sign in with Apple. Server `/auth/apple` (verify token → key on Apple id →
+  session), client native button, `users.phone_e164` now nullable + `apple_user_id`,
+  and Apple token **revocation on account deletion** (guideline 5.1.1(v)) with the
+  `.p8` key wired (local `.env` + Railway). **Verified: sign-in works on device.**
+- **Billing verified on device.** A sandbox purchase completes → entitlement →
+  app unlocks. The previously "configured but unproven" Phase 7 items now proven.
+  *(Restore + cross-device still to confirm — see §2.)*
+- **All Tier 1 compliance (docs/prelaunch-audit.md):** age gate (hard-block <13),
+  persistent + recurring-3h AI disclosure, deterministic crisis protocol
+  (detect → fixed 988 response, published `/safety` page), reset-conversation,
+  roleplay red-team (model held).
+- **Tier 2 ops:** token logging, `/health` DB ping, SIGTERM graceful drain,
+  OpenAI/RevenueCat timeouts, log/Sentry scrubbing. Figure-guard root fix
+  (typed figures — no more false retractions on world numbers).
+- **Deploy hygiene:** migrations now run on deploy (Dockerfile), so schema changes
+  reach prod automatically. Dev + prod share one Supabase DB (already migrated).
 
 ---
 
@@ -49,18 +72,20 @@ surfaces as `introPrice`, that `REVENUECAT_ENTITLEMENT_ID=plus` took on Railway.
 
 ## 2. Dev build — unblocks the most
 
-- [ ] `eas build --profile development --platform ios`, install on a physical device
+- [x] Dev build on device (`npx expo run:ios`) — done; Sign in with Apple works.
 
 Everything here depends on it:
 
-- [ ] **Phase 7 DoD** — test purchase starts the 7-day trial and unlocks premium
+- [x] **Phase 7 DoD** — sandbox purchase completes, entitlement granted, app unlocks
+      (verified on device 2026-07-28).
+- [x] `default` offering resolves + purchase sheet loads (proven by the purchase above).
 - [ ] **Phase 7 DoD** — delete/reinstall → restore re-grants via server verification
 - [ ] **Phase 7 DoD** — entitlement consistent across two devices, same account
-- [ ] Confirm the `default` offering resolves and `introPrice` reads 7 days
+- [ ] Confirm `introPrice` reads 7 days (the trial copy on the paywall)
 - [ ] **Push-token registration** (Expo Go can't get push tokens) → unblocks Tier 2
-- [ ] **Phase 8 manual checks, never run on device**: AI-consent nav flow, delete/export
+- [ ] **Phase 8 manual checks, on device**: AI-consent nav flow, delete/export
       UI, report-a-response UI, notification tap routing, error/offline states
-- [ ] Paywall visual review on device
+- [x] Paywall visual review on device (rendered; purchase flow works).
 
 Sandbox notes: sign the tester in under **Settings → Developer → Sandbox Apple Account**,
 not the App Store. Trial eligibility is per-account and sticks — mint a fresh
@@ -107,7 +132,15 @@ not the App Store. Trial eligibility is per-account and sticks — mint a fresh
 
 ## 6. Housekeeping
 
-- [ ] Merge `phase-8-partial` → `main` (unmerged, 15+ commits)
+- [ ] **Enroll in the App Store Small Business Program** — drops Apple's cut 30% → 15%
+      (you're under $1M/yr). A quick App Store Connect form; do before real revenue.
+- [ ] Put the 3 **Apple Sign In** secrets in **Railway** — done (`APPLE_TEAM_ID`,
+      `APPLE_KEY_ID`, `APPLE_PRIVATE_KEY`). Enable the **"Sign in with Apple" capability**
+      for `com.meroa.app` in the Apple Developer identifier if not already.
+- [ ] Merge `phase-8-partial` → `main` (unmerged, many commits)
 - [ ] Revoke the old `sk_XFiU…` RevenueCat secret key if still active
 - [ ] `scripts/battery.sh` reuses a fixed phone (`+15559000001`) with no reset —
       count-based assertions drift against leftover data across runs
+
+**App Review note (nice):** with Sign in with Apple, the reviewer signs in with their
+own Apple ID — no demo credentials to provide. Just note the sandbox for the subscription.
