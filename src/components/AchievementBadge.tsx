@@ -42,17 +42,15 @@ export function AchievementBadge({ badge }: { badge: ApiAchievementView }) {
   const earned = badge.earnedTier !== null;
   const started = !earned && badge.count > 0;
   const active = earned || started; // has color; untouched does not
-  // Globals show the punchy tier label ("Committed"); per-goal/consistency show
-  // the family title (the goal name) so the badge is identifiable at a glance.
-  const title =
-    badge.category === 'global' ? (earned ? badge.earnedLabel! : badge.nextLabel ?? '—') : badge.title;
-  const hasNext = badge.nextThreshold !== null;
-
-  const sub = earned
-    ? hasNext
-      ? `${badge.count} / ${badge.nextThreshold} ${badge.unit}`
-      : `Maxed out · ${badge.count} ${badge.unit}`
-    : `${badge.count} / ${badge.nextThreshold} ${badge.unit}`;
+  // The server reshapes views per section: an EARNED view has earnedTier set +
+  // no next (→ full, no bar); an IN-PROGRESS view has earnedTier null + a next
+  // (→ outline + bar). So `earned`/`started` here map exactly to the section.
+  // title = the specific tier (the completed one, or the one you're chasing);
+  // sub = what it's about (goal name for per-goal, family name for globals).
+  const title = earned ? badge.earnedLabel ?? '—' : badge.nextLabel ?? '—';
+  const sub = badge.title;
+  const showBar = started && badge.nextThreshold !== null;
+  const progressText = showBar ? `${badge.count} / ${badge.nextThreshold} ${badge.unit}` : null;
 
   const banner: ViewStyle = earned
     ? banner3dStyle(accent, { tint: accent + '1A' })
@@ -76,11 +74,16 @@ export function AchievementBadge({ badge }: { badge: ApiAchievementView }) {
       <Text style={styles.sub} numberOfLines={1}>
         {sub}
       </Text>
-      {hasNext ? (
-        <View style={styles.bar}>
-          {/* Bar matches the family outline color (accent). */}
-          <Progress value={(badge.progressToNext ?? 0) * 100} color={accent} />
-        </View>
+      {showBar ? (
+        <>
+          <Text style={styles.progressText} numberOfLines={1}>
+            {progressText}
+          </Text>
+          <View style={styles.bar}>
+            {/* Bar matches the family outline color (accent). */}
+            <Progress value={(badge.progressToNext ?? 0) * 100} color={accent} />
+          </View>
+        </>
       ) : (
         <View style={styles.barSpacer} />
       )}
@@ -118,6 +121,7 @@ const styles = StyleSheet.create({
   title: { color: theme.text, fontSize: 14, fontWeight: '700' },
   titleUntouched: { color: theme.dim },
   sub: { color: theme.faint, fontSize: 12 },
+  progressText: { color: theme.faint, fontSize: 11, marginTop: 4 },
   bar: { marginTop: 4 },
   barSpacer: { height: 6, marginTop: 4 },
 });

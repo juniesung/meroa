@@ -124,8 +124,13 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: 1.2,
     paddingHorizontal: 4,
+    // Consistent gap to the content below (the EARNED section has no hint line,
+    // so without this its grid sat flush against the title).
+    marginBottom: 12,
   },
-  sectionHint: { color: theme.faint, fontSize: 12.5, paddingHorizontal: 4, marginTop: 4, marginBottom: 12 },
+  // Pulled up under the title so a section WITH a hint keeps the same title→content
+  // rhythm as one without.
+  sectionHint: { color: theme.faint, fontSize: 12.5, paddingHorizontal: 4, marginTop: -8, marginBottom: 12 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, justifyContent: 'space-between' },
   empty: { color: theme.dim, fontSize: 13.5, lineHeight: 19, marginTop: 10, paddingHorizontal: 4 },
   recordRow: { flexDirection: 'row', gap: 10 },

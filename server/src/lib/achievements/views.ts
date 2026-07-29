@@ -133,11 +133,20 @@ export async function buildAchievementsScreen(
 
   const views = catalog.map(({ family, count }) => toView(family, count, earnedAtByKeyTier));
 
+  // Each section renders one thing: EARNED shows the completed tier (full badge,
+  // no bar), IN PROGRESS shows the *next* tier you're working toward (outline +
+  // bar). A family with an earned tier AND a next tier legitimately appears in
+  // both — but as different tiers with different highlighting, so it never reads
+  // as a confusing duplicate. Reshaping here (blanking `next` on earned, blanking
+  // `earnedTier` on in-progress) is what makes AchievementBadge pick full vs
+  // outline correctly per section, instead of "has any earned tier → full".
   const earned = views
     .filter((v) => v.earnedTier !== null)
+    .map((v) => ({ ...v, nextThreshold: null, nextLabel: null, progressToNext: null }))
     .sort((a, b) => (b.earnedAt ?? '').localeCompare(a.earnedAt ?? ''));
   const inProgress = views
     .filter((v) => v.nextThreshold !== null && v.count > 0)
+    .map((v) => ({ ...v, earnedTier: null, earnedLabel: null, earnedAt: null }))
     .sort((a, b) => (b.progressToNext ?? 0) - (a.progressToNext ?? 0))
     .slice(0, IN_PROGRESS_LIMIT);
 
