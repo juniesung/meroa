@@ -33,7 +33,7 @@ describe('assembleAchievements', () => {
     expect(tasks.earnedTier).toBe(10);
     expect(tasks.earnedLabel).toBe('Getting going');
     expect(tasks.earnedAt).toBe(D.toISOString());
-    expect(tasks.nextThreshold).toBe(50);
+    expect(tasks.nextThreshold).toBe(25);
   });
 
   it('fills the progress bar to count / next threshold (matches the label)', () => {
@@ -44,11 +44,16 @@ describe('assembleAchievements', () => {
   });
 
   it('nulls the teaser + progress once every tier is earned', () => {
-    const rows = [{ key: 'goals_finished', tier: 1, earnedAt: D }, { key: 'goals_finished', tier: 3, earnedAt: D }];
-    const finished = assembleAchievements(counts({ goals_finished: 4 }), rows).find(
+    const rows = [
+      { key: 'goals_finished', tier: 1, earnedAt: D },
+      { key: 'goals_finished', tier: 3, earnedAt: D },
+      { key: 'goals_finished', tier: 5, earnedAt: D },
+      { key: 'goals_finished', tier: 10, earnedAt: D },
+    ];
+    const finished = assembleAchievements(counts({ goals_finished: 10 }), rows).find(
       (a) => a.key === 'goals_finished',
     )!;
-    expect(finished.earnedTier).toBe(3);
+    expect(finished.earnedTier).toBe(10);
     expect(finished.nextThreshold).toBeNull();
     expect(finished.progressToNext).toBeNull();
   });
@@ -63,7 +68,7 @@ describe('assembleAchievements', () => {
     const tasks = assembleAchievements(counts({ tasks_completed: 3 }), rows).find((a) => a.key === 'tasks_completed')!;
     expect(tasks.earnedTier).toBe(1);
     expect(tasks.earnedLabel).toBe('First step');
-    expect(tasks.nextThreshold).toBe(10);
+    expect(tasks.nextThreshold).toBe(5);
   });
 
   it('returns one view per catalog family', () => {

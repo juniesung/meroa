@@ -39,24 +39,37 @@ export type AchievementFamily = {
 
 // Icons reuse the existing set (components/Icon.tsx): check, flame, sparkle,
 // crown are all already drawn there.
+// Tiers are layered on purpose (research: retention rises with achievement
+// difficulty, so pair an accessible early tier with progressively harder ones).
+// More tiers per family also means there's almost always a *close* next target
+// — the goal-gradient pull that drives the "In progress" section.
 export const ACHIEVEMENT_CATALOG: AchievementFamily[] = [
   {
     key: 'tasks_completed',
     unit: 'tasks completed',
     tiers: [
       { threshold: 1, label: 'First step', icon: 'check' },
+      { threshold: 5, label: 'Warming up', icon: 'check' },
       { threshold: 10, label: 'Getting going', icon: 'check' },
+      { threshold: 25, label: 'Rolling', icon: 'check' },
       { threshold: 50, label: 'Committed', icon: 'check' },
+      { threshold: 100, label: 'Centurion', icon: 'check' },
       { threshold: 250, label: 'Unstoppable', icon: 'check' },
+      { threshold: 500, label: 'Machine', icon: 'check' },
     ],
   },
   {
     key: 'streak',
     unit: 'day streak',
     tiers: [
+      { threshold: 3, label: 'Three in a row', icon: 'flame' },
       { threshold: 7, label: 'Week one', icon: 'flame' },
+      { threshold: 14, label: 'Two weeks', icon: 'flame' },
       { threshold: 30, label: 'Month strong', icon: 'flame' },
+      { threshold: 60, label: 'Two months', icon: 'flame' },
       { threshold: 100, label: 'Century', icon: 'flame' },
+      { threshold: 180, label: 'Half a year', icon: 'flame' },
+      { threshold: 365, label: 'A full year', icon: 'flame' },
     ],
   },
   {
@@ -65,6 +78,8 @@ export const ACHIEVEMENT_CATALOG: AchievementFamily[] = [
     tiers: [
       { threshold: 1, label: 'First goal', icon: 'sparkle' },
       { threshold: 3, label: 'Three going', icon: 'sparkle' },
+      { threshold: 5, label: 'Ambitious', icon: 'sparkle' },
+      { threshold: 10, label: 'Big plans', icon: 'sparkle' },
     ],
   },
   {
@@ -73,15 +88,20 @@ export const ACHIEVEMENT_CATALOG: AchievementFamily[] = [
     tiers: [
       { threshold: 1, label: 'Finisher', icon: 'crown' },
       { threshold: 3, label: 'Serial finisher', icon: 'crown' },
+      { threshold: 5, label: 'Closer', icon: 'crown' },
+      { threshold: 10, label: 'Relentless', icon: 'crown' },
     ],
   },
   {
     key: 'active_days',
     unit: 'active days',
     tiers: [
+      { threshold: 3, label: 'Getting the habit', icon: 'clock' },
       { threshold: 7, label: 'Showing up', icon: 'clock' },
       { threshold: 30, label: 'Regular', icon: 'clock' },
+      { threshold: 60, label: 'Fixture', icon: 'clock' },
       { threshold: 100, label: 'Ever-present', icon: 'clock' },
+      { threshold: 365, label: 'Year-rounder', icon: 'clock' },
     ],
   },
 ];
