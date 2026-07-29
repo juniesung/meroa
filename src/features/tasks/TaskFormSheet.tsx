@@ -9,6 +9,7 @@ import { PrimaryButton } from '@/components/PrimaryButton';
 import { Icon, type IconName } from '@/components/Icon';
 import { isOverdue } from '@/components/TaskCard';
 import { useMe } from '@/features/profile/queries';
+import { setPendingChatDraft, tellMeroaDraft } from '@/features/chat/pending-draft';
 import { useGoals } from '@/features/goals/queries';
 import { radii, theme } from '@/constants/theme';
 import { asLimitReached, limitReachedMessage } from '@/lib/api/limits';
@@ -566,6 +567,24 @@ function TaskFormBody({ task, onClose }: { task?: ApiTask; onClose: () => void }
         onPress={canSubmit() ? handleSubmit : undefined}
         style={{ marginTop: 20, marginBottom: 4, opacity: canSubmit() && !submitting ? 1 : 0.5 }}
       />
+
+      {isEdit && task && (
+        // WS6: one tap from this task to talking to Meroa about it — closes the
+        // sheet, seeds the composer, and jumps to Chat.
+        <Pressable
+          onPress={() => {
+            haptic();
+            setPendingChatDraft(tellMeroaDraft('task', task.title));
+            onClose();
+            router.navigate('/(tabs)');
+          }}
+          style={styles.tellMeroaLink}
+          hitSlop={8}
+        >
+          <Icon name="chat" size={15} color={theme.dim} stroke={1.9} />
+          <Text style={styles.tellMeroaText}>Talk to Meroa about this</Text>
+        </Pressable>
+      )}
     </ScrollView>
   );
 }
@@ -725,4 +744,13 @@ const styles = StyleSheet.create({
   },
   recoveryTitle: { color: theme.text, fontSize: 13.5, fontWeight: '600', marginBottom: 10 },
   recoveryHint: { color: theme.dim, fontSize: 12, marginTop: 8 },
+  tellMeroaLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 14,
+    marginTop: 4,
+  },
+  tellMeroaText: { color: theme.dim, fontSize: 13, fontWeight: '600' },
 });

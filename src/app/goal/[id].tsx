@@ -12,6 +12,7 @@ import { TrendChart, type TrendPoint } from '@/components/TrendChart';
 import { radii, theme } from '@/constants/theme';
 import { banner3dStyle } from '@/lib/banner';
 import { goalAccent } from '@/features/goals/goal-accent';
+import { setPendingChatDraft, tellMeroaDraft } from '@/features/chat/pending-draft';
 import { useArchiveGoal, useGoal } from '@/features/goals/queries';
 import { GoalEntrySheet } from '@/features/goals/GoalEntrySheet';
 import { GoalFormSheet } from '@/features/goals/GoalFormSheet';
@@ -252,6 +253,18 @@ export default function GoalDetailScreen() {
           </Text>
           <Text style={styles.subtitle}>{detail.card.sub}</Text>
         </View>
+        <Pressable
+          onPress={() => {
+            haptics.tap();
+            // WS6: hand Meroa this goal and jump to Chat, composer pre-seeded.
+            setPendingChatDraft(tellMeroaDraft('goal', goal.name));
+            router.navigate('/(tabs)');
+          }}
+          style={[styles.editButton, { marginRight: 4 }]}
+          hitSlop={8}
+        >
+          <Icon name="chat" size={17} color={theme.dim} stroke={1.8} />
+        </Pressable>
         <Pressable
           onPress={() => {
             haptics.tap();

@@ -1,6 +1,6 @@
 import * as Haptics from 'expo-haptics';
-import { router } from 'expo-router';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { router, useFocusEffect } from 'expo-router';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Keyboard,
@@ -40,6 +40,7 @@ import { useGoalConsistency } from '@/features/goals/queries';
 import { useMe } from '@/features/profile/queries';
 import { VibePickerSheet } from '@/features/profile/VibePickerSheet';
 import { toneFromPrefs, toneLabel } from '@/features/profile/tone';
+import { consumePendingChatDraft } from '@/features/chat/pending-draft';
 import { useTabBarHeight } from '@/hooks/use-tab-bar-inset';
 
 // Must match the server's `sendSchema` max (server/src/routes/messages.ts) —
@@ -231,6 +232,20 @@ export default function ChatScreen() {
   const { data: me } = useMe();
   const communicationStyle = toneLabel(toneFromPrefs(me?.user.prefs));
   const scrollRef = useRef<ScrollView>(null);
+  const inputRef = useRef<TextInput>(null);
+
+  // "Tell Meroa about this" (WS6): a goal/task screen queued a draft and jumped
+  // to this tab. Consume it once on focus into the composer and focus the input,
+  // so the user lands ready to finish the sentence and send.
+  useFocusEffect(
+    useCallback(() => {
+      const queued = consumePendingChatDraft();
+      if (queued) {
+        setDraft(queued);
+        setTimeout(() => inputRef.current?.focus(), 350);
+      }
+    }, []),
+  );
   const ellipsisFeedback = useTapFeedback();
   const sendFeedback = useTapFeedback(0.9);
   const tabBarHeight = useTabBarHeight();
@@ -454,6 +469,7 @@ export default function ChatScreen() {
 
         <View style={[styles.composer, { paddingBottom: keyboardShown ? 16 : tabBarHeight + 16 }]}>
           <TextInput
+            ref={inputRef}
             value={draft}
             onChangeText={setDraft}
             placeholder="Message Meroa"
