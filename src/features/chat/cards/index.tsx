@@ -11,6 +11,8 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 
 import { Icon } from '@/components/Icon';
+import { Progress } from '@/components/Progress';
+import { Ring } from '@/components/Ring';
 import { TaskCard } from '@/components/TaskCard';
 import { radii, theme } from '@/constants/theme';
 import { banner3dStyle } from '@/lib/banner';
@@ -489,6 +491,53 @@ export function GoalActionCard({ message }: { message: ChatMessage }) {
   );
 }
 
+// A log_goal_entry put a real number on the board, so the reward lives IN the
+// conversation now (WS3): a live progress ring + bar, not just a text line. Like
+// GoalActionCard it resolves the goal by id so the ring reflects live state
+// (undo/another log updates it here too), reusing the exact Ring/Progress the
+// Goals tab renders and the same 0..1 -> 0..100 conversion. The summary sentence
+// stays as the caption because it carries what the bar can't — the goal-impact
+// and history fact ("that's your 4th time this week"), server-computed.
+export function GoalProgressCard({ message }: { message: ChatMessage }) {
+  const { data: goals } = useGoals();
+  const goalId = message.meta.goalId as string | undefined;
+  const snapshot = message.meta.goal as { name: string; icon: string | null } | undefined;
+  const liveGoal = goals?.find((g) => g.id === goalId);
+  const goal = liveGoal ?? snapshot;
+  if (!goal) return null;
+
+  const accent = liveGoal ? goalAccent(liveGoal.definition.type) : theme.blue;
+  const pct = liveGoal?.progress != null ? Math.round(liveGoal.progress * 100) : null;
+  const headline = liveGoal?.headline;
+
+  return (
+    <View style={[styles.actionCard, styles.chatCard, banner3dStyle(accent, { tint: theme.card })]}>
+      <View style={styles.removalRow}>
+        <View style={[styles.removalIconChip, { backgroundColor: accent + '24' }]}>
+          <Icon name={toIconName(goal.icon)} size={18} color={accent} stroke={1.9} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.removalTitle} numberOfLines={1}>
+            {goal.name}
+          </Text>
+          {headline ? (
+            <Text style={styles.removalStatus} numberOfLines={1}>
+              {headline}
+            </Text>
+          ) : null}
+        </View>
+        {pct != null ? <Ring value={pct} size={40} stroke={4} label={`${pct}`} /> : null}
+      </View>
+      {pct != null ? (
+        <View style={styles.previewBody}>
+          <Progress value={pct} color={accent} />
+        </View>
+      ) : null}
+      {message.content ? <Text style={styles.actionDetail}>{message.content}</Text> : null}
+    </View>
+  );
+}
+
 // advance_goal_stage never mutates anything by itself — this card's Advance
 // tap is the only confirmation (docs/milestone-goal-plan.md §2.1), same
 // skeleton as TaskRemovalConfirmCard: shows the real proposal (from -> to
@@ -586,6 +635,7 @@ export const CARD_BY_KIND: Record<string, (props: { message: ChatMessage }) => R
   task_creation_pending: TaskPreviewCard,
   goal_preview: GoalPreviewCard,
   goal_action: GoalActionCard,
+  goal_progress: GoalProgressCard,
   goal_advance_pending: GoalAdvanceConfirmCard,
   memory_action: MemoryActionCard,
 };

@@ -156,6 +156,7 @@ const CARD_KINDS = new Set([
   'task_bulk_removal_pending',
   'task_creation_pending',
   'goal_action',
+  'goal_progress',
   'goal_preview',
   'goal_advance_pending',
   'memory_action',
@@ -747,7 +748,16 @@ messageRoutes.post('/', rateLimit({ windowMs: 60_000, max: 20 }), zValidator('js
           // `action` branch above) instead of a read-only one, and the
           // proposal is stamped onto meta so POST /goals/:id/advance can
           // re-validate exactly what the card showed.
-          const kind = event.recordKind === 'goal_advance_pending' ? 'goal_advance_pending' : 'goal_action';
+          // A log_goal_entry moves the goal's number, so render the reward IN
+          // the thread — a progress ring/bar (goal_progress card) instead of the
+          // text-only goal_action line (WS3). Everything else (edit, archive,
+          // restore) stays goal_action; an advance is its own confirm card.
+          const kind =
+            event.recordKind === 'goal_advance_pending'
+              ? 'goal_advance_pending'
+              : event.recordKind === 'goal_entry'
+                ? 'goal_progress'
+                : 'goal_action';
           const [assistantMessage] = await db
             .insert(messages)
             .values({
