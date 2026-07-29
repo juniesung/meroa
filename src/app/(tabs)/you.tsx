@@ -2,7 +2,7 @@ import { router } from 'expo-router';
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { AchievementBadge } from '@/components/AchievementBadge';
+import { AchievementBadge, achievementBadgeKey } from '@/components/AchievementBadge';
 import { Heatmap } from '@/components/Heatmap';
 import { Icon } from '@/components/Icon';
 import { SkeletonBlock } from '@/components/Skeleton';
@@ -143,7 +143,7 @@ export default function YouScreen() {
                 </Pressable>
                 <View style={styles.badgeGrid}>
                   {achPreview.map((b) => (
-                    <AchievementBadge key={b.key} badge={b} />
+                    <AchievementBadge key={achievementBadgeKey(b)} badge={b} />
                   ))}
                 </View>
               </View>

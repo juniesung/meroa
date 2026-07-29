@@ -2,7 +2,7 @@ import { router, Stack } from 'expo-router';
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { AchievementBadge } from '@/components/AchievementBadge';
+import { AchievementBadge, achievementBadgeKey } from '@/components/AchievementBadge';
 import { Icon } from '@/components/Icon';
 import { SkeletonBlock } from '@/components/Skeleton';
 import { theme } from '@/constants/theme';
@@ -62,7 +62,7 @@ export default function AchievementsScreen() {
                 <Text style={styles.sectionHint}>What you&apos;re closest to earning.</Text>
                 <View style={styles.grid}>
                   {data.inProgress.map((b) => (
-                    <AchievementBadge key={b.key} badge={b} />
+                    <AchievementBadge key={achievementBadgeKey(b)} badge={b} />
                   ))}
                 </View>
               </View>
@@ -73,7 +73,7 @@ export default function AchievementsScreen() {
               {data && data.earned.length > 0 ? (
                 <View style={styles.grid}>
                   {data.earned.map((b) => (
-                    <AchievementBadge key={b.key} badge={b} />
+                    <AchievementBadge key={achievementBadgeKey(b)} badge={b} />
                   ))}
                 </View>
               ) : (

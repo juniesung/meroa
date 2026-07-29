@@ -29,6 +29,13 @@ function accentFor(badge: ApiAchievementView): string {
   return GLOBAL_ACCENT[badge.key] ?? CATEGORY_ACCENT[badge.category] ?? theme.blue;
 }
 
+// A React key unique per (family, shown tier). The same family appears in both
+// Earned (its completed tier) and In progress (its next tier), so `badge.key`
+// alone collides when the two lists are rendered together (the You-tab preview).
+export function achievementBadgeKey(badge: ApiAchievementView): string {
+  return `${badge.key}:${badge.earnedTier ?? 'p'}:${badge.nextThreshold ?? ''}`;
+}
+
 // Three visual states:
 // - earned  → the full 3D colored banner (thick left/bottom edge + shadow).
 // - started → some progress but no tier yet (e.g. a 3-day streak toward 7):
