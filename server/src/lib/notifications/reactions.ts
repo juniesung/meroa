@@ -196,59 +196,80 @@ export async function buildReactionTrigger(
  * unique (user,key,tier) insert means whichever path evaluates first is the only
  * one that gets a row back to announce.
  */
+// Per-user in-process serialization for the fire-and-forget beats. The reaction
+// cap (and the frequency cap) are check-then-insert, so two beats running
+// concurrently for one user — e.g. a backlog import crossing milestones on
+// several goals at once — could both read count<cap and both send, blowing the
+// ceiling. An advisory lock is the wrong tool (it's shared with the user's
+// foreground request path and would block a send/create across a model call);
+// a lightweight promise chain per user makes the check-then-send atomic within
+// this instance without touching the request path. Single-instance deploy, so
+// this is sufficient; the dedupeKey claim still guards cross-instance dups.
+const beatChains = new Map<string, Promise<void>>();
+
 export function emitProgressBeat(userId: string, event: ReactionEvent): void {
-  void (async () => {
-    try {
-      const now = new Date();
-      const [user] = await db
-        .select({ timezone: users.timezone, prefs: users.prefs })
-        .from(users)
-        .where(eq(users.id, userId))
-        .limit(1);
-      if (!user) return;
+  const prev = beatChains.get(userId) ?? Promise.resolve();
+  const next = prev.then(() => runProgressBeat(userId, event));
+  // Drop the chain entry once it's the tail and settled, so the map doesn't grow.
+  beatChains.set(
+    userId,
+    next.finally(() => {
+      if (beatChains.get(userId) === next) beatChains.delete(userId);
+    }),
+  );
+}
 
-      // Every in-thread proactive message honors the user's frequency cap — the
-      // same one the cron tick enforces (CLAUDE.md §2 + the user's notificationCap
-      // override; a user who set perDay:0 wants zero proactive messages). Checked
-      // BEFORE claiming so nothing gets announce-suppressed when over cap — the
-      // badge stays un-announced and surfaces on a later beat.
-      if (!(await withinFrequencyCap(userId, user.prefs as Record<string, unknown> | null, now))) return;
+async function runProgressBeat(userId: string, event: ReactionEvent): Promise<void> {
+  try {
+    const now = new Date();
+    const [user] = await db
+      .select({ timezone: users.timezone, prefs: users.prefs })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
+    if (!user) return;
 
-      // claimNewlyEarned atomically stamps the congrats (see evaluate.ts), so a
-      // concurrent profile-read backfill can't suppress it and no markAnnounced
-      // follow-up is needed. deliverThreadReachOut only ever declines on a
-      // dedupe-dup (already delivered), so eager claiming loses no congrats.
-      const earned = await claimNewlyEarned(userId, user.timezone);
-      const top = mostSignificant(earned);
-      if (top) {
-        await deliverThreadReachOut(
-          userId,
-          {
-            kind: `achievement_${top.family.category}`,
-            dedupeKey: `achievement:${top.key}:${top.tier}`,
-            chatBody: congratsLine(top),
-            data: { route: 'you' },
-          },
-          { push: false },
-        );
-        return;
-      }
+    // Every in-thread proactive message honors the user's frequency cap — the
+    // same one the cron tick enforces (CLAUDE.md §2 + the user's notificationCap
+    // override; a user who set perDay:0 wants zero proactive messages). Checked
+    // BEFORE claiming so nothing gets announce-suppressed when over cap — the
+    // badge stays un-announced and surfaces on a later beat.
+    if (!(await withinFrequencyCap(userId, user.prefs as Record<string, unknown> | null, now))) return;
 
-      if (!(await withinReactionCap(userId, now))) return;
-      const trigger = await buildReactionTrigger(userId, event, user.timezone, now);
-      if (!trigger) return;
-      // Cheap up-front skip so a duplicate never reaches the (paid) compose step;
-      // the claim inside deliverThreadReachOut is the real race-safe guard.
-      if (await alreadySent(userId, trigger.dedupeKey)) return;
-      const tone = resolveTone(user.prefs as Record<string, unknown> | null);
-      const chatBody = await composeProactiveMessage(trigger, tone);
+    // claimNewlyEarned atomically stamps the congrats (see evaluate.ts), so a
+    // concurrent profile-read backfill can't suppress it and no markAnnounced
+    // follow-up is needed. deliverThreadReachOut only ever declines on a
+    // dedupe-dup (already delivered), so eager claiming loses no congrats.
+    const earned = await claimNewlyEarned(userId, user.timezone);
+    const top = mostSignificant(earned);
+    if (top) {
       await deliverThreadReachOut(
         userId,
-        { kind: trigger.kind, dedupeKey: trigger.dedupeKey, chatBody, data: trigger.data },
+        {
+          kind: `achievement_${top.family.category}`,
+          dedupeKey: `achievement:${top.key}:${top.tier}`,
+          chatBody: congratsLine(top),
+          data: { route: 'you' },
+        },
         { push: false },
       );
-    } catch (err) {
-      logger.warn({ err, userId }, 'progress beat failed');
+      return;
     }
-  })();
+
+    if (!(await withinReactionCap(userId, now))) return;
+    const trigger = await buildReactionTrigger(userId, event, user.timezone, now);
+    if (!trigger) return;
+    // Cheap up-front skip so a duplicate never reaches the (paid) compose step;
+    // the claim inside deliverThreadReachOut is the real race-safe guard.
+    if (await alreadySent(userId, trigger.dedupeKey)) return;
+    const tone = resolveTone(user.prefs as Record<string, unknown> | null);
+    const chatBody = await composeProactiveMessage(trigger, tone);
+    await deliverThreadReachOut(
+      userId,
+      { kind: trigger.kind, dedupeKey: trigger.dedupeKey, chatBody, data: trigger.data },
+      { push: false },
+    );
+  } catch (err) {
+    logger.warn({ err, userId }, 'progress beat failed');
+  }
 }
