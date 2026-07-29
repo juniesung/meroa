@@ -20,6 +20,7 @@ import {
   users,
 } from '../db/schema.ts';
 import { hardDeleteUser } from '../lib/account-deletion.ts';
+import { runUserCatchUp } from '../lib/notifications/rituals.ts';
 import { resolvePlan } from '../lib/billing/plan.ts';
 import { AI_CONSENT_VERSION } from '../lib/constants.ts';
 import { ianaTimezoneSchema } from '../lib/timezone.ts';
@@ -215,6 +216,17 @@ meRoutes.post('/push-token', zValidator('json', pushTokenSchema), async (c) => {
 
   await db.update(users).set({ lastActiveAt: now }).where(eq(users.id, userId));
 
+  return c.json({ ok: true });
+});
+
+// Client pings this on app foreground (features/chat/useDailyCatchUp). It drops
+// at most one proactive reach-out into the chat thread if one is due — a
+// first-open-of-day ritual or a roughly-weekly recap — both deduped per period
+// (lib/notifications/rituals.ts). Thread-only, so it works without the blocked
+// push cron. Never errors out: runUserCatchUp swallows its own failures.
+meRoutes.post('/catch-up', async (c) => {
+  const userId = c.get('userId');
+  await runUserCatchUp(userId);
   return c.json({ ok: true });
 });
 

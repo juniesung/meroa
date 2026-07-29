@@ -32,7 +32,12 @@ export type NotificationKind =
   // (Tasks/Goals tab), built in reactions.ts rather than the cron sweep.
   | 'reaction_progress'
   | 'reaction_streak'
-  | 'reaction_stage';
+  | 'reaction_stage'
+  // Client-pinged rituals (rituals.ts): a first-open-of-day "here's your day"
+  // and a first-open-of-week reflect-back recap. Thread-only, deduped per
+  // period — they work without the (blocked) push cron.
+  | 'daily_ritual'
+  | 'weekly_recap';
 
 export type NotificationTrigger = {
   kind: NotificationKind;

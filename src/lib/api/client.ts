@@ -252,6 +252,11 @@ export const api = {
       body: JSON.stringify(body),
     }),
 
+  // Pinged on app foreground (features/chat/useDailyCatchUp) — the server drops
+  // a first-open-of-day ritual or weekly recap into the chat thread if one's due
+  // (deduped per period, so calling it often is safe).
+  catchUp: () => request<{ ok: true }>('/me/catch-up', { method: 'POST' }),
+
   // A faithful, unpaginated dump of every row the user owns (routes/me.ts).
   exportData: () => request<Record<string, unknown>>('/me/export'),
 

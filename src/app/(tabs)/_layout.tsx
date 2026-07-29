@@ -6,6 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Icon, type IconName } from '@/components/Icon';
 import { TAB_BAR_CONTENT_HEIGHT, theme } from '@/constants/theme';
+import { useDailyCatchUp } from '@/features/chat/useDailyCatchUp';
 import { usePushRegistration } from '@/features/profile/usePushRegistration';
 import { useTimezoneSync } from '@/features/profile/useTimezoneSync';
 import { useTaskReminderSync } from '@/features/tasks/useTaskReminderSync';
@@ -30,6 +31,7 @@ export default function TabsLayout() {
   useTaskReminderSync();
   useTimezoneSync();
   usePushRegistration();
+  useDailyCatchUp();
 
   return (
     <Tabs
