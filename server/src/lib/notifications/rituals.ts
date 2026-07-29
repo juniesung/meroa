@@ -98,25 +98,26 @@ async function buildWeeklyRecap(
   weekBucket: number,
 ): Promise<NotificationTrigger | null> {
   const weekAgo = new Date(now.getTime() - 7 * DAY_MS);
+  // Count currently-DONE tasks whose completion landed this week, keyed on the
+  // task's completedRecordId (one per done task) — NOT raw task_completion
+  // records. applyProgress writes a completion record on every toggle and never
+  // reverts the prior one, so counting records inflates on any
+  // check->uncheck->re-check ("42 tasks" that was really 14). This mirrors the
+  // blessed convention in profile/overview.ts's buildMonthRecap and
+  // achievements/evaluate.ts: a recurring task's daily instances are separate
+  // rows so each done day still counts once; a reopened (now-open) task drops
+  // out honestly.
   const [doneRow] = await db
-    .select({
-      // DISTINCT taskId, not count(*): a task toggled done->reopen->done writes
-      // a mark_done record each time, so count(*) counted check-off EVENTS and
-      // "42 tasks" really meant "42 completions across 14 tasks" — a misleading
-      // number. Distinct tasks is the honest "tasks you completed this week"
-      // (a recurring task's daily instances are distinct ids, so they still each
-      // count once per day, which is correct).
-      n: sql<number>`count(distinct ${records.payload}->>'taskId')::int`,
-    })
-    .from(records)
+    .select({ n: sql<number>`count(*)::int` })
+    .from(tasks)
+    .innerJoin(records, eq(tasks.completedRecordId, records.id))
     .where(
       and(
-        eq(records.userId, user.id),
-        eq(records.kind, 'task_completion'),
+        eq(tasks.userId, user.id),
+        eq(tasks.status, 'done'),
+        isNull(tasks.deletedAt),
         isNull(records.revertedAt),
-        gte(records.createdAt, weekAgo),
-        // exclude reopens (mark_open) — only real completions count
-        sql`${records.payload}->'input'->>'kind' = 'mark_done'`,
+        gte(records.occurredAt, weekAgo),
       ),
     );
   const tasksDone = doneRow?.n ?? 0;
