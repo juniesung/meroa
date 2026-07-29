@@ -229,6 +229,13 @@ async function runProgressBeat(userId: string, event: ReactionEvent): Promise<vo
       .limit(1);
     if (!user) return;
 
+    // An explicit opt-out silences every in-thread reach-out, reaction beats
+    // included — the same rule runUserCatchUp applies. In-thread beats default
+    // ON per the companion direction (only an explicit `false` suppresses them);
+    // push is a separate, opt-IN channel (tick.ts), so the defaults differ by
+    // channel on purpose.
+    if ((user.prefs as { proactiveCheckins?: boolean } | null)?.proactiveCheckins === false) return;
+
     // Every in-thread proactive message honors the user's frequency cap — the
     // same one the cron tick enforces (CLAUDE.md §2 + the user's notificationCap
     // override; a user who set perDay:0 wants zero proactive messages). Checked
