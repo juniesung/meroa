@@ -337,13 +337,18 @@ export function computeIndirectCardSummary(
       // Unlike savings, the clock starts at the FIRST READING, not the goal's
       // creation: `start` is that reading, and the movement being paced is
       // `current - start`. Numerator and denominator have to span the same
-      // window or the rate is meaningless. Direction-agnostic via abs() —
-      // this works the same whether the number is climbing toward a bench PR
-      // or falling toward a weight target (docs/goals-redesign-plan.md §1.3).
+      // window or the rate is meaningless. Movement must be measured TOWARD the
+      // target, not just its magnitude: abs() reported "on track" for someone
+      // moving the wrong way (e.g. gaining weight on a weight-LOSS goal). Sign it
+      // by the target's direction and clamp at 0, so away-from-target reads as
+      // not-on-track (works for both climbing to a bench PR and falling to a
+      // weight target — docs/goals-redesign-plan.md §1.3).
       const elapsedDays = elapsedDaysSince(sortedAsc[0]!.entryAt, tz, now);
+      const towardTarget = Math.sign(definition.targetValue - start);
+      const progressRate = Math.max(0, (current - start) * towardTarget) / (elapsedDays || 1);
       onTrack =
         !pace.reached && !pace.overdue && elapsedDays !== null
-          ? computeOnTrack(Math.abs(current - start) / elapsedDays, pace.perDay)
+          ? computeOnTrack(progressRate, pace.perDay)
           : null;
 
       if (pace.reached) {

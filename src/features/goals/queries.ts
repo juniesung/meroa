@@ -58,6 +58,10 @@ function invalidateGoal(queryClient: ReturnType<typeof useQueryClient>, goalId: 
   queryClient.invalidateQueries({ queryKey: goalsQueryKey });
   queryClient.invalidateQueries({ queryKey: goalDetailQueryKey(goalId) });
   queryClient.invalidateQueries({ queryKey: goalEntriesQueryKey(goalId) });
+  // The You-tab stat row + achievement badges derive from goals too (finished/
+  // started counts, per-goal progress/tenure). Edits, stage advances, and
+  // creates change those, so refresh the profile prefix or they go stale.
+  queryClient.invalidateQueries({ queryKey: ['profile'] });
 }
 
 export function useCreateGoalFromPreview() {
@@ -76,6 +80,7 @@ export function useCreateGoalFromPreview() {
       // (docs/goals-redesign-plan.md §2.3) — the Tasks tab needs to reflect
       // them the instant Create is tapped, same as any other task action.
       if (data?.tasks.length) queryClient.invalidateQueries({ queryKey: tasksQueryKey });
+      queryClient.invalidateQueries({ queryKey: ['profile'] });
     },
   });
 }
@@ -96,6 +101,7 @@ export function useCreateGoal() {
       queryClient.invalidateQueries({ queryKey: goalsQueryKey });
       if (data) queryClient.invalidateQueries({ queryKey: goalDetailQueryKey(data.goal.id) });
       if (data?.tasks.length) queryClient.invalidateQueries({ queryKey: tasksQueryKey });
+      queryClient.invalidateQueries({ queryKey: ['profile'] });
     },
   });
 }

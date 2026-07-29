@@ -369,10 +369,12 @@ messageRoutes.post('/', rateLimit({ windowMs: 60_000, max: 20 }), zValidator('js
   // refers to.
   const newestAssistant = [...history].reverse().find((m) => m.role === 'assistant');
   const newestMeta = (newestAssistant?.meta ?? null) as { kind?: string } | null;
-  const newestIsConfirmCard =
-    newestMeta?.kind === 'task_removal_pending' ||
-    newestMeta?.kind === 'task_bulk_removal_pending' ||
-    newestMeta?.kind === 'goal_advance_pending';
+  // ALL pending cards, not just the removal/advance ones — a creation preview
+  // (task_creation_pending / goal_preview) also persists no record until the
+  // Create tap, so "undo that" while one is newest must not reach past it to an
+  // older real change. The actedOn record-check below still correctly allows
+  // undo once the card WAS tapped (a record then exists after it).
+  const newestIsConfirmCard = !!newestMeta?.kind && PENDING_CARD_KINDS.has(newestMeta.kind);
 
   // A confirm card is only "pending" until it is TAPPED. The first version of this
   // guard asked "is the newest assistant message a confirm card?" — but the card

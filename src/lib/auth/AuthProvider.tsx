@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useMemo, useState, type ReactNode
 
 import { logOutPurchases } from '@/features/billing/purchases';
 import { api, setSessionExpiredHandler } from '@/lib/api/client';
+import { queryClient } from '@/lib/query-client';
 import type { AuthTokens } from '@/lib/api/types';
 
 import { getCachedRefreshToken, loadTokens, setTokens } from './tokenStore';
@@ -37,6 +38,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signOut: async () => {
         await api.logout();
         await logOutPurchases();
+        // Wipe the React Query cache — it's an app-level singleton, so without
+        // this the next account signing in on this device would briefly see the
+        // previous user's cached chat/tasks/goals/memories/entitlement before
+        // refetches replace them (cross-account data leak).
+        queryClient.clear();
         setStatus('signedOut');
       },
     }),

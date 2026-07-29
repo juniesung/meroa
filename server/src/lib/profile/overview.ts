@@ -107,7 +107,16 @@ async function countGoalsActive(userId: string): Promise<number> {
   const [row] = await db
     .select({ n: sql<number>`count(*)::int` })
     .from(goals)
-    .where(and(eq(goals.userId, userId), isNull(goals.archivedAt)));
+    .where(
+      and(
+        eq(goals.userId, userId),
+        isNull(goals.archivedAt),
+        // A finished milestone (advanced past its last stage) is counted under
+        // "finished", not "active" — otherwise it's double-counted in the stat
+        // row. Same finished-predicate as countGoalsFinished.
+        sql`NOT (${goals.definition}->>'type' = 'milestone' AND coalesce((${goals.definition}->>'activeStageIndex')::int, 0) >= coalesce(jsonb_array_length(${goals.definition}->'stages'), 0) AND coalesce(jsonb_array_length(${goals.definition}->'stages'), 0) > 0)`,
+      ),
+    );
   return row?.n ?? 0;
 }
 
