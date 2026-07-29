@@ -4,7 +4,7 @@ import { db } from '../../db/client.ts';
 import { goals, notificationsLog, tasks, users } from '../../db/schema.ts';
 import { logger } from '../../logger.ts';
 import { congratsLine } from '../achievements/copy.ts';
-import { evaluateAchievements, markAnnounced, mostSignificant } from '../achievements/evaluate.ts';
+import { claimNewlyEarned, mostSignificant } from '../achievements/evaluate.ts';
 import { resolveTone } from '../ai/system-prompt.ts';
 import { buildGoalCardSummaries } from '../goals/summary.ts';
 import type { GoalDefinition } from '../goals/schema.ts';
@@ -210,14 +210,18 @@ export function emitProgressBeat(userId: string, event: ReactionEvent): void {
       // Every in-thread proactive message honors the user's frequency cap — the
       // same one the cron tick enforces (CLAUDE.md §2 + the user's notificationCap
       // override; a user who set perDay:0 wants zero proactive messages). Checked
-      // BEFORE evaluateAchievements so nothing gets markAnnounced-suppressed when
-      // over cap — the badge stays un-announced and surfaces on a later beat.
+      // BEFORE claiming so nothing gets announce-suppressed when over cap — the
+      // badge stays un-announced and surfaces on a later beat.
       if (!(await withinFrequencyCap(userId, user.prefs as Record<string, unknown> | null, now))) return;
 
-      const earned = await evaluateAchievements(userId, user.timezone);
+      // claimNewlyEarned atomically stamps the congrats (see evaluate.ts), so a
+      // concurrent profile-read backfill can't suppress it and no markAnnounced
+      // follow-up is needed. deliverThreadReachOut only ever declines on a
+      // dedupe-dup (already delivered), so eager claiming loses no congrats.
+      const earned = await claimNewlyEarned(userId, user.timezone);
       const top = mostSignificant(earned);
       if (top) {
-        const delivered = await deliverThreadReachOut(
+        await deliverThreadReachOut(
           userId,
           {
             kind: `achievement_${top.family.category}`,
@@ -227,9 +231,6 @@ export function emitProgressBeat(userId: string, event: ReactionEvent): void {
           },
           { push: false },
         );
-        // Stamp all newly-earned so no other path re-announces them (we chose to
-        // celebrate one and suppress the rest, same as the chat-turn path).
-        if (delivered) await markAnnounced(userId, earned);
         return;
       }
 

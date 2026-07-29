@@ -1,4 +1,4 @@
-import { and, asc, eq, gt, inArray, isNull, or } from 'drizzle-orm';
+import { and, desc, eq, gt, inArray, isNull, or } from 'drizzle-orm';
 
 import { db } from '../../db/client.ts';
 import { goals, records, tasks } from '../../db/schema.ts';
@@ -142,18 +142,25 @@ export function renderUndoTarget(
 export async function buildRecentChangesFeed(userId: string, since: Date | null): Promise<string> {
   if (!since) return '';
 
-  const rows = await db
-    .select({ kind: records.kind, payload: records.payload })
-    .from(records)
-    .where(
-      and(
-        eq(records.userId, userId),
-        or(eq(records.source, 'tasks_ui'), eq(records.source, 'goal_ui')),
-        gt(records.occurredAt, since),
-      ),
-    )
-    .orderBy(asc(records.occurredAt))
-    .limit(MAX_FEED_ENTRIES);
+  // Order DESC + limit so that when MORE than MAX_FEED_ENTRIES out-of-band
+  // changes happened we keep the NEWEST ones (the change the user is most likely
+  // to reference next) — ascending + limit kept the oldest and dropped the
+  // newest, defeating the anti-contradiction purpose. Reversed below to render
+  // chronologically.
+  const rows = (
+    await db
+      .select({ kind: records.kind, payload: records.payload })
+      .from(records)
+      .where(
+        and(
+          eq(records.userId, userId),
+          or(eq(records.source, 'tasks_ui'), eq(records.source, 'goal_ui')),
+          gt(records.occurredAt, since),
+        ),
+      )
+      .orderBy(desc(records.occurredAt))
+      .limit(MAX_FEED_ENTRIES)
+  ).reverse();
 
   if (rows.length === 0) return '';
 

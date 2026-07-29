@@ -1,6 +1,19 @@
-import { createHash, randomBytes, randomInt } from 'node:crypto';
+import { createHash, randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
 
 import { env } from '../env.ts';
+
+/**
+ * Constant-time comparison of two shared secrets (webhook/cron bearer tokens).
+ * Length short-circuit first (timingSafeEqual throws on unequal lengths, and the
+ * length itself isn't the secret). Use everywhere a static secret is checked so
+ * a plain `!==` can't leak the secret via prefix-match timing.
+ */
+export function secretsMatch(a: string, b: string): boolean {
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  if (bufA.length !== bufB.length) return false;
+  return timingSafeEqual(bufA, bufB);
+}
 
 /** Six-digit OTP, zero-padded. */
 export function generateOtpCode(): string {

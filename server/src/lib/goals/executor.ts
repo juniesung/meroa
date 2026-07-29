@@ -487,6 +487,15 @@ export async function logGoalEntry(
       );
     }
 
+    // A savings contribution is a positive amount added to the total; 0 or a
+    // negative would silently corrupt the running total (the shared entry schema
+    // can't enforce this — for indirect goals `amount` is an absolute
+    // measurement that may legitimately be zero or negative). Mirrors the task
+    // contribution path's z.number().min(0.01).
+    if ((goal.definition as GoalDefinition).type === 'savings' && !(patch.amount > 0)) {
+      throw new GoalActionError('invalid_input', 'A savings contribution has to be more than 0.');
+    }
+
     // patch.entryAt, when set, has already been normalized to a real UTC
     // instant by the caller (lib/ai/actions.ts, via localDatetimeToUtcIso) —
     // same convention as every dueAt reaching lib/tasks/executor.ts.

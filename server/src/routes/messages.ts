@@ -9,7 +9,7 @@ import { db } from '../db/client.ts';
 import { conversations, messageReports, messages, records, users } from '../db/schema.ts';
 import { streamChatReply, type ChatHistoryMessage } from '../lib/ai/chat.ts';
 import { maybeExtractMemories } from '../lib/ai/memory-extractor.ts';
-import { evaluateAchievements, markAnnounced, mostSignificant } from '../lib/achievements/evaluate.ts';
+import { claimNewlyEarned, mostSignificant } from '../lib/achievements/evaluate.ts';
 import { congratsLine } from '../lib/achievements/copy.ts';
 import { pickTaskCreatedQuip } from '../lib/ai/quips.ts';
 import { buildRecentChangesFeed, renderUndoTarget } from '../lib/ai/recent-changes.ts';
@@ -830,7 +830,10 @@ messageRoutes.post('/', rateLimit({ windowMs: 60_000, max: 20 }), zValidator('js
           // announced immediately so the proactive tick never repeats it.
           if (turnHadAction) {
             try {
-              const earned = await evaluateAchievements(userId, userContext.timezone, db);
+              // claimNewlyEarned atomically claims the congrats (see evaluate.ts)
+              // so a concurrent profile-read backfill can't suppress it; the
+              // claim already stamps announcedAt, so no markAnnounced follow-up.
+              const earned = await claimNewlyEarned(userId, userContext.timezone, db);
               const top = mostSignificant(earned);
               if (top) {
                 const [badgeMessage] = await db
@@ -843,7 +846,6 @@ messageRoutes.post('/', rateLimit({ windowMs: 60_000, max: 20 }), zValidator('js
                   })
                   .returning();
                 await stream.writeSSE({ event: 'segment', data: JSON.stringify({ message: badgeMessage }) });
-                await markAnnounced(userId, earned, db);
               }
             } catch (err) {
               // A congrats is a nicety — never let it break the turn's close.

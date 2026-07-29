@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { AppState } from 'react-native';
 import { useQueryClient } from '@tanstack/react-query';
 
-import { messagesQueryKey } from '@/features/chat/queries';
+import { isChatStreaming, messagesQueryKey } from '@/features/chat/queries';
 import { api } from '@/lib/api/client';
 
 /**
@@ -17,13 +17,22 @@ export function useDailyCatchUp() {
   const queryClient = useQueryClient();
   useEffect(() => {
     let cancelled = false;
+    // Never refetch mid-stream — a getMessages snapshot would clobber the
+    // optimistic in-flight reply and truncate it. If a stream is running, wait
+    // for it to finish, then refresh so the ritual/reactions still show.
+    const refreshWhenIdle = () => {
+      if (cancelled) return;
+      if (isChatStreaming()) {
+        setTimeout(refreshWhenIdle, 800);
+        return;
+      }
+      queryClient.invalidateQueries({ queryKey: messagesQueryKey });
+    };
     const run = () => {
       api
         .catchUp()
         .catch(() => {})
-        .finally(() => {
-          if (!cancelled) queryClient.invalidateQueries({ queryKey: messagesQueryKey });
-        });
+        .finally(refreshWhenIdle);
     };
     run();
     const sub = AppState.addEventListener('change', (state) => {

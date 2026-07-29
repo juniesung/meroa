@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 
 import { env } from '../env.ts';
 import { logger } from '../logger.ts';
+import { secretsMatch } from '../lib/crypto.ts';
 import { runNotificationTick } from '../lib/notifications/tick.ts';
 
 // Internal, cron-driven endpoints. Not behind requireAuth (no user JWT) — guarded
@@ -14,8 +15,8 @@ internalRoutes.post('/tick', async (c) => {
   if (!env.CRON_SECRET) return c.json({ error: 'not_found' }, 404);
 
   const header = c.req.header('authorization');
-  const token = header?.startsWith('Bearer ') ? header.slice('Bearer '.length) : undefined;
-  if (token !== env.CRON_SECRET) return c.json({ error: 'unauthorized' }, 401);
+  const token = header?.startsWith('Bearer ') ? header.slice('Bearer '.length) : '';
+  if (!secretsMatch(token, env.CRON_SECRET)) return c.json({ error: 'unauthorized' }, 401);
 
   try {
     const result = await runNotificationTick();

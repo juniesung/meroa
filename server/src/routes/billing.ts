@@ -1,5 +1,3 @@
-import { timingSafeEqual } from 'node:crypto';
-
 import { eq } from 'drizzle-orm';
 import { Hono } from 'hono';
 
@@ -7,21 +5,11 @@ import { db } from '../db/client.ts';
 import { users } from '../db/schema.ts';
 import { env } from '../env.ts';
 import { syncEntitlementFromRevenueCat } from '../lib/billing/entitlement.ts';
+import { secretsMatch } from '../lib/crypto.ts';
 import { requireAuth, type AuthVariables } from '../middleware/auth.ts';
 import { logger } from '../logger.ts';
 
 export const billingRoutes = new Hono<{ Variables: AuthVariables }>();
-
-// Constant-time compare — a naive `===` on a webhook secret leaks its value
-// one byte at a time via response-time differences. Lengths differ almost
-// always (a wrong/missing header), so that case short-circuits to false
-// before ever calling timingSafeEqual (which throws on a length mismatch).
-function secretsMatch(a: string, b: string): boolean {
-  const bufA = Buffer.from(a);
-  const bufB = Buffer.from(b);
-  if (bufA.length !== bufB.length) return false;
-  return timingSafeEqual(bufA, bufB);
-}
 
 // users.id is a Postgres uuid — comparing it against a non-UUID string is a
 // type error at the DB level, not an empty result. RevenueCat's dashboard

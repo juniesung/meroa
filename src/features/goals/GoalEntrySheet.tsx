@@ -24,6 +24,13 @@ function GoalEntryForm({ goal, onDone }: { goal: ApiGoal; onDone: () => void }) 
       setError('Enter an amount.');
       return;
     }
+    // A savings contribution must be positive — 0/negative would corrupt the
+    // total (server rejects it too). Indirect goals log an absolute measurement,
+    // which may legitimately be zero or negative, so only gate savings.
+    if (goal.definition.type === 'savings' && n <= 0) {
+      setError('Enter an amount more than 0.');
+      return;
+    }
     setError(null);
     logEntry.mutate(
       { id: goal.id, patch: { amount: n, note: note.trim() || undefined } },

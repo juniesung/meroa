@@ -10,6 +10,16 @@ import type { ApiMessage } from '@/lib/api/types';
 
 export const messagesQueryKey = ['messages'] as const;
 
+// How many chat streams are currently writing the messages cache via optimistic
+// setQueryData. A getMessages refetch mid-stream would REPLACE the cache with a
+// server snapshot that lacks the in-flight assistant placeholder, so subsequent
+// deltas (targeting an id no longer present) get silently dropped and the reply
+// truncates. Background pollers (useDailyCatchUp) check this before invalidating.
+let activeStreamCount = 0;
+export function isChatStreaming(): boolean {
+  return activeStreamCount > 0;
+}
+
 export type ChatMessageStatus = 'sending' | 'streaming' | 'failed' | 'limit_reached';
 
 export type ChatMessage = ApiMessage & { status?: ChatMessageStatus };
@@ -136,6 +146,7 @@ export function useSendMessage() {
         else markFailed(status);
       };
 
+      activeStreamCount += 1;
       try {
         for await (const event of streamMessage(text)) {
           if (event.type === 'user_message') {
@@ -202,6 +213,8 @@ export function useSendMessage() {
         }
       } catch {
         failTurn('failed');
+      } finally {
+        activeStreamCount -= 1;
       }
     },
     [updateMessages, queryClient],
