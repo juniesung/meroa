@@ -4,6 +4,7 @@ import { Hono } from 'hono';
 import { db } from '../db/client.ts';
 import { users } from '../db/schema.ts';
 import { evaluateAchievements } from '../lib/achievements/evaluate.ts';
+import { buildAchievementsScreen } from '../lib/achievements/views.ts';
 import { buildProfileOverview } from '../lib/profile/overview.ts';
 import { requireAuth, type AuthVariables } from '../middleware/auth.ts';
 
@@ -32,4 +33,22 @@ profileRoutes.get('/overview', async (c) => {
 
   const overview = await buildProfileOverview(userId, user.timezone, user.createdAt);
   return c.json(overview);
+});
+
+// The dedicated Achievements screen — the full per-user catalog (globals +
+// per-goal + consistency) split into in-progress (nearest first) and earned
+// (newest first). Backfills earned tiers silently, same as /overview, so
+// opening the screen never queues a pile of historical congrats.
+profileRoutes.get('/achievements', async (c) => {
+  const userId = c.get('userId');
+  const [user] = await db
+    .select({ timezone: users.timezone })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+  if (!user) return c.json({ error: 'not_found' }, 404);
+
+  await evaluateAchievements(userId, user.timezone, db, { silent: true });
+  const screen = await buildAchievementsScreen(userId, user.timezone);
+  return c.json(screen);
 });

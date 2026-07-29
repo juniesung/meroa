@@ -4,20 +4,30 @@ import { Icon, type IconName } from '@/components/Icon';
 import { Progress } from '@/components/Progress';
 import { theme } from '@/constants/theme';
 import { banner3dStyle } from '@/lib/banner';
-import type { ApiAchievementKey, ApiAchievementView } from '@/lib/api/types';
+import { toIconName } from '@/lib/icon';
+import type { ApiAchievementView } from '@/lib/api/types';
 
-// Per-family identity: icon (mirrors server catalog.ts) + an accent. Colors are
-// chosen so tasks vs goals (and each family) read as distinct at a glance —
-// tasks blue, streak the warm flame, goals started purple, goals finished gold,
-// active days teal. The 3D extrude is the shared banner3dStyle (lib/banner.ts),
-// the same look task and goal cards use.
-const FAMILY: Record<ApiAchievementKey, { icon: IconName; accent: string }> = {
-  tasks_completed: { icon: 'check', accent: '#0A84FF' },
-  streak: { icon: 'flame', accent: '#FF9F0A' },
-  goals_started: { icon: 'sparkle', accent: '#BF5AF2' },
-  goals_finished: { icon: 'crown', accent: '#FFD60A' },
-  active_days: { icon: 'clock', accent: '#34C6C6' },
+// The icon now comes from the badge itself (server catalog is the source of
+// truth — per-goal families aren't in any fixed client map). The accent still
+// reads distinctly per family: the 5 globals keep their hand-picked colors,
+// everything else colors by category (per-goal green, consistency purple,
+// records gold). The 3D extrude is the shared banner3dStyle (lib/banner.ts).
+const GLOBAL_ACCENT: Record<string, string> = {
+  tasks_completed: '#0A84FF',
+  streak: '#FF9F0A',
+  goals_started: '#BF5AF2',
+  goals_finished: '#FFD60A',
+  active_days: '#34C6C6',
 };
+const CATEGORY_ACCENT: Record<string, string> = {
+  global: '#0A84FF',
+  goal: '#30D158',
+  consistency: '#BF5AF2',
+  record: '#FFD60A',
+};
+function accentFor(badge: ApiAchievementView): string {
+  return GLOBAL_ACCENT[badge.key] ?? CATEGORY_ACCENT[badge.category] ?? theme.blue;
+}
 
 // Three visual states:
 // - earned  → the full 3D colored banner (thick left/bottom edge + shadow).
@@ -27,11 +37,15 @@ const FAMILY: Record<ApiAchievementKey, { icon: IconName; accent: string }> = {
 // - untouched (count 0) → flat grey.
 // Framing is the user's own progress — never a bond with Meroa (CLAUDE.md §2).
 export function AchievementBadge({ badge }: { badge: ApiAchievementView }) {
-  const fam = FAMILY[badge.key];
+  const accent = accentFor(badge);
+  const iconName: IconName = toIconName(badge.icon);
   const earned = badge.earnedTier !== null;
   const started = !earned && badge.count > 0;
   const active = earned || started; // has color; untouched does not
-  const title = earned ? badge.earnedLabel! : (badge.nextLabel ?? '—');
+  // Globals show the punchy tier label ("Committed"); per-goal/consistency show
+  // the family title (the goal name) so the badge is identifiable at a glance.
+  const title =
+    badge.category === 'global' ? (earned ? badge.earnedLabel! : badge.nextLabel ?? '—') : badge.title;
   const hasNext = badge.nextThreshold !== null;
 
   const sub = earned
@@ -41,9 +55,9 @@ export function AchievementBadge({ badge }: { badge: ApiAchievementView }) {
     : `${badge.count} / ${badge.nextThreshold} ${badge.unit}`;
 
   const banner: ViewStyle = earned
-    ? banner3dStyle(fam.accent, { tint: fam.accent + '1A' })
+    ? banner3dStyle(accent, { tint: accent + '1A' })
     : started
-      ? { ...styles.tileOutlined, borderColor: fam.accent }
+      ? { ...styles.tileOutlined, borderColor: accent }
       : styles.tileUntouched;
 
   return (
@@ -51,10 +65,10 @@ export function AchievementBadge({ badge }: { badge: ApiAchievementView }) {
       <View
         style={[
           styles.chip,
-          { backgroundColor: earned ? fam.accent : started ? fam.accent + '22' : theme.card2 },
+          { backgroundColor: earned ? accent : started ? accent + '22' : theme.card2 },
         ]}
       >
-        <Icon name={fam.icon} size={20} color={earned ? '#fff' : started ? fam.accent : theme.faint} stroke={2.2} />
+        <Icon name={iconName} size={20} color={earned ? '#fff' : started ? accent : theme.faint} stroke={2.2} />
       </View>
       <Text style={[styles.title, !active && styles.titleUntouched]} numberOfLines={1}>
         {title}
@@ -65,7 +79,7 @@ export function AchievementBadge({ badge }: { badge: ApiAchievementView }) {
       {hasNext ? (
         <View style={styles.bar}>
           {/* Bar matches the family outline color (accent). */}
-          <Progress value={(badge.progressToNext ?? 0) * 100} color={fam.accent} />
+          <Progress value={(badge.progressToNext ?? 0) * 100} color={accent} />
         </View>
       ) : (
         <View style={styles.barSpacer} />

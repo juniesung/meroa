@@ -14,6 +14,7 @@ import {
   computeAchievementCounts,
   countTasksCompleted,
 } from '../achievements/evaluate.ts';
+import type { AchievementView } from '../achievements/views.ts';
 
 // The You-tab profile read (GET /profile/overview). Every number here is a
 // count over real, non-reverted records — the same figures the badges are
@@ -29,19 +30,11 @@ export type ProfileStats = {
   activeDays: number;
 };
 
-export type AchievementView = {
-  key: AchievementKey;
-  unit: string;
-  count: number;
-  // Highest earned tier's threshold+label, or null if none earned yet.
-  earnedTier: number | null;
-  earnedLabel: string | null;
-  earnedAt: string | null;
-  // The next locked tier (teaser) + progress toward it, or null once maxed.
-  nextThreshold: number | null;
-  nextLabel: string | null;
-  progressToNext: number | null; // 0..1
-};
+// AchievementView is shared with the dedicated Achievements screen
+// (lib/achievements/views.ts) so the client renders both surfaces with one
+// shape — key is a string (globals here, per-goal there) and every view carries
+// its own icon/title/category, so no client-side key→icon map is needed.
+export type { AchievementView };
 
 export type MonthRecap = {
   tasksCompleted: number;
@@ -93,7 +86,10 @@ export function assembleAchievements(
 
     return {
       key,
+      title: family.title,
       unit: family.unit,
+      icon: family.icon,
+      category: family.category,
       count,
       earnedTier: highestTier,
       earnedLabel: highestLabel,

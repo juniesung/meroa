@@ -24,6 +24,17 @@ export function useProfileOverview() {
   });
 }
 
+// Under the ['profile'] parent so it refreshes on the same task/goal/chat
+// mutations that already invalidate it (fresh earned + in-progress badges).
+export const achievementsQueryKey = ['profile', 'achievements'] as const;
+
+export function useAchievements() {
+  return useQuery({
+    queryKey: achievementsQueryKey,
+    queryFn: () => api.getAchievements(),
+  });
+}
+
 export function useUpdatePrefs() {
   const queryClient = useQueryClient();
   return useMutation({

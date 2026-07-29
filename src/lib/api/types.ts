@@ -324,16 +324,18 @@ export type ApiGoalConsistency = {
 // The You-tab profile surface (GET /profile/overview). Every number here is a
 // real count over non-reverted records — the server never fabricates. Streak
 // is NOT here (fetched via getGoalConsistency, reused unchanged).
-export type ApiAchievementKey =
-  | 'tasks_completed'
-  | 'streak'
-  | 'goals_started'
-  | 'goals_finished'
-  | 'active_days';
+export type ApiAchievementCategory = 'global' | 'goal' | 'consistency' | 'record';
 
+// `key` is a free string now: globals ('tasks_completed'…), per-goal
+// ('goal_streak:<id>'…), and consistency ('consistency:perfect_days'). Every
+// view carries its own icon/title/category so the client renders any family
+// without a key→icon map (server catalog is the source of truth).
 export type ApiAchievementView = {
-  key: ApiAchievementKey;
+  key: string;
+  title: string;
   unit: string;
+  icon: string;
+  category: ApiAchievementCategory;
   count: number;
   earnedTier: number | null;
   earnedLabel: string | null;
@@ -341,6 +343,12 @@ export type ApiAchievementView = {
   nextThreshold: number | null;
   nextLabel: string | null;
   progressToNext: number | null; // 0..1
+};
+
+// The dedicated Achievements screen (GET /profile/achievements).
+export type ApiAchievementsScreen = {
+  inProgress: ApiAchievementView[];
+  earned: ApiAchievementView[];
 };
 
 export type ApiProfileOverview = {

@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AchievementBadge } from '@/components/AchievementBadge';
@@ -10,7 +10,7 @@ import { theme } from '@/constants/theme';
 import { banner3dStyle } from '@/lib/banner';
 import { AnimatedPressable, useTapFeedback } from '@/components/AnimatedPressable';
 import { useGoalConsistency } from '@/features/goals/queries';
-import { useMe, useProfileOverview } from '@/features/profile/queries';
+import { useAchievements, useMe, useProfileOverview } from '@/features/profile/queries';
 import { useTabBarHeight } from '@/hooks/use-tab-bar-inset';
 
 function memberSinceLabel(iso: string): string {
@@ -30,11 +30,18 @@ export default function YouScreen() {
   const { data: me } = useMe();
   const overview = useProfileOverview();
   const consistency = useGoalConsistency();
+  const achievements = useAchievements();
   const gearFeedback = useTapFeedback();
 
   const loading = overview.isLoading || consistency.isLoading;
   const streak = consistency.data;
   const o = overview.data;
+
+  // Compact preview: the freshest earned badges, topped up with the closest
+  // in-progress ones — the full set (incl. per-goal) lives on the Achievements
+  // screen behind "See all".
+  const ach = achievements.data;
+  const achPreview = ach ? [...ach.earned, ...ach.inProgress].slice(0, 4) : [];
 
   // The phone (and the logo) now live behind the gear in Settings — the header
   // shows just the name, falling back to a neutral title rather than the raw
@@ -45,6 +52,7 @@ export default function YouScreen() {
   const onRefresh = () => {
     void overview.refetch();
     void consistency.refetch();
+    void achievements.refetch();
   };
 
   return (
@@ -126,12 +134,15 @@ export default function YouScreen() {
               </View>
             ) : null}
 
-            {/* Achievements — earned + locked teasers */}
-            {o ? (
+            {/* Achievements — a compact preview; the full set is one tap away */}
+            {achPreview.length > 0 ? (
               <View style={styles.section}>
-                <Text style={styles.sectionTitle}>ACHIEVEMENTS</Text>
+                <Pressable style={styles.sectionHeader} onPress={() => router.push('/achievements')} hitSlop={6}>
+                  <Text style={styles.sectionTitle}>ACHIEVEMENTS</Text>
+                  <Text style={styles.seeAll}>See all →</Text>
+                </Pressable>
                 <View style={styles.badgeGrid}>
-                  {o.achievements.map((b) => (
+                  {achPreview.map((b) => (
                     <AchievementBadge key={b.key} badge={b} />
                   ))}
                 </View>
@@ -229,6 +240,14 @@ const styles = StyleSheet.create({
   statLabel: { color: theme.faint, fontSize: 11 },
 
   section: { marginTop: 28 },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+    paddingHorizontal: 4,
+  },
+  seeAll: { color: theme.blue, fontSize: 12.5, fontWeight: '600' },
   sectionTitle: {
     color: theme.dim,
     fontSize: 11,

@@ -13,6 +13,7 @@ import type {
   ApiTask,
   ApiGoal,
   ApiGoalConsistency,
+  ApiAchievementsScreen,
   ApiProfileOverview,
   ApiGoalDetail,
   ApiGoalEntry,
@@ -336,6 +337,8 @@ export const api = {
   getGoalConsistency: () => request<ApiGoalConsistency>('/goals/consistency'),
 
   getProfileOverview: () => request<ApiProfileOverview>('/profile/overview'),
+
+  getAchievements: () => request<ApiAchievementsScreen>('/profile/achievements'),
 
   getGoal: (id: string) =>
     request<{ goal: ApiGoal; detail: ApiGoalDetail; entries: ApiGoalEntry[] }>(`/goals/${id}`),
