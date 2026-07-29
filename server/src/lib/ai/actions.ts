@@ -961,6 +961,23 @@ async function executeAiToolCallInner(
         if (!target.ok) return { ok: false, error: target.error };
         const hintCheck = await verifyTitleHint(userId, target.taskId, validated.data.titleHint);
         if (hintCheck) return { ok: false, error: hintCheck.error };
+        // Same structural ambiguity backstop as complete_task above: a
+        // progress_task is also an immediate, un-carded mutation (a counter
+        // increment can cross the done boundary and auto-log a goal
+        // contribution; a timer start/stop mutates state), so it must refuse
+        // and ask when the user's OWN words match more than one open task
+        // rather than guessing whichever ref the model picked.
+        if (userMessageText) {
+          const candidates = await listOpenTaskTitles(userId);
+          const ambiguity = findAmbiguousTaskMatch(userMessageText, candidates);
+          if (ambiguity) {
+            const titles = ambiguity.candidates.map((c) => `"${c.title}"`).join(' or ');
+            return {
+              ok: false,
+              error: `That could mean more than one task — ${titles} both match what the user said. Don't guess: call no_action and ask which one they mean.`,
+            };
+          }
+        }
         const { action } = validated.data;
         const input: ProgressInput =
           action === 'start_timer'

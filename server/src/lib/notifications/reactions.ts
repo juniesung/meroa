@@ -10,7 +10,7 @@ import { buildGoalCardSummaries } from '../goals/summary.ts';
 import type { GoalDefinition } from '../goals/schema.ts';
 import { composeProactiveMessage } from './proactive-message.ts';
 import { deliverThreadReachOut } from './dispatch.ts';
-import { alreadySent } from './policy.ts';
+import { alreadySent, withinFrequencyCap } from './policy.ts';
 import type { NotificationTrigger } from './triggers.ts';
 
 // "Meroa noticed" — event-driven, milestone-weighted reactions to something the
@@ -206,6 +206,13 @@ export function emitProgressBeat(userId: string, event: ReactionEvent): void {
         .where(eq(users.id, userId))
         .limit(1);
       if (!user) return;
+
+      // Every in-thread proactive message honors the user's frequency cap — the
+      // same one the cron tick enforces (CLAUDE.md §2 + the user's notificationCap
+      // override; a user who set perDay:0 wants zero proactive messages). Checked
+      // BEFORE evaluateAchievements so nothing gets markAnnounced-suppressed when
+      // over cap — the badge stays un-announced and surfaces on a later beat.
+      if (!(await withinFrequencyCap(userId, user.prefs as Record<string, unknown> | null, now))) return;
 
       const earned = await evaluateAchievements(userId, user.timezone);
       const top = mostSignificant(earned);

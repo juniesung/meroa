@@ -438,6 +438,10 @@ goalRoutes.post('/:id/restore', async (c) => {
     const { goal } = await restoreGoal(userId, id, { source: 'goal_ui' });
     return c.json({ goal });
   } catch (err) {
+    if (err instanceof LimitReachedError) {
+      const { status, body } = limitReachedBody(err);
+      return c.json(body, status);
+    }
     const { status, body } = actionErrorResponse(err);
     return c.json(body, status);
   }

@@ -1,10 +1,18 @@
-import { and, eq, isNull, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 
-import { achievements, records, tasks } from '../../db/schema.ts';
+import { achievements, goals, records, tasks } from '../../db/schema.ts';
 import { db } from '../../db/client.ts';
 import { buildGoalConsistency } from '../goals/consistency.ts';
 import { weekStartYmd } from '../tasks/recurrence.ts';
-import { earnedTiersOf, nextTierOf, type AchievementCategory, type AchievementFamily } from './catalog.ts';
+import {
+  earnedTiersOf,
+  goalProgressFamily,
+  goalStreakFamily,
+  goalTenureFamily,
+  nextTierOf,
+  type AchievementCategory,
+  type AchievementFamily,
+} from './catalog.ts';
 import { buildUserCatalog } from './user-catalog.ts';
 
 // A single achievement family shaped for display — the highest tier earned (if
@@ -114,6 +122,62 @@ function toView(
   };
 }
 
+// Per-goal family key → the builder that reconstructs its family from the goal's
+// name + icon. Used to resurrect earned badges for archived goals (whose live
+// families buildUserCatalog omits).
+const GOAL_FAMILY_BUILDERS: Record<string, (id: string, name: string, icon: string) => AchievementFamily> = {
+  goal_streak: goalStreakFamily,
+  goal_progress: goalProgressFamily,
+  goal_tenure: goalTenureFamily,
+};
+
+async function buildOrphanEarnedViews(
+  userId: string,
+  rows: { key: string; tier: number; earnedAt: Date }[],
+  presentKeys: Set<string>,
+  earnedAtByKeyTier: Map<string, Date>,
+): Promise<AchievementView[]> {
+  // Highest earned tier per orphaned per-goal key.
+  const maxTierByKey = new Map<string, number>();
+  for (const r of rows) {
+    if (presentKeys.has(r.key)) continue;
+    const [prefix, goalId] = splitGoalKey(r.key);
+    if (!prefix || !goalId || !GOAL_FAMILY_BUILDERS[prefix]) continue;
+    maxTierByKey.set(r.key, Math.max(maxTierByKey.get(r.key) ?? 0, r.tier));
+  }
+  if (maxTierByKey.size === 0) return [];
+
+  const goalIds = [...maxTierByKey.keys()].map((k) => splitGoalKey(k)[1]!).filter(Boolean);
+  const goalRows = await db
+    .select({ id: goals.id, name: goals.name, icon: goals.icon })
+    .from(goals)
+    .where(and(eq(goals.userId, userId), inArray(goals.id, goalIds)));
+  const goalById = new Map(goalRows.map((g) => [g.id, g]));
+
+  const out: AchievementView[] = [];
+  for (const [key, maxTier] of maxTierByKey) {
+    const [prefix, goalId] = splitGoalKey(key);
+    const goal = goalId ? goalById.get(goalId) : undefined;
+    if (!prefix || !goalId || !goal) continue; // hard-deleted goal → nothing to render
+    const family = GOAL_FAMILY_BUILDERS[prefix]!(goalId, goal.name, goal.icon ?? 'sparkle');
+    // Count = the highest earned threshold so the family renders earned at that
+    // tier (the live count is unavailable for an archived goal; the row IS the
+    // proof it was earned). Force it earned-only (no next/bar) — an archived
+    // goal has no live progress, so it must never surface in IN PROGRESS.
+    const v = toView(family, maxTier, earnedAtByKeyTier);
+    out.push({ ...v, nextThreshold: null, nextLabel: null, progressToNext: null });
+  }
+  return out;
+}
+
+// 'goal_streak:<uuid>' → ['goal_streak', '<uuid>']. Split on the FIRST ':' only
+// (a uuid has none, but keep it robust).
+function splitGoalKey(key: string): [string | null, string | null] {
+  const i = key.indexOf(':');
+  if (i < 0) return [null, null];
+  return [key.slice(0, i), key.slice(i + 1)];
+}
+
 /**
  * The dedicated Achievements screen: the full per-user catalog split into
  * in-progress (nearest first) and earned (newest first). Every number is
@@ -132,6 +196,16 @@ export async function buildAchievementsScreen(
   for (const r of rows) earnedAtByKeyTier.set(`${r.key}:${r.tier}`, r.earnedAt);
 
   const views = catalog.map(({ family, count }) => toView(family, count, earnedAtByKeyTier));
+
+  // A tier stays earned forever (schema.ts) — but the live catalog only
+  // instantiates per-goal families for ACTIVE goals (buildUserCatalog filters
+  // isNull(archivedAt)), so archiving a goal made its already-earned badges
+  // vanish from EARNED, turning the persisted rows into dead data. Rebuild an
+  // earned-only view for any persisted per-goal key with no live family, from
+  // the (archived) goal's own name/icon.
+  const presentKeys = new Set(catalog.map((c) => c.family.key));
+  const orphanViews = await buildOrphanEarnedViews(userId, rows, presentKeys, earnedAtByKeyTier);
+  views.push(...orphanViews);
 
   // Each section renders one thing: EARNED shows the completed tier (full badge,
   // no bar), IN PROGRESS shows the *next* tier you're working toward (outline +

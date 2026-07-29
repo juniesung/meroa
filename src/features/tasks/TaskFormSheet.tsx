@@ -150,6 +150,10 @@ function TaskFormBody({ task, onClose }: { task?: ApiTask; onClose: () => void }
     const c = (task?.config as { goalContribution?: number } | undefined)?.goalContribution;
     return c !== undefined ? String(c) : '';
   });
+  // Editing ONLY the amount (without re-tapping the goal chip) must still save.
+  // Mirrors dueTimeTouched — without it the edit branch dropped a changed
+  // contribution and every future completion kept logging the stale amount.
+  const [contributionTouched, setContributionTouched] = useState(false);
   const willRepeat = isTemplate || (!isEdit && recurrenceChoice !== 'none');
   const linkableGoals = goals.filter((g) => g.definition.type !== 'habit' || willRepeat);
   const selectedGoal = goalId ? goals.find((g) => g.id === goalId) : undefined;
@@ -224,7 +228,10 @@ function TaskFormBody({ task, onClose }: { task?: ApiTask; onClose: () => void }
         if (!Number.isFinite(n) || n <= 0) return;
         patch.targetMinutes = n;
       }
-      if (goalTouched) {
+      if (goalTouched || contributionTouched) {
+        // Server applies goalContribution only when goalId is present in the
+        // patch (executor.ts editTaskInTx), so always send the current goalId
+        // alongside a contribution-only change.
         patch.goalId = goalId;
         if (goalId && selectedGoalNeedsContribution) patch.goalContribution = Number(contribution);
       }
@@ -467,7 +474,10 @@ function TaskFormBody({ task, onClose }: { task?: ApiTask; onClose: () => void }
               <FieldLabel>AMOUNT PER COMPLETION</FieldLabel>
               <TextInput
                 value={contribution}
-                onChangeText={setContribution}
+                onChangeText={(t) => {
+                  setContribution(t);
+                  setContributionTouched(true);
+                }}
                 keyboardType="decimal-pad"
                 placeholder="5"
                 placeholderTextColor={theme.faint}

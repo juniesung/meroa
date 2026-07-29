@@ -9,6 +9,7 @@ import {
   type ActionSource,
   type TaskRow,
 } from '../tasks/executor.ts';
+import { computeActiveGoalAllowance, LimitReachedError } from '../limits.ts';
 import {
   applyStageOps,
   goalDefinitionSchema,
@@ -615,6 +616,14 @@ export async function restoreGoal(
       .limit(1);
     if (!goal) throw new GoalActionError('not_found', 'goal not found');
     if (!goal.archivedAt) throw new GoalActionError('invalid_input', 'that goal is not archived');
+
+    // Restoring brings the goal back into the ACTIVE set, so it must clear the
+    // same hard-paywall cap createGoal enforces (routes/goals.ts) — otherwise a
+    // lapsed user, or anyone already at the cap, could exceed it just by
+    // archiving then restoring. Checked inside this transaction (which already
+    // holds a row lock on the goal) so it can't race a concurrent create.
+    const allowance = await computeActiveGoalAllowance(tx, userId);
+    if (!allowance.allowed) throw new LimitReachedError('goals', allowance);
 
     // Restore exactly what THAT removal took, not everything currently
     // soft-deleted and linked — a task deleted separately before the goal

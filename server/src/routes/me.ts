@@ -24,6 +24,7 @@ import { runUserCatchUp } from '../lib/notifications/rituals.ts';
 import { resolvePlan } from '../lib/billing/plan.ts';
 import { AI_CONSENT_VERSION } from '../lib/constants.ts';
 import { ianaTimezoneSchema } from '../lib/timezone.ts';
+import { withUserLock } from '../lib/usage.ts';
 import { requireAuth, type AuthVariables } from '../middleware/auth.ts';
 
 export const meRoutes = new Hono<{ Variables: AuthVariables }>();
@@ -161,30 +162,34 @@ meRoutes.patch('/prefs', zValidator('json', prefsPatchSchema), async (c) => {
   const userId = c.get('userId');
   const patch = c.req.valid('json');
 
-  const [user] = await db
-    .select({ prefs: users.prefs })
-    .from(users)
-    .where(eq(users.id, userId))
-    .limit(1);
-  if (!user) return c.json({ error: 'not_found' }, 404);
+  // Read-merge-write of the prefs jsonb must be atomic, or two concurrent
+  // PATCHes both read the same baseline and the second write drops the first's
+  // change (a tone update clobbering a just-saved quiet-hours change). Serialize
+  // per-user under the same advisory lock the message/goal/task paths use, and
+  // re-read inside the lock so the merge is against current DB state.
+  const updated = await withUserLock(userId, async (tx) => {
+    const [user] = await tx
+      .select({ prefs: users.prefs })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
+    if (!user) return null;
 
-  const nextPrefs: Record<string, unknown> = { ...(user.prefs as Record<string, unknown>), ...patch };
-  // Server-stamp consent metadata — never trust a client-supplied timestamp or
-  // version (see the schema note above). Both grant and revoke are stamped, so
-  // the recorded `at` is always the moment of the real state change.
-  if (patch.aiConsent) {
-    nextPrefs.aiConsent = {
-      granted: patch.aiConsent.granted,
-      at: new Date().toISOString(),
-      version: AI_CONSENT_VERSION,
-    };
-  }
-  const [updated] = await db
-    .update(users)
-    .set({ prefs: nextPrefs })
-    .where(eq(users.id, userId))
-    .returning();
-  if (!updated) throw new Error('user_update_failed');
+    const nextPrefs: Record<string, unknown> = { ...(user.prefs as Record<string, unknown>), ...patch };
+    // Server-stamp consent metadata — never trust a client-supplied timestamp or
+    // version (see the schema note above). Both grant and revoke are stamped, so
+    // the recorded `at` is always the moment of the real state change.
+    if (patch.aiConsent) {
+      nextPrefs.aiConsent = {
+        granted: patch.aiConsent.granted,
+        at: new Date().toISOString(),
+        version: AI_CONSENT_VERSION,
+      };
+    }
+    const [row] = await tx.update(users).set({ prefs: nextPrefs }).where(eq(users.id, userId)).returning();
+    return row ?? null;
+  });
+  if (!updated) return c.json({ error: 'not_found' }, 404);
 
   return c.json({ prefs: updated.prefs });
 });

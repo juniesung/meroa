@@ -6,7 +6,7 @@ import { logger } from '../../logger.ts';
 import { resolveTone } from '../ai/system-prompt.ts';
 import { buildGoalCardSummaries } from '../goals/summary.ts';
 import { deliverThreadReachOut } from './dispatch.ts';
-import { alreadySent } from './policy.ts';
+import { alreadySent, withinFrequencyCap } from './policy.ts';
 import { composeProactiveMessage } from './proactive-message.ts';
 import type { NotificationTrigger, NotifyUser } from './triggers.ts';
 
@@ -180,6 +180,10 @@ export async function runUserCatchUp(userId: string, now: Date = new Date()): Pr
 
     async function deliver(trigger: NotificationTrigger): Promise<boolean> {
       if (await alreadySent(userId, trigger.dedupeKey)) return false;
+      // Honor the user's proactive-message frequency cap, same as the cron tick
+      // and the reaction beats — dedupe alone let a daily ritual + weekly recap
+      // reach a user who capped themselves lower (or at zero).
+      if (!(await withinFrequencyCap(userId, prefs, now))) return false;
       const chatBody = await composeProactiveMessage(trigger, tone);
       return deliverThreadReachOut(
         userId,
