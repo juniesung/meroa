@@ -376,6 +376,23 @@ export async function editTask(
       prior.goalId = task.goalId;
       updates.goalId = patch.goalId;
 
+      // Relinking (or unlinking) a done task AWAY from a previous savings goal:
+      // drop that goal's entry for this completion, or the same completion ends
+      // up credited to BOTH the old and the new goal. (Non-recurring case; a
+      // recurring series' per-instance entries are handled by their own
+      // reopen/complete path.) Hard delete mirrors the reopen path.
+      if (
+        task.goalId &&
+        task.goalId !== patch.goalId &&
+        !task.recurrence &&
+        task.status === 'done' &&
+        task.completedRecordId
+      ) {
+        await tx
+          .delete(goalEntries)
+          .where(and(eq(goalEntries.recordId, task.completedRecordId), eq(goalEntries.goalId, task.goalId)));
+      }
+
       if (patch.goalId === null) {
         if (patch.goalContribution !== undefined) {
           throw new TaskActionError(
@@ -1459,6 +1476,44 @@ async function undoTaskRecord(
           .returning();
         if (!t) throw new Error('task_update_failed');
         updated = t;
+
+        // Re-credit a savings auto-log when undoing a REOPEN restores the task
+        // to done. The reopen HARD-deleted the goal entry (keyed to the original
+        // completion record), and reverting the reopen record can't bring it
+        // back — so without this the task shows done while the goal is
+        // permanently under-counted. Idempotent (skips if an entry already
+        // exists) and savings-only (only savings links auto-log).
+        if (prior.status === 'done' && prior.completedRecordId && task.goalId) {
+          const contribution = (prior.config as { goalContribution?: number }).goalContribution;
+          if (typeof contribution === 'number' && contribution > 0) {
+            const [g] = await tx
+              .select({ archivedAt: goals.archivedAt, definition: goals.definition })
+              .from(goals)
+              .where(eq(goals.id, task.goalId))
+              .limit(1);
+            const isSavings = !!g && g.archivedAt === null && (g.definition as { type?: string }).type === 'savings';
+            if (isSavings) {
+              const [existing] = await tx
+                .select({ id: goalEntries.id })
+                .from(goalEntries)
+                .where(and(eq(goalEntries.recordId, prior.completedRecordId), eq(goalEntries.goalId, task.goalId)))
+                .limit(1);
+              if (!existing) {
+                const [origRec] = await tx
+                  .select({ occurredAt: records.occurredAt })
+                  .from(records)
+                  .where(eq(records.id, prior.completedRecordId))
+                  .limit(1);
+                await tx.insert(goalEntries).values({
+                  goalId: task.goalId,
+                  recordId: prior.completedRecordId,
+                  data: { amount: contribution },
+                  entryAt: origRec?.occurredAt ?? new Date(),
+                });
+              }
+            }
+          }
+        }
         break;
       }
       case 'task_edited': {
