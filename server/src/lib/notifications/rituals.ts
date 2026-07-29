@@ -99,7 +99,15 @@ async function buildWeeklyRecap(
 ): Promise<NotificationTrigger | null> {
   const weekAgo = new Date(now.getTime() - 7 * DAY_MS);
   const [doneRow] = await db
-    .select({ n: sql<number>`count(*)::int` })
+    .select({
+      // DISTINCT taskId, not count(*): a task toggled done->reopen->done writes
+      // a mark_done record each time, so count(*) counted check-off EVENTS and
+      // "42 tasks" really meant "42 completions across 14 tasks" — a misleading
+      // number. Distinct tasks is the honest "tasks you completed this week"
+      // (a recurring task's daily instances are distinct ids, so they still each
+      // count once per day, which is correct).
+      n: sql<number>`count(distinct ${records.payload}->>'taskId')::int`,
+    })
     .from(records)
     .where(
       and(
