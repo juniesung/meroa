@@ -27,7 +27,7 @@ import {
   TaskActionError,
   undoLastAction,
 } from '../lib/tasks/executor.ts';
-import { emitReaction } from '../lib/notifications/reactions.ts';
+import { emitProgressBeat } from '../lib/notifications/reactions.ts';
 import { withUserLock } from '../lib/usage.ts';
 
 export const taskRoutes = new Hono<{ Variables: AuthVariables }>();
@@ -192,7 +192,7 @@ taskRoutes.post('/:id/complete', zValidator('json', completeSchema), async (c) =
     // milestone; buildReactionTrigger no-ops on the rest anyway, but gating here
     // skips the work for plain to-do completions (the common case).
     if (task.status === 'done' && task.goalId) {
-      emitReaction(userId, { type: 'task_completed', taskId: task.id });
+      emitProgressBeat(userId, { type: 'task_completed', taskId: task.id });
     }
     return c.json({ task });
   } catch (err) {

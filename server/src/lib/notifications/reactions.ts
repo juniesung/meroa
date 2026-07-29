@@ -3,6 +3,8 @@ import { and, eq, gte, isNull, like, sql } from 'drizzle-orm';
 import { db } from '../../db/client.ts';
 import { goals, notificationsLog, tasks, users } from '../../db/schema.ts';
 import { logger } from '../../logger.ts';
+import { congratsLine } from '../achievements/copy.ts';
+import { evaluateAchievements, markAnnounced, mostSignificant } from '../achievements/evaluate.ts';
 import { resolveTone } from '../ai/system-prompt.ts';
 import { buildGoalCardSummaries } from '../goals/summary.ts';
 import type { GoalDefinition } from '../goals/schema.ts';
@@ -178,15 +180,23 @@ export async function buildReactionTrigger(
 }
 
 /**
- * Fire-and-forget "Meroa noticed" reaction for an app-originated mutation. Call
- * it right AFTER the mutation commits, WITHOUT awaiting — it must never block or
- * fail the request (a reaction is a nicety; the write already succeeded). It
- * composes on its own microtask, so completing a task never waits on a model
- * call. Gated by: a per-day reaction cap, a real milestone in buildReactionTrigger,
- * and per-milestone dedupe (alreadySent + the claim inside deliverThreadReachOut).
- * Thread-only in v1 (no push) — the message sits in the chat thread for next open.
+ * Fire-and-forget "Meroa noticed" beat for an app-originated (Tasks/Goals-tab)
+ * mutation. Call it right AFTER the mutation commits, WITHOUT awaiting — it must
+ * never block or fail the request. Delivers at most ONE beat:
+ *
+ *  1. If the mutation earned an achievement, celebrate the most significant one
+ *     in Meroa's voice (deterministic congratsLine — no model call). This is the
+ *     "Meroa voice for tab-earned achievements" — chat-earned ones are already
+ *     announced by routes/messages.ts.
+ *  2. Otherwise fall back to a plain "you hit 50%" reaction (LLM-composed).
+ *
+ * Achievement first because it's the richer beat AND often celebrates the SAME
+ * crossing (a goal_progress tier vs a progress reaction) — firing both would
+ * double-message. Cross-path double-earn is already impossible: the achievements
+ * unique (user,key,tier) insert means whichever path evaluates first is the only
+ * one that gets a row back to announce.
  */
-export function emitReaction(userId: string, event: ReactionEvent): void {
+export function emitProgressBeat(userId: string, event: ReactionEvent): void {
   void (async () => {
     try {
       const now = new Date();
@@ -196,6 +206,26 @@ export function emitReaction(userId: string, event: ReactionEvent): void {
         .where(eq(users.id, userId))
         .limit(1);
       if (!user) return;
+
+      const earned = await evaluateAchievements(userId, user.timezone);
+      const top = mostSignificant(earned);
+      if (top) {
+        const delivered = await deliverThreadReachOut(
+          userId,
+          {
+            kind: `achievement_${top.family.category}`,
+            dedupeKey: `achievement:${top.key}:${top.tier}`,
+            chatBody: congratsLine(top),
+            data: { route: 'you' },
+          },
+          { push: false },
+        );
+        // Stamp all newly-earned so no other path re-announces them (we chose to
+        // celebrate one and suppress the rest, same as the chat-turn path).
+        if (delivered) await markAnnounced(userId, earned);
+        return;
+      }
+
       if (!(await withinReactionCap(userId, now))) return;
       const trigger = await buildReactionTrigger(userId, event, user.timezone, now);
       if (!trigger) return;
@@ -210,7 +240,7 @@ export function emitReaction(userId: string, event: ReactionEvent): void {
         { push: false },
       );
     } catch (err) {
-      logger.warn({ err, userId }, 'reaction emit failed');
+      logger.warn({ err, userId }, 'progress beat failed');
     }
   })();
 }
