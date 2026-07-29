@@ -345,10 +345,14 @@ export type ApiAchievementView = {
   progressToNext: number | null; // 0..1
 };
 
+// A self-referential personal best (most in a day, longest streak, best week).
+export type ApiPersonalRecord = { key: string; label: string; value: number; unit: string; icon: string };
+
 // The dedicated Achievements screen (GET /profile/achievements).
 export type ApiAchievementsScreen = {
   inProgress: ApiAchievementView[];
   earned: ApiAchievementView[];
+  records: ApiPersonalRecord[];
 };
 
 export type ApiProfileOverview = {

@@ -7,6 +7,8 @@ import { Icon } from '@/components/Icon';
 import { SkeletonBlock } from '@/components/Skeleton';
 import { theme } from '@/constants/theme';
 import { useAchievements } from '@/features/profile/queries';
+import { toIconName } from '@/lib/icon';
+import type { ApiPersonalRecord } from '@/lib/api/types';
 
 // The full Achievements surface (off the You tab's "See all"). Everything is the
 // user's OWN real progress — earned marks an earned transition, in-progress is
@@ -42,6 +44,18 @@ export default function AchievementsScreen() {
           </View>
         ) : (
           <>
+            {data && data.records.length > 0 ? (
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>PERSONAL RECORDS</Text>
+                <Text style={styles.sectionHint}>Your own bests — always there to beat.</Text>
+                <View style={styles.recordRow}>
+                  {data.records.map((r) => (
+                    <RecordCard key={r.key} record={r} />
+                  ))}
+                </View>
+              </View>
+            ) : null}
+
             {data && data.inProgress.length > 0 ? (
               <View style={styles.section}>
                 <Text style={styles.sectionTitle}>IN PROGRESS</Text>
@@ -75,6 +89,21 @@ export default function AchievementsScreen() {
   );
 }
 
+function RecordCard({ record }: { record: ApiPersonalRecord }) {
+  return (
+    <View style={styles.recordCard}>
+      <View style={styles.recordChip}>
+        <Icon name={toIconName(record.icon)} size={16} color={theme.blue} stroke={2.2} />
+      </View>
+      <Text style={styles.recordValue}>{record.value}</Text>
+      <Text style={styles.recordUnit}>{record.unit}</Text>
+      <Text style={styles.recordLabel} numberOfLines={1}>
+        {record.label}
+      </Text>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: theme.bg },
   header: {
@@ -99,4 +128,26 @@ const styles = StyleSheet.create({
   sectionHint: { color: theme.faint, fontSize: 12.5, paddingHorizontal: 4, marginTop: 4, marginBottom: 12 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, justifyContent: 'space-between' },
   empty: { color: theme.dim, fontSize: 13.5, lineHeight: 19, marginTop: 10, paddingHorizontal: 4 },
+  recordRow: { flexDirection: 'row', gap: 10 },
+  recordCard: {
+    flex: 1,
+    backgroundColor: theme.card,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: theme.border,
+    padding: 12,
+    gap: 2,
+  },
+  recordChip: {
+    width: 32,
+    height: 32,
+    borderRadius: 9,
+    backgroundColor: 'rgba(10,132,255,0.14)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 4,
+  },
+  recordValue: { color: theme.text, fontSize: 22, fontWeight: '800' },
+  recordUnit: { color: theme.dim, fontSize: 12 },
+  recordLabel: { color: theme.faint, fontSize: 11.5, marginTop: 2 },
 });
