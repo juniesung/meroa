@@ -1,14 +1,13 @@
 import { and, isNull, sql } from 'drizzle-orm';
 
 import { db } from '../../db/client.ts';
-import { messages, pushTokens, users } from '../../db/schema.ts';
+import { pushTokens, users } from '../../db/schema.ts';
 import { logger } from '../../logger.ts';
-import { getOrCreateAppConversation } from '../conversations.ts';
 import { resolveTone } from '../ai/system-prompt.ts';
 import { composeNotificationBody } from './compose.ts';
+import { deliverThreadReachOut } from './dispatch.ts';
 import { composeProactiveMessage } from './proactive-message.ts';
 import { alreadySent, isWithinQuietHours, withinFrequencyCap } from './policy.ts';
-import { claimNotification, deliverPush } from './send.ts';
 import { buildTrigger, type NotifyUser } from './triggers.ts';
 
 // How many opted-in users to scan per tick, and how many to process at once.
@@ -85,41 +84,18 @@ export async function runNotificationTick(now: Date = new Date()): Promise<TickR
         composeProactiveMessage(trigger, tone),
       ]);
 
-      // Atomically claim the trigger BEFORE anything user-visible. If a
-      // concurrent tick already claimed it, we produce neither a chat message
-      // nor a push — a missed reach-out is cheaper than a duplicate one.
-      const claimed = await claimNotification(user.id, {
-        kind: trigger.kind,
-        title: 'Meroa',
-        body: pushBody,
-        dedupeKey: trigger.dedupeKey,
-      });
-      if (!claimed) return;
-
-      // Meroa reaches out FIRST: the real message lands in the chat thread, so
-      // opening the app shows it already there. The push is just the alert that
-      // pulls them in to read and reply — the reply is an ordinary turn from
-      // there. The reach-out has succeeded once the message is in the thread,
-      // whether or not push delivery (a blocked dev-build dependency) lands.
-      const conversation = await getOrCreateAppConversation(user.id);
-      // Use `proactiveKind`, NOT `kind`: `meta.kind` is a reserved history
-      // classification field (routes/messages.ts isCardMessage / historyContentFor).
-      // A proactive message is plain prose, so it must not carry a `kind` that
-      // could ever be mistaken for a card/pending marker.
-      await db.insert(messages).values({
-        conversationId: conversation.id,
-        role: 'assistant',
-        content: chatBody,
-        meta: { proactive: true, proactiveKind: trigger.kind },
-      });
-      sent++;
-
-      await deliverPush(user.id, {
-        kind: trigger.kind,
-        title: 'Meroa',
-        body: pushBody,
-        data: trigger.data,
-      });
+      // Meroa reaches out FIRST: the real message lands in the chat thread (so
+      // opening the app shows it already there) and the push is just the alert
+      // that pulls them in. deliverThreadReachOut claims atomically before
+      // either, so a lost race produces neither. The reach-out has succeeded
+      // once the message is in the thread, whether or not push delivery (a
+      // blocked dev-build dependency) lands.
+      const delivered = await deliverThreadReachOut(
+        user.id,
+        { kind: trigger.kind, dedupeKey: trigger.dedupeKey, pushBody, chatBody, data: trigger.data },
+        { push: true },
+      );
+      if (delivered) sent++;
     } catch (err) {
       // One user's failure never stops the tick for everyone else.
       logger.warn({ err, userId: user.id }, 'notification tick: per-user failure');

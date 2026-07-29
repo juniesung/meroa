@@ -27,6 +27,7 @@ import {
   TaskActionError,
   undoLastAction,
 } from '../lib/tasks/executor.ts';
+import { emitReaction } from '../lib/notifications/reactions.ts';
 import { withUserLock } from '../lib/usage.ts';
 
 export const taskRoutes = new Hono<{ Variables: AuthVariables }>();
@@ -186,6 +187,13 @@ taskRoutes.post('/:id/complete', zValidator('json', completeSchema), async (c) =
   const input = c.req.valid('json');
   try {
     const { task } = await completeTask(userId, id, input, { source: 'tasks_ui' });
+    // "Meroa noticed" — fire-and-forget (never awaited, never blocks the
+    // response). Only a genuine completion of a goal-linked task can cross a
+    // milestone; buildReactionTrigger no-ops on the rest anyway, but gating here
+    // skips the work for plain to-do completions (the common case).
+    if (task.status === 'done' && task.goalId) {
+      emitReaction(userId, { type: 'task_completed', taskId: task.id });
+    }
     return c.json({ task });
   } catch (err) {
     const { status, body } = actionErrorResponse(err);

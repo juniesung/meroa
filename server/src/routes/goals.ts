@@ -18,6 +18,7 @@ import {
   GoalActionError,
 } from '../lib/goals/executor.ts';
 import { computeActiveGoalAllowance, limitReachedBody, LimitReachedError } from '../lib/limits.ts';
+import { emitReaction } from '../lib/notifications/reactions.ts';
 import { withUserLock } from '../lib/usage.ts';
 import {
   buildGoalDefinition,
@@ -365,6 +366,8 @@ goalRoutes.post('/:id/advance', zValidator('json', advanceSchema), async (c) => 
       .update(messages)
       .set({ meta: { ...meta, advancedRecordId: updated.id } })
       .where(eq(messages.id, proposalMessageId));
+    // "Meroa noticed" — fire-and-forget reaction to the new stage.
+    emitReaction(userId, { type: 'stage_advanced', goalId: id });
     return c.json({ goal: updated, tasks }, 201);
   } catch (err) {
     const { status, body } = actionErrorResponse(err);
@@ -403,6 +406,9 @@ goalRoutes.post('/:id/entries', zValidator('json', logGoalEntryPatchSchema), asy
 
   try {
     const { goal, entry } = await logGoalEntry(userId, id, { ...patch, entryAt }, { source: 'goal_ui' });
+    // "Meroa noticed" — fire-and-forget; reacts only if this entry crossed a
+    // progress milestone (buildReactionTrigger no-ops otherwise).
+    emitReaction(userId, { type: 'goal_entry', goalId: id });
     return c.json({ goal, entry }, 201);
   } catch (err) {
     const { status, body } = actionErrorResponse(err);

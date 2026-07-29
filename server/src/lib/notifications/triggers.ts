@@ -27,7 +27,12 @@ export type NotificationKind =
   | 'stalled_task'
   | 'stale_goal'
   | 'broken_streak'
-  | 'loose_thread';
+  | 'loose_thread'
+  // Event-driven "Meroa noticed" reactions to a milestone hit OUTSIDE chat
+  // (Tasks/Goals tab), built in reactions.ts rather than the cron sweep.
+  | 'reaction_progress'
+  | 'reaction_streak'
+  | 'reaction_stage';
 
 export type NotificationTrigger = {
   kind: NotificationKind;
