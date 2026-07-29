@@ -5,7 +5,6 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { AchievementBadge } from '@/components/AchievementBadge';
 import { Heatmap } from '@/components/Heatmap';
 import { Icon } from '@/components/Icon';
-import { MeroaMark } from '@/components/MeroaMark';
 import { SkeletonBlock } from '@/components/Skeleton';
 import { theme } from '@/constants/theme';
 import { banner3dStyle } from '@/lib/banner';
@@ -37,7 +36,10 @@ export default function YouScreen() {
   const streak = consistency.data;
   const o = overview.data;
 
-  const displayName = me?.user.displayName ?? me?.user.phoneE164 ?? '—';
+  // The phone (and the logo) now live behind the gear in Settings — the header
+  // shows just the name, falling back to a neutral title rather than the raw
+  // phone number.
+  const displayName = me?.user.displayName?.trim() || 'Your profile';
 
   const refreshing = overview.isRefetching || consistency.isRefetching;
   const onRefresh = () => {
@@ -67,15 +69,16 @@ export default function YouScreen() {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.dim} />
         }
       >
-        {/* Hero — identity, about the user */}
-        <View style={styles.hero}>
-          <MeroaMark size={64} glow />
-          <Text style={styles.name}>{displayName}</Text>
-          {me?.user.displayName ? <Text style={styles.sub}>{me.user.phoneE164}</Text> : null}
-          <View style={styles.pill}>
-            <Text style={styles.pillText}>{me?.entitlement.plan === 'plus' ? 'Member' : 'Meroa'}</Text>
+        {/* Header — same eyebrow + big-title shape as the Tasks and Goals tabs */}
+        <View style={styles.headerRow}>
+          <Text style={styles.eyebrow}>YOU</Text>
+          <Text style={styles.h1}>{displayName}</Text>
+          <View style={styles.identityMeta}>
+            <View style={styles.pill}>
+              <Text style={styles.pillText}>{me?.entitlement.plan === 'plus' ? 'Member' : 'Meroa'}</Text>
+            </View>
+            {o ? <Text style={styles.memberSince}>{memberSinceLabel(o.memberSince)}</Text> : null}
           </View>
-          {o ? <Text style={styles.memberSince}>{memberSinceLabel(o.memberSince)}</Text> : null}
         </View>
 
         {loading ? (
@@ -183,18 +186,19 @@ const styles = StyleSheet.create({
   gearSpacer: { flex: 1 },
   gearButton: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
 
-  hero: { alignItems: 'center', gap: 6, marginTop: 4 },
-  name: { color: theme.text, fontSize: 22, fontWeight: '700', marginTop: 8 },
-  sub: { color: theme.dim, fontSize: 13 },
+  // Matches the Tasks/Goals tab header (eyebrow + 26/700 big title).
+  headerRow: { marginTop: 4 },
+  eyebrow: { color: theme.dim, fontSize: 11, fontWeight: '700', letterSpacing: 1.2 },
+  h1: { color: theme.text, fontSize: 26, fontWeight: '700', letterSpacing: -0.5, marginTop: 4 },
+  identityMeta: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 10 },
   pill: {
-    marginTop: 4,
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 999,
     backgroundColor: 'rgba(10,132,255,0.14)',
   },
   pillText: { color: theme.blue, fontSize: 12, fontWeight: '600' },
-  memberSince: { color: theme.faint, fontSize: 12, marginTop: 2 },
+  memberSince: { color: theme.faint, fontSize: 12 },
 
   card: {
     backgroundColor: theme.card,

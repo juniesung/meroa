@@ -7,6 +7,7 @@ import { Alert, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 're
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Icon } from '@/components/Icon';
+import { MeroaMark } from '@/components/MeroaMark';
 import { Row } from '@/components/Row';
 import { theme } from '@/constants/theme';
 import { haptics } from '@/lib/haptics';
@@ -163,6 +164,22 @@ export default function SettingsScreen() {
       </View>
 
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 20, paddingBottom: 60 }}>
+        {/* Identity — the logo + phone number, moved here off the You tab. */}
+        <View style={styles.identity}>
+          <MeroaMark size={56} glow />
+          <Text style={styles.identityName}>
+            {data?.user.displayName?.trim() || data?.user.phoneE164 || '—'}
+          </Text>
+          {data?.user.displayName ? (
+            <Text style={styles.identitySub}>{data.user.phoneE164}</Text>
+          ) : null}
+          <View style={styles.identityPill}>
+            <Text style={styles.identityPillText}>
+              {data?.entitlement.plan === 'plus' ? 'Member' : 'Meroa'}
+            </Text>
+          </View>
+        </View>
+
         <Section title="PERSONALITY">
           <Row
             icon="sparkle"
@@ -253,6 +270,17 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: theme.bg },
+  identity: { alignItems: 'center', gap: 6, marginBottom: 20 },
+  identityName: { color: theme.text, fontSize: 20, fontWeight: '700', marginTop: 8 },
+  identitySub: { color: theme.dim, fontSize: 13 },
+  identityPill: {
+    marginTop: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
+    backgroundColor: 'rgba(10,132,255,0.14)',
+  },
+  identityPillText: { color: theme.blue, fontSize: 12, fontWeight: '600' },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
