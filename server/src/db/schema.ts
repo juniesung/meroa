@@ -425,10 +425,11 @@ export const achievements = pgTable(
     // A tier is earned once, forever — makes evaluateAchievements' insert
     // idempotent under concurrent evaluation of the same crossing.
     uniqueIndex('achievements_user_key_tier_unique').on(t.userId, t.key, t.tier),
-    check(
-      'achievements_key_check',
-      sql`${t.key} in ('tasks_completed','streak','goals_started','goals_finished','active_days')`,
-    ),
+    // No key CHECK: keys are now dynamic (per-goal `goal_streak:<id>` etc.,
+    // consistency:*) and always code-generated from the achievement catalog,
+    // never user input — a DB enum would just have to grow with every new
+    // family. The catalog (lib/achievements/catalog.ts + user-catalog.ts) is
+    // the single source of truth for what's earnable.
   ],
 );
 

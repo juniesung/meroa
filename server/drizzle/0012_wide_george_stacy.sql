@@ -1,0 +1,1 @@
+ALTER TABLE "achievements" DROP CONSTRAINT "achievements_key_check";

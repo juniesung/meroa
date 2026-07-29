@@ -73,14 +73,18 @@ export function assembleAchievements(
   for (const r of earnedRows) earnedAtByKeyTier.set(`${r.key}:${r.tier}`, r.earnedAt);
 
   return ACHIEVEMENT_CATALOG.map((family) => {
-    const count = counts[family.key];
-    const earnedTiers = earnedThresholds(family.key, count);
+    // ACHIEVEMENT_CATALOG holds only the static global families here, whose keys
+    // are AchievementKeys — the You-tab overview stays globals-only (the dynamic
+    // per-goal families live on the dedicated Achievements screen).
+    const key = family.key as AchievementKey;
+    const count = counts[key];
+    const earnedTiers = earnedThresholds(key, count);
     const highestTier = earnedTiers.length ? Math.max(...earnedTiers) : null;
     const highestLabel =
       highestTier !== null ? (family.tiers.find((t) => t.threshold === highestTier)?.label ?? null) : null;
-    const earnedAt = highestTier !== null ? earnedAtByKeyTier.get(`${family.key}:${highestTier}`) ?? null : null;
+    const earnedAt = highestTier !== null ? earnedAtByKeyTier.get(`${key}:${highestTier}`) ?? null : null;
 
-    const next = nextTier(family.key, count);
+    const next = nextTier(key, count);
     // Progress is absolute (count / next threshold) so the bar matches the
     // "count / next" label shown on the badge — e.g. "1 / 3" reads as a third
     // full, not empty (which a band-relative fill would show right after
@@ -88,7 +92,7 @@ export function assembleAchievements(
     const progressToNext = next ? Math.max(0, Math.min(1, count / next.threshold)) : null;
 
     return {
-      key: family.key,
+      key,
       unit: family.unit,
       count,
       earnedTier: highestTier,

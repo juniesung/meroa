@@ -1,16 +1,22 @@
-// The achievement catalog — pure data, no I/O. The single place that defines
-// which badges exist, their tiers, and their copy. Kept out of the DB (the
-// `achievements` row stores only key+tier) so labels/icons can change without
-// a migration, and so evaluate.ts and the /profile/overview read share one
-// definition of "what's earnable."
+// The achievement catalog. The single place that defines what's earnable, its
+// tiers, and its copy. The `achievements` row stores only key+tier, so labels/
+// icons/tiers can change without a migration.
 //
-// Design is deliberately narrow (CLAUDE.md §2 + the retention research): every
-// tier marks an EARNED TRANSITION from real recorded activity — there is no
-// badge for merely opening the app or showing up, because participation badges
-// test as hollow. Tiers escalate in difficulty (research: retention rises with
-// achievement difficulty), and every family maps to a count computed in SQL
-// from real records, never a fabricated number.
+// Two shapes of family now coexist:
+//   - STATIC globals (below), keyed by AchievementKey — account-wide counts.
+//   - DYNAMIC per-goal / consistency families, INSTANTIATED per user by
+//     lib/achievements/user-catalog.ts (goal name woven into the title, goal id
+//     in the key). This is how achievements feel "custom" without an LLM ever
+//     inventing one: the definitions are code, the numbers are SQL, only the
+//     instantiation is per-user.
+//
+// Design is deliberate (CLAUDE.md §2 + retention research): every tier marks an
+// EARNED TRANSITION from real recorded activity — no badge for merely opening
+// the app. Tiers escalate in difficulty (retention rises with difficulty), and
+// every family maps to a count computed in SQL, never a fabricated number.
 
+// The static, account-wide families. Per-goal/consistency keys are dynamic
+// strings (see user-catalog.ts) and deliberately NOT in this union.
 export type AchievementKey =
   | 'tasks_completed'
   | 'streak'
@@ -18,27 +24,35 @@ export type AchievementKey =
   | 'goals_finished'
   | 'active_days';
 
+export type AchievementCategory = 'global' | 'goal' | 'consistency' | 'record';
+
 export type AchievementTier = {
   // The threshold that earns this tier — the same integer stored in
-  // achievements.tier. Also the value a count is compared against.
+  // achievements.tier, and the value a count is compared against.
   threshold: number;
-  // Shown on the badge itself.
   label: string;
-  // Icon name from the client's stroke-SVG set (components/Icon.tsx). Chosen
-  // per family; the tier doesn't change the icon, only brightness/earned state.
+  // Icon name from the client's stroke-SVG set. Kept per-tier for back-compat;
+  // display uses the family-level `icon` (all tiers in a family share it).
   icon: string;
 };
 
 export type AchievementFamily = {
-  key: AchievementKey;
-  // What the family measures, shown as the badge's sub-line / the locked
-  // teaser's goal ("Complete 50 tasks").
+  // AchievementKey for globals; a namespaced string for dynamic families
+  // (`goal_streak:<id>`, `goal_progress:<id>`, `goal_tenure:<id>`,
+  // `consistency:perfect_days`).
+  key: string;
+  // Display title — for a dynamic family the goal name is woven in
+  // ("Meditation streak"). Shown on the badge / teaser.
+  title: string;
+  // What the family measures ("day streak", "% funded") — the badge sub-line.
   unit: string;
-  tiers: AchievementTier[];
+  // Family-level icon (server sends this to the client so per-goal families
+  // render without a client-side key→icon map).
+  icon: string;
+  category: AchievementCategory;
+  tiers: AchievementTier[]; // ascending threshold
 };
 
-// Icons reuse the existing set (components/Icon.tsx): check, flame, sparkle,
-// crown are all already drawn there.
 // Tiers are layered on purpose (research: retention rises with achievement
 // difficulty, so pair an accessible early tier with progressively harder ones).
 // More tiers per family also means there's almost always a *close* next target
@@ -46,7 +60,10 @@ export type AchievementFamily = {
 export const ACHIEVEMENT_CATALOG: AchievementFamily[] = [
   {
     key: 'tasks_completed',
+    title: 'Tasks completed',
     unit: 'tasks completed',
+    icon: 'check',
+    category: 'global',
     tiers: [
       { threshold: 1, label: 'First step', icon: 'check' },
       { threshold: 5, label: 'Warming up', icon: 'check' },
@@ -60,7 +77,10 @@ export const ACHIEVEMENT_CATALOG: AchievementFamily[] = [
   },
   {
     key: 'streak',
+    title: 'Daily streak',
     unit: 'day streak',
+    icon: 'flame',
+    category: 'global',
     tiers: [
       { threshold: 3, label: 'Three in a row', icon: 'flame' },
       { threshold: 7, label: 'Week one', icon: 'flame' },
@@ -74,7 +94,10 @@ export const ACHIEVEMENT_CATALOG: AchievementFamily[] = [
   },
   {
     key: 'goals_started',
+    title: 'Goals started',
     unit: 'goals started',
+    icon: 'sparkle',
+    category: 'global',
     tiers: [
       { threshold: 1, label: 'First goal', icon: 'sparkle' },
       { threshold: 3, label: 'Three going', icon: 'sparkle' },
@@ -84,7 +107,10 @@ export const ACHIEVEMENT_CATALOG: AchievementFamily[] = [
   },
   {
     key: 'goals_finished',
+    title: 'Goals finished',
     unit: 'goals finished',
+    icon: 'crown',
+    category: 'global',
     tiers: [
       { threshold: 1, label: 'Finisher', icon: 'crown' },
       { threshold: 3, label: 'Serial finisher', icon: 'crown' },
@@ -94,7 +120,10 @@ export const ACHIEVEMENT_CATALOG: AchievementFamily[] = [
   },
   {
     key: 'active_days',
+    title: 'Active days',
     unit: 'active days',
+    icon: 'clock',
+    category: 'global',
     tiers: [
       { threshold: 3, label: 'Getting the habit', icon: 'clock' },
       { threshold: 7, label: 'Showing up', icon: 'clock' },
@@ -107,7 +136,7 @@ export const ACHIEVEMENT_CATALOG: AchievementFamily[] = [
 ];
 
 const BY_KEY = new Map<AchievementKey, AchievementFamily>(
-  ACHIEVEMENT_CATALOG.map((f) => [f.key, f]),
+  ACHIEVEMENT_CATALOG.map((f) => [f.key as AchievementKey, f]),
 );
 
 export function familyFor(key: AchievementKey): AchievementFamily {
@@ -120,22 +149,96 @@ export function tierFor(key: AchievementKey, threshold: number): AchievementTier
   return familyFor(key).tiers.find((t) => t.threshold === threshold);
 }
 
-/**
- * Pure: given a family and the user's current real count, return every tier
- * threshold that count has reached. The one place "earned?" is decided — both
- * the evaluator (what to insert) and any display code share it, so they can
- * never disagree about where the line is.
- */
-export function earnedThresholds(key: AchievementKey, count: number): number[] {
-  return familyFor(key)
-    .tiers.filter((t) => count >= t.threshold)
-    .map((t) => t.threshold);
+// --- pure tier logic, family-based (works for globals AND dynamic families) --
+
+/** Every tier threshold this count has reached, ascending. */
+export function earnedTiersOf(family: AchievementFamily, count: number): number[] {
+  return family.tiers.filter((t) => count >= t.threshold).map((t) => t.threshold);
 }
 
-/**
- * Pure: the next unearned tier for a family given the current count, or null if
- * every tier is earned. Drives the locked/teaser badge + its progress bar.
- */
-export function nextTier(key: AchievementKey, count: number): AchievementTier | null {
-  return familyFor(key).tiers.find((t) => count < t.threshold) ?? null;
+/** The next unearned tier for this count, or null once every tier is earned. */
+export function nextTierOf(family: AchievementFamily, count: number): AchievementTier | null {
+  return family.tiers.find((t) => count < t.threshold) ?? null;
 }
+
+// Key-based wrappers over the global families — kept so catalog.test.ts and the
+// profile read keep their existing call shape. Both delegate to the family-based
+// core above, so the "earned?" line is defined in exactly one place.
+export function earnedThresholds(key: AchievementKey, count: number): number[] {
+  return earnedTiersOf(familyFor(key), count);
+}
+export function nextTier(key: AchievementKey, count: number): AchievementTier | null {
+  return nextTierOf(familyFor(key), count);
+}
+
+// --- dynamic (per-user) family builders -----------------------------------
+// Instantiated by user-catalog.ts. Keys are namespaced and stable so an earned
+// row survives even after the goal is deleted (append-only: you earned it).
+
+const tier = (threshold: number, label: string, icon: string): AchievementTier => ({ threshold, label, icon });
+
+/** A habit goal's own streak (earned off its longest run, like the global one). */
+export function goalStreakFamily(goalId: string, goalName: string, icon: string): AchievementFamily {
+  return {
+    key: `goal_streak:${goalId}`,
+    title: `${goalName} streak`,
+    unit: 'day streak',
+    icon,
+    category: 'goal',
+    tiers: [
+      tier(7, 'A week of it', icon),
+      tier(30, 'A month of it', icon),
+      tier(100, '100 days', icon),
+      tier(365, 'A full year', icon),
+    ],
+  };
+}
+
+/** A savings / measured goal's progress toward its target, in percent. */
+export function goalProgressFamily(goalId: string, goalName: string, icon: string): AchievementFamily {
+  return {
+    key: `goal_progress:${goalId}`,
+    title: goalName,
+    unit: '% there',
+    icon,
+    category: 'goal',
+    tiers: [
+      tier(25, 'A quarter of the way', icon),
+      tier(50, 'Halfway', icon),
+      tier(75, 'Three quarters', icon),
+      tier(100, 'Reached it', icon),
+    ],
+  };
+}
+
+/** How long the user has kept a goal going (months since it was created). */
+export function goalTenureFamily(goalId: string, goalName: string, icon: string): AchievementFamily {
+  return {
+    key: `goal_tenure:${goalId}`,
+    title: `Kept ${goalName} going`,
+    unit: 'months',
+    icon,
+    category: 'goal',
+    tiers: [
+      tier(1, 'One month in', icon),
+      tier(3, 'Three months', icon),
+      tier(6, 'Half a year', icon),
+      tier(12, 'A whole year', icon),
+    ],
+  };
+}
+
+/** Account-wide "perfect days" — days every due task got done. */
+export const consistencyFamily: AchievementFamily = {
+  key: 'consistency:perfect_days',
+  title: 'Perfect days',
+  unit: 'days you finished everything due',
+  icon: 'sparkle',
+  category: 'consistency',
+  tiers: [
+    tier(3, 'Three perfect days', 'sparkle'),
+    tier(10, 'Ten perfect days', 'sparkle'),
+    tier(30, 'Thirty perfect days', 'sparkle'),
+    tier(100, 'A hundred perfect days', 'sparkle'),
+  ],
+};

@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest';
 
-import { earnedThresholds, nextTier, tierFor } from './catalog.ts';
+import {
+  earnedThresholds,
+  earnedTiersOf,
+  goalProgressFamily,
+  goalStreakFamily,
+  goalTenureFamily,
+  nextTier,
+  nextTierOf,
+  tierFor,
+} from './catalog.ts';
 
 describe('earnedThresholds', () => {
   it('earns every tier at or below the count', () => {
@@ -47,5 +56,29 @@ describe('tierFor', () => {
 
   it('is undefined for a threshold that is not a real tier', () => {
     expect(tierFor('tasks_completed', 42)).toBeUndefined();
+  });
+});
+
+describe('dynamic per-goal families', () => {
+  it('instantiate namespaced keys with the goal name woven into the title', () => {
+    const g = 'a1b2';
+    expect(goalStreakFamily(g, 'Meditation', 'flame')).toMatchObject({
+      key: 'goal_streak:a1b2',
+      title: 'Meditation streak',
+      category: 'goal',
+      icon: 'flame',
+    });
+    expect(goalProgressFamily(g, 'Trip to Japan', 'wallet').key).toBe('goal_progress:a1b2');
+    expect(goalProgressFamily(g, 'Trip to Japan', 'wallet').title).toBe('Trip to Japan');
+    expect(goalTenureFamily(g, 'Reading', 'book').title).toBe('Kept Reading going');
+  });
+
+  it('tier math works family-based, same as the global helpers', () => {
+    const fam = goalProgressFamily('x', 'Bike', 'wallet'); // tiers 25/50/75/100
+    expect(earnedTiersOf(fam, 24)).toEqual([]);
+    expect(earnedTiersOf(fam, 40)).toEqual([25]);
+    expect(earnedTiersOf(fam, 100)).toEqual([25, 50, 75, 100]);
+    expect(nextTierOf(fam, 40)?.threshold).toBe(50);
+    expect(nextTierOf(fam, 100)).toBeNull();
   });
 });

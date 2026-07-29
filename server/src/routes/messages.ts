@@ -836,7 +836,7 @@ messageRoutes.post('/', rateLimit({ windowMs: 60_000, max: 20 }), zValidator('js
                   .values({
                     conversationId: conversation.id,
                     role: 'assistant',
-                    content: congratsLine(top.key, top.tier),
+                    content: congratsLine(top),
                     meta: { actionAck: true },
                   })
                   .returning();

@@ -253,6 +253,30 @@ export async function buildGoalConsistency(
   };
 }
 
+/**
+ * All-time count of "perfect days" — calendar days (in the user's tz) where at
+ * least one task was due and every due task got done. Powers the consistency
+ * achievement. Unlike buildGoalConsistency's calendar (windowed for the
+ * heatmap), this scans the whole history. Grace doesn't apply — a perfect day is
+ * simply due===done, and re-completing a task can't inflate it (status, not
+ * records).
+ */
+export async function countPerfectDays(userId: string, timezone: string | null): Promise<number> {
+  const tz = timezone ?? 'UTC';
+  const rows = await db
+    .select({ dueAt: tasks.dueAt, status: tasks.status })
+    .from(tasks)
+    .where(and(eq(tasks.userId, userId), isNull(tasks.deletedAt), isNull(tasks.recurrence)));
+  const dueRows: TaskDueRow[] = rows
+    .filter((r) => r.dueAt !== null)
+    .map((r) => ({ dueYmd: ymdInTz(r.dueAt!, tz), status: r.status }));
+  let perfect = 0;
+  for (const bucket of bucketTasksByDay(dueRows).values()) {
+    if (bucket.verdict === 'perfect') perfect += 1;
+  }
+  return perfect;
+}
+
 export type GoalStreak = { current: number; longest: number; doneCount: number };
 
 /**
