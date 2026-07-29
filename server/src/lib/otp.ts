@@ -55,23 +55,34 @@ export type VerifyOtpResult = { ok: true } | { ok: false; status: 400 | 429; err
 // signup side effect (unlike the app verify route). Increments attempts on a
 // wrong code and consumes on success, exactly as the app path does.
 export async function verifyAndConsumeOtp(phone: string, code: string): Promise<VerifyOtpResult> {
-  const [candidate] = await db
-    .select()
-    .from(otpCodes)
-    .where(
-      and(eq(otpCodes.phoneE164, phone), isNull(otpCodes.consumedAt), gt(otpCodes.expiresAt, new Date())),
-    )
-    .orderBy(desc(otpCodes.createdAt))
-    .limit(1);
+  // Serialize verifies for the same phone under the SAME per-phone advisory lock
+  // as issuance. The attempts counter is the only brute-force protection on this
+  // path (there's no IP/global verify rate limit), and it was a read-modify-write
+  // on a value read before the update — 100k concurrent guesses all read
+  // attempts=0 and all wrote attempts=1, so the cap never advanced and the guess
+  // budget against one code jumped from 5 to unbounded. The lock makes the
+  // read → check → increment/consume atomic.
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${phone})::bigint)`);
 
-  if (!candidate) return { ok: false, status: 400, error: 'no_pending_code' };
-  if (candidate.attempts >= OTP_MAX_ATTEMPTS) return { ok: false, status: 429, error: 'too_many_attempts' };
+    const [candidate] = await tx
+      .select()
+      .from(otpCodes)
+      .where(
+        and(eq(otpCodes.phoneE164, phone), isNull(otpCodes.consumedAt), gt(otpCodes.expiresAt, new Date())),
+      )
+      .orderBy(desc(otpCodes.createdAt))
+      .limit(1);
 
-  if (candidate.codeHash !== hashWithPepper(code)) {
-    await db.update(otpCodes).set({ attempts: candidate.attempts + 1 }).where(eq(otpCodes.id, candidate.id));
-    return { ok: false, status: 400, error: 'invalid_code' };
-  }
+    if (!candidate) return { ok: false, status: 400, error: 'no_pending_code' };
+    if (candidate.attempts >= OTP_MAX_ATTEMPTS) return { ok: false, status: 429, error: 'too_many_attempts' };
 
-  await db.update(otpCodes).set({ consumedAt: new Date() }).where(eq(otpCodes.id, candidate.id));
-  return { ok: true };
+    if (candidate.codeHash !== hashWithPepper(code)) {
+      await tx.update(otpCodes).set({ attempts: candidate.attempts + 1 }).where(eq(otpCodes.id, candidate.id));
+      return { ok: false, status: 400, error: 'invalid_code' };
+    }
+
+    await tx.update(otpCodes).set({ consumedAt: new Date() }).where(eq(otpCodes.id, candidate.id));
+    return { ok: true };
+  });
 }

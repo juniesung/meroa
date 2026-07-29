@@ -177,6 +177,12 @@ function GoalFormBody({ goal, onClose }: { goal?: ApiGoal; onClose: () => void }
     setStages((prev) => {
       const target = index + dir;
       if (target < 0 || target >= prev.length) return prev;
+      // On edit, stages[0..activeStageIndex] are the LIVED prefix — rename-only,
+      // never reorderable (the server keeps activeStageIndex fixed and can't
+      // detect a reorder). A swap that touches that prefix would relabel the
+      // active stage over unchanged tasks and wipe the stage swapped into a
+      // future slot. Reject any swap whose lower endpoint is in the prefix.
+      if (isEdit && Math.min(index, target) <= activeStageIndex) return prev;
       const next = [...prev];
       [next[index], next[target]] = [next[target]!, next[index]!];
       return next;
@@ -477,7 +483,7 @@ function GoalFormBody({ goal, onClose }: { goal?: ApiGoal; onClose: () => void }
                 onRename={(t) => renameStage(stage.id, t)}
                 onRemove={isEdit && i <= activeStageIndex ? undefined : () => removeStage(stage.id)}
                 onMoveUp={isEdit && i <= activeStageIndex ? undefined : () => moveStage(i, -1)}
-                onMoveDown={isEdit && i < activeStageIndex ? undefined : () => moveStage(i, 1)}
+                onMoveDown={isEdit && i <= activeStageIndex ? undefined : () => moveStage(i, 1)}
                 onAddTask={(title) => addStageTask(stage.id, title)}
                 onRemoveTask={(taskId) => removeStageTask(stage.id, taskId)}
                 onToggleTaskDaily={(taskId) => toggleStageTaskDaily(stage.id, taskId)}

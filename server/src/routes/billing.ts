@@ -66,12 +66,23 @@ billingRoutes.post('/webhook', async (c) => {
   }
 
   const body = (await c.req.json().catch(() => null)) as {
-    event?: { app_user_id?: string; transferred_from?: string[]; type?: string };
+    event?: { app_user_id?: string; transferred_from?: string[]; transferred_to?: string[]; type?: string };
   } | null;
   const event = body?.event;
-  if (!event?.app_user_id) return c.json({ ok: true });
+  if (!event) return c.json({ ok: true });
 
-  const idsToSync = [event.app_user_id, ...(event.type === 'TRANSFER' ? event.transferred_from ?? [] : [])];
+  // A TRANSFER event carries NO app_user_id — only transferred_from/_to arrays.
+  // Gating on app_user_id (as this once did) dropped every transfer on the
+  // floor, so the account that LOST the subscription was never re-synced and
+  // kept premium for free until its stale expiry passed. Sync every id the
+  // event names: the losers (to downgrade) and the gainers (to grant).
+  const idsToSync =
+    event.type === 'TRANSFER'
+      ? [...(event.transferred_from ?? []), ...(event.transferred_to ?? [])]
+      : event.app_user_id
+        ? [event.app_user_id]
+        : [];
+  if (idsToSync.length === 0) return c.json({ ok: true });
 
   for (const appUserId of idsToSync) {
     if (appUserId.startsWith('$RCAnonymousID:')) {

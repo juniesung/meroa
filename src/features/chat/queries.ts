@@ -111,6 +111,31 @@ export function useSendMessage() {
         );
       };
 
+      // Once the server has persisted the user turn (user_message) and/or run a
+      // real, side-effecting action, a naive resend is UNSAFE: the server keys
+      // idempotency on the user-message id, so a retry (new id) duplicates the
+      // user row (#18) and re-executes every already-succeeded action — a second
+      // task, a second $20 logged (#9). In that case we do NOT offer "tap to
+      // retry"; we drop the dangling placeholder, clear the sending state, and
+      // refetch so the thread shows the true server state (whatever landed).
+      let userPersisted = false;
+      let turnHadAction = false;
+      const reconcileFromServer = () => {
+        const droppedAssistantId = currentAssistantId;
+        const settledUserId = currentUserId;
+        updateMessages((prev) =>
+          prev
+            .filter((m) => m.id !== droppedAssistantId)
+            .map((m) => (m.id === settledUserId ? { ...m, status: undefined } : m)),
+        );
+        queryClient.invalidateQueries({ queryKey: messagesQueryKey });
+      };
+      // A post-persist failure can't be a naive resend — reconcile instead.
+      const failTurn = (status: ChatMessageStatus) => {
+        if (userPersisted || turnHadAction) reconcileFromServer();
+        else markFailed(status);
+      };
+
       try {
         for await (const event of streamMessage(text)) {
           if (event.type === 'user_message') {
@@ -118,6 +143,7 @@ export function useSendMessage() {
             const tempId = currentUserId;
             updateMessages((prev) => prev.map((m) => (m.id === tempId ? persisted : m)));
             currentUserId = persisted.id;
+            userPersisted = true;
           } else if (event.type === 'delta') {
             const assistantId = currentAssistantId;
             updateMessages((prev) =>
@@ -143,6 +169,7 @@ export function useSendMessage() {
               placeholderAssistantMessage(nextId),
             ]);
             currentAssistantId = nextId;
+            turnHadAction = true;
             // Same record, two views (CLAUDE.md §2) — the Tasks/Goals tab
             // must reflect this the instant the card appears in chat. Both
             // prefixes always: a task_action on a goal-linked task auto-logs
@@ -162,7 +189,7 @@ export function useSendMessage() {
             const danglingId = currentAssistantId;
             updateMessages((prev) => prev.filter((m) => m.id !== danglingId));
           } else if (event.type === 'error') {
-            markFailed('failed');
+            failTurn('failed');
           } else if (event.type === 'limit_reached') {
             markFailed('limit_reached');
           } else if (event.type === 'consent_required') {
@@ -174,7 +201,7 @@ export function useSendMessage() {
           }
         }
       } catch {
-        markFailed('failed');
+        failTurn('failed');
       }
     },
     [updateMessages, queryClient],
