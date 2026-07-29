@@ -188,10 +188,10 @@ taskRoutes.post('/:id/complete', zValidator('json', completeSchema), async (c) =
   try {
     const { task } = await completeTask(userId, id, input, { source: 'tasks_ui' });
     // "Meroa noticed" — fire-and-forget (never awaited, never blocks the
-    // response). Only a genuine completion of a goal-linked task can cross a
-    // milestone; buildReactionTrigger no-ops on the rest anyway, but gating here
-    // skips the work for plain to-do completions (the common case).
-    if (task.status === 'done' && task.goalId) {
+    // response). Fire on ANY completion, not just goal-linked: a plain to-do
+    // can still earn a global/consistency/personal-record badge worth
+    // celebrating. The reaction fallback inside no-ops when there's no goal.
+    if (task.status === 'done') {
       emitProgressBeat(userId, { type: 'task_completed', taskId: task.id });
     }
     return c.json({ task });
@@ -207,6 +207,12 @@ taskRoutes.post('/:id/progress', zValidator('json', progressInputSchema), async 
   const input = c.req.valid('json');
   try {
     const { task } = await progressTask(userId, id, input, { source: 'tasks_ui' });
+    // A counter/duration task reaching its target completes via this route, not
+    // /complete — so it earns badges too. Only when it's now done (not on every
+    // increment); evaluate is idempotent if it's already been celebrated.
+    if (task.status === 'done') {
+      emitProgressBeat(userId, { type: 'task_completed', taskId: task.id });
+    }
     return c.json({ task });
   } catch (err) {
     const { status, body } = actionErrorResponse(err);
