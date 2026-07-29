@@ -49,36 +49,36 @@ export default function YouScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
-      <View style={styles.topBar}>
-        <View style={styles.gearSpacer} />
-        <AnimatedPressable
-          onPress={() => router.push('/settings')}
-          onPressIn={gearFeedback.onPressIn}
-          onPressOut={gearFeedback.onPressOut}
-          style={[styles.gearButton, gearFeedback.animatedStyle]}
-          hitSlop={8}
-        >
-          <Icon name="gear" size={22} color={theme.dim} stroke={1.8} />
-        </AnimatedPressable>
-      </View>
-
       <ScrollView
         style={{ flex: 1 }}
-        contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: tabBarHeight + 40 }}
+        contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 12, paddingBottom: tabBarHeight + 40 }}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.dim} />
         }
       >
-        {/* Header — same eyebrow + big-title shape as the Tasks and Goals tabs */}
+        {/* Header — same eyebrow + big-title shape and top position as the Tasks
+            and Goals tabs, with the settings gear level with the title. */}
         <View style={styles.headerRow}>
-          <Text style={styles.eyebrow}>YOU</Text>
-          <Text style={styles.h1}>{displayName}</Text>
-          <View style={styles.identityMeta}>
-            <View style={styles.pill}>
-              <Text style={styles.pillText}>{me?.entitlement.plan === 'plus' ? 'Member' : 'Meroa'}</Text>
-            </View>
-            {o ? <Text style={styles.memberSince}>{memberSinceLabel(o.memberSince)}</Text> : null}
+          <View style={{ flex: 1 }}>
+            <Text style={styles.eyebrow}>YOU</Text>
+            <Text style={styles.h1}>{displayName}</Text>
           </View>
+          <AnimatedPressable
+            onPress={() => router.push('/settings')}
+            onPressIn={gearFeedback.onPressIn}
+            onPressOut={gearFeedback.onPressOut}
+            style={[styles.gearButton, gearFeedback.animatedStyle]}
+            hitSlop={8}
+          >
+            <Icon name="gear" size={22} color={theme.dim} stroke={1.8} />
+          </AnimatedPressable>
+        </View>
+
+        <View style={styles.identityMeta}>
+          <View style={styles.pill}>
+            <Text style={styles.pillText}>{me?.entitlement.plan === 'plus' ? 'Member' : 'Meroa'}</Text>
+          </View>
+          {o ? <Text style={styles.memberSince}>{memberSinceLabel(o.memberSince)}</Text> : null}
         </View>
 
         {loading ? (
@@ -182,12 +182,11 @@ function Stat({ value, label }: { value: number; label: string }) {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: theme.bg },
-  topBar: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 6 },
-  gearSpacer: { flex: 1 },
   gearButton: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
 
-  // Matches the Tasks/Goals tab header (eyebrow + 26/700 big title).
-  headerRow: { marginTop: 4 },
+  // Matches the Tasks/Goals tab header (eyebrow + 26/700 big title); the gear
+  // sits on the right, vertically centered so it's level with the title.
+  headerRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   eyebrow: { color: theme.dim, fontSize: 11, fontWeight: '700', letterSpacing: 1.2 },
   h1: { color: theme.text, fontSize: 26, fontWeight: '700', letterSpacing: -0.5, marginTop: 4 },
   identityMeta: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 10 },
