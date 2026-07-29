@@ -367,7 +367,7 @@ export const AI_TOOLS: Anthropic.Tool[] = [
             required: ['title'],
           },
           description:
-            'Proposed starter tasks (up to 5). For a savings goal: optional, e.g. a daily "Save $5" — only when a natural next action is obvious from what the user said; each completion auto-logs its contribution, never a separate log_goal_entry for the same amount. For a HABIT goal: required, exactly the recurring check-in task ("Meditate 10 min") — the streak counts that task and completing it IS the check-in. Its recurrence must match the cadence the user actually described: daily for "every day", weekly with byWeekday for "3x a week" or "every Monday and Thursday", every_n_days for "every other day". Only use daily when they said something that actually means daily — a habit does not have to be daily. For an INDIRECT goal: optional, supporting activity only ("go for a run") — never carries a contribution, and completing it never logs a measurement (only log_goal_entry does that). For a MILESTONE goal: optional, and only the tasks the USER stated for the FIRST milestone in the same message — never ones you thought of, and never call no_action to go fetch them; if they didn\'t say any, omit this and the card just shows the stage with no starter tasks yet (they add tasks in the Goals tab). Never carries a contribution — a milestone goal never logs a number from a task. Never invent a schedule, amount, or time the user didn\'t give (a plain "daily" gets no time field).',
+            'Proposed starter tasks (up to 5). For a savings goal: usually OMIT these. Only add a savings starter when the user EXPLICITLY states a per-deposit amount ("save $20 each week", "put in 50 a month") — then set that starter\'s `contribution` to exactly that amount. If they only gave a target ("save $200 for raves") with no per-deposit amount, add NO starter task at all — never invent a deposit amount to fill one in, and never add a starter whose contribution you had to make up. A savings starter with no contribution is rejected outright (completing it would move nothing), so the choice is always: real stated amount, or no starter. Each completion auto-logs its contribution, never a separate log_goal_entry for the same amount. For a HABIT goal: required, exactly the recurring check-in task ("Meditate 10 min") — the streak counts that task and completing it IS the check-in. Its recurrence must match the cadence the user actually described: daily for "every day", weekly with byWeekday for "3x a week" or "every Monday and Thursday", every_n_days for "every other day". Only use daily when they said something that actually means daily — a habit does not have to be daily. For an INDIRECT goal: optional, supporting activity only ("go for a run") — never carries a contribution, and completing it never logs a measurement (only log_goal_entry does that). For a MILESTONE goal: optional, and only the tasks the USER stated for the FIRST milestone in the same message — never ones you thought of, and never call no_action to go fetch them; if they didn\'t say any, omit this and the card just shows the stage with no starter tasks yet (they add tasks in the Goals tab). Never carries a contribution — a milestone goal never logs a number from a task. Never invent a schedule, amount, or time the user didn\'t give (a plain "daily" gets no time field).',
         },
       },
       required: ['type', 'name'],
@@ -553,34 +553,48 @@ export const OPENAI_AI_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = AI_
 // executed against the DB — the orchestrator treats it as "skip to the
 // narrate pass."
 export const NO_ACTION_TOOL_NAME = 'no_action';
-export const OPENAI_ACTION_PASS_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
-  ...OPENAI_AI_TOOLS,
-  {
-    type: 'function',
-    function: {
-      name: NO_ACTION_TOOL_NAME,
-      description:
-        "The user's newest message requires no task/goal action this turn — it's conversation, a question, a status check, feelings, or something a reply alone should handle (including asking for a missing required detail). Call this instead of guessing at an action.",
-      parameters: {
-        type: 'object',
-        properties: {
-          reason: {
-            type: 'string',
-            description:
-              'Why nothing was called — and, when the reply needs to ask the user something, exactly what it must ask. The reply pass sees only this string, never your reasoning, so name the real candidates or the missing value outright. Examples: "ambiguous — \'water\' matches both \'Water the plants\' and \'Water filter change\'; ask which one they mean", "savings goal has no target amount; ask for it", "just conversation, nothing to do".',
-          },
-          intent: {
-            type: 'string',
-            enum: ['conversation', 'unfulfilled'],
-            description:
-              'Did the user\'s newest message ask for ANY task or goal action at all? "conversation" = no, there is nothing here to create, complete, log, remove, or track — a greeting, small talk, venting, a feeling, a question about you. "unfulfilled" = they wanted something done and you could not do it (a number is missing, the reference is ambiguous, intent is only a "maybe", a card is pending), OR they mentioned their tasks/goals at all (reporting progress, asking about it). When in doubt, choose "unfulfilled" — that is the cautious answer.',
-          },
+const NO_ACTION_TOOL: OpenAI.Chat.Completions.ChatCompletionTool = {
+  type: 'function',
+  function: {
+    name: NO_ACTION_TOOL_NAME,
+    description:
+      "The user's newest message requires no task/goal action this turn — it's conversation, a question, a status check, feelings, or something a reply alone should handle (including asking for a missing required detail). Call this instead of guessing at an action.",
+    parameters: {
+      type: 'object',
+      properties: {
+        reason: {
+          type: 'string',
+          description:
+            'Why nothing was called — and, when the reply needs to ask the user something, exactly what it must ask. The reply pass sees only this string, never your reasoning, so name the real candidates or the missing value outright. Examples: "ambiguous — \'water\' matches both \'Water the plants\' and \'Water filter change\'; ask which one they mean", "savings goal has no target amount; ask for it", "just conversation, nothing to do".',
         },
-        required: ['reason', 'intent'],
+        intent: {
+          type: 'string',
+          enum: ['conversation', 'unfulfilled'],
+          description:
+            'Did the user\'s newest message ask for ANY task or goal action at all? "conversation" = no, there is nothing here to create, complete, log, remove, or track — a greeting, small talk, venting, a feeling, a question about you. "unfulfilled" = they wanted something done and you could not do it (a number is missing, the reference is ambiguous, intent is only a "maybe", a card is pending), OR they mentioned their tasks/goals at all (reporting progress, asking about it). When in doubt, choose "unfulfilled" — that is the cautious answer.',
+        },
       },
+      required: ['reason', 'intent'],
     },
   },
+};
+export const OPENAI_ACTION_PASS_TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
+  ...OPENAI_AI_TOOLS,
+  NO_ACTION_TOOL,
 ];
+
+// The quick-create ("+" sheet) toolsets: ONE create tool (matching which tab's
+// "+" was tapped) plus the no_action escape (used here strictly to ASK for a
+// missing required field, never "just conversation" — see
+// CREATE_MODE_ACTION_PROMPT). Restricting to a single create tool is what makes
+// the "+" predictable: the Tasks "+" always makes a task, the Goals "+" always
+// makes a goal — no create-vs-talk branch and no cross-entity drift (e.g.
+// "stretch every morning" on the Tasks tab becoming a habit *goal*).
+function createPassTools(toolName: 'create_task' | 'create_goal'): OpenAI.Chat.Completions.ChatCompletionTool[] {
+  return [...OPENAI_AI_TOOLS.filter((t) => t.type === 'function' && t.function.name === toolName), NO_ACTION_TOOL];
+}
+export const OPENAI_CREATE_TASK_PASS_TOOLS = createPassTools('create_task');
+export const OPENAI_CREATE_GOAL_PASS_TOOLS = createPassTools('create_goal');
 
 // taskRef: a turn-scoped alias ("T2"), never a raw database id — resolved
 // server-side against the current TurnRefs map (lib/ai/actions.ts) before

@@ -141,10 +141,15 @@ export const goalDefinitionSchema = z.discriminatedUnion('type', [
 export type GoalDefinition = z.infer<typeof goalDefinitionSchema>;
 
 // A starter task proposed alongside the goal. For savings, `contribution`
-// is the amount completing it auto-logs (docs/goals-redesign-plan.md §2.3);
-// for habit there's no amount — the completion itself is the check-in, so
-// contribution stays unset (the auto-entry hook requires a numeric
-// contribution and correctly logs nothing without one).
+// is the amount completing it auto-logs (docs/goals-redesign-plan.md §2.3) and
+// is REQUIRED whenever a savings starter is present (enforced in
+// refineCreateGoalParams) — a savings starter without it links to the goal but
+// logs nothing on completion, the "Save $20 that does nothing" bug. For habit
+// there's no amount — the completion itself is the check-in, so contribution
+// stays unset (the auto-entry hook requires a numeric contribution and
+// correctly logs nothing without one). Optional at the field level here because
+// habit/indirect/milestone starters must NOT carry one; the per-type refine is
+// what makes it required for savings and forbidden for the rest.
 export const starterTaskSchema = z
   .object({
     title: z.string().trim().min(1).max(80),
@@ -225,6 +230,20 @@ function refineCreateGoalParams(params: CreateGoalParamsInput, ctx: z.Refinement
         message: 'a savings goal has no stages — that field is milestone-only',
       });
     }
+    // A savings starter task exists to auto-log on completion, so it MUST carry
+    // the amount it logs — otherwise it links to the goal but moves nothing when
+    // completed (a "Save $20" task that does nothing). Mirrors the create_task
+    // savings-link guard (lib/tasks/executor.ts); without it, goals/executor.ts
+    // silently drops the contribution and the completion is a no-op.
+    (params.starterTasks ?? []).forEach((st, i) => {
+      if (st.contribution === undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['starterTasks', i, 'contribution'],
+          message: `savings starter task "${st.title}" must carry the amount each completion logs — use the amount the user stated (e.g. "Save $20" means 20), or omit the starter task entirely. Never invent a number.`,
+        });
+      }
+    });
     return;
   }
   if (params.type === 'habit') {

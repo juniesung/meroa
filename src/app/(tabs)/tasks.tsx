@@ -11,9 +11,11 @@ import { LoadError } from '@/components/LoadError';
 import { MeroaMark } from '@/components/MeroaMark';
 import { Ring } from '@/components/Ring';
 import { TaskListSkeleton } from '@/components/Skeleton';
+import { ANIM_DURATION } from '@/components/Sheet';
 import { SwipeToDelete } from '@/components/SwipeToDelete';
 import { isOverdue, isPastDue, isUpcoming, TaskCard, taskProgressFraction } from '@/components/TaskCard';
 import { theme } from '@/constants/theme';
+import { QuickCreateSheet } from '@/features/chat/QuickCreateSheet';
 import { useGoals } from '@/features/goals/queries';
 import { useMe } from '@/features/profile/queries';
 import { TaskFormSheet } from '@/features/tasks/TaskFormSheet';
@@ -80,6 +82,9 @@ export default function TasksScreen() {
     deleteTask.mutate(t.id);
   }
 
+  // `quickVisible` is the Meroa-first quick-add (the "+"); `createVisible` is the
+  // manual form, now reached via the sheet's "fill in manually" link.
+  const [quickVisible, setQuickVisible] = useState(false);
   const [createVisible, setCreateVisible] = useState(false);
   const [editingTemplate, setEditingTemplate] = useState<ApiTask | null>(null);
 
@@ -230,8 +235,20 @@ export default function TasksScreen() {
         )}
       </ScrollView>
 
-      <AddFab onPress={() => setCreateVisible(true)} bottom={tabBarHeight + 16} />
+      <AddFab onPress={() => setQuickVisible(true)} bottom={tabBarHeight + 16} />
 
+      <QuickCreateSheet
+        visible={quickVisible}
+        onClose={() => setQuickVisible(false)}
+        mode="task"
+        onManual={() => {
+          setQuickVisible(false);
+          // Wait out the quick sheet's close animation before opening the form
+          // (two Modals can't animate over each other) — same handoff timing as
+          // the chat menu→tone sheet chain.
+          setTimeout(() => setCreateVisible(true), ANIM_DURATION);
+        }}
+      />
       <TaskFormSheet visible={createVisible} onClose={() => setCreateVisible(false)} />
       <TaskFormSheet
         visible={!!editingTemplate}

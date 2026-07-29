@@ -20,7 +20,9 @@ import { MeroaMark, type MeroaMood } from '@/components/MeroaMark';
 import { Ring } from '@/components/Ring';
 import { GoalListSkeleton } from '@/components/Skeleton';
 import { taskProgressFraction } from '@/components/TaskCard';
+import { ANIM_DURATION } from '@/components/Sheet';
 import { radii, theme } from '@/constants/theme';
+import { QuickCreateSheet } from '@/features/chat/QuickCreateSheet';
 import { GoalFormSheet } from '@/features/goals/GoalFormSheet';
 import { useArchivedGoals, useGoalConsistency, useGoals } from '@/features/goals/queries';
 import { useMe } from '@/features/profile/queries';
@@ -161,6 +163,9 @@ export default function GoalsScreen() {
   const { data: me } = useMe();
   const timezone = me?.user.timezone;
   const tabBarHeight = useTabBarHeight();
+  // `quickVisible` is the Meroa-first quick-add (the "+"); `createVisible` is the
+  // manual form, now reached via the sheet's "fill in manually" link.
+  const [quickVisible, setQuickVisible] = useState(false);
   const [createVisible, setCreateVisible] = useState(false);
   // Goals, consistency, and archived all live under the ['goals'] prefix;
   // tasks feed the "today" ring, so refresh both.
@@ -285,8 +290,17 @@ export default function GoalsScreen() {
         )}
       </ScrollView>
 
-      <AddFab onPress={() => setCreateVisible(true)} bottom={tabBarHeight + 16} />
+      <AddFab onPress={() => setQuickVisible(true)} bottom={tabBarHeight + 16} />
 
+      <QuickCreateSheet
+        visible={quickVisible}
+        onClose={() => setQuickVisible(false)}
+        mode="goal"
+        onManual={() => {
+          setQuickVisible(false);
+          setTimeout(() => setCreateVisible(true), ANIM_DURATION);
+        }}
+      />
       <GoalFormSheet visible={createVisible} onClose={() => setCreateVisible(false)} />
     </SafeAreaView>
   );

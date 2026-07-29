@@ -67,10 +67,17 @@ async function* parseSSE(
   }
 }
 
-/** Streams a chat reply for `text`. Yields events as they arrive; never throws for a limit/model error — those surface as `error`/`limit_reached` events. */
+/**
+ * Streams a chat reply for `text`. Yields events as they arrive; never throws
+ * for a limit/model error — those surface as `error`/`limit_reached` events.
+ * `opts.mode` = 'create_task'|'create_goal' is the Tasks/Goals tab quick-add
+ * sheet (features/chat/QuickCreateSheet): same endpoint/SSE, but the turn runs
+ * create-scoped server-side so it only previews that kind of create or asks for
+ * a missing field. Omitted = normal chat.
+ */
 export async function* streamMessage(
   text: string,
-  isRetry = false,
+  opts: { mode?: 'create_task' | 'create_goal'; isRetry?: boolean } = {},
 ): AsyncGenerator<ChatStreamEvent> {
   await loadTokens();
   const accessToken = getCachedAccessToken();
@@ -81,13 +88,13 @@ export async function* streamMessage(
       'content-type': 'application/json',
       ...(accessToken ? { authorization: `Bearer ${accessToken}` } : {}),
     },
-    body: JSON.stringify({ text }),
+    body: JSON.stringify({ text, ...(opts.mode ? { mode: opts.mode } : {}) }),
   });
 
-  if (res.status === 401 && !isRetry) {
+  if (res.status === 401 && !opts.isRetry) {
     const newAccessToken = await refreshAccessToken();
     if (newAccessToken) {
-      yield* streamMessage(text, true);
+      yield* streamMessage(text, { ...opts, isRetry: true });
       return;
     }
     notifySessionExpired();

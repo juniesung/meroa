@@ -8,9 +8,16 @@ import {
   buildMemoryBlock,
   buildStyleBlock,
   buildSystemPrompt,
+  CREATE_MODE_ACTION_PROMPT,
+  CREATE_MODE_NARRATE_PROMPT,
   type ChatUserContext,
 } from '../system-prompt.ts';
-import { NO_ACTION_TOOL_NAME, OPENAI_ACTION_PASS_TOOLS } from '../tools.ts';
+import {
+  NO_ACTION_TOOL_NAME,
+  OPENAI_ACTION_PASS_TOOLS,
+  OPENAI_CREATE_GOAL_PASS_TOOLS,
+  OPENAI_CREATE_TASK_PASS_TOOLS,
+} from '../tools.ts';
 import {
   buildConversationHistory,
   buildTailedMessages,
@@ -122,6 +129,18 @@ This is a talking turn, so talk like yourself. Lead with a real reaction or a ta
 Do not claim or imply that anything was created, changed, logged, removed, or previewed — nothing was. A reaction to what they said is fine and good; a statement that you completed, created, or logged something is simply false, and they're looking at an unchanged list that will show it.`;
 }
 
+// The create-mode counterpart — used INSTEAD of noActionResultsBlock in the
+// quick-add sheet. The normal block above tells the model to "talk like
+// yourself" and, on anything heavy, to lead with warmth and NOT a question —
+// exactly right for chat, exactly wrong for an add box, where an emotional
+// input kept getting empathy with no ask. This block keeps the turn on-task:
+// one question, no conversation.
+function createModeNoActionBlock(reason: string): string {
+  return `# No preview could be built this turn${reason ? `\nThe add layer could not create it, and this is why: ${reason}` : ''}
+
+You are the quick-add box. Reply with ONE short question asking for exactly what's needed to add it — name the missing value ("how much are you saving toward?", "how many glasses a day?"). If their message was just a vague feeling with nothing concrete to add, ask plainly what they'd like to add ("what do you want to add?"). Your reply MUST be that question. Do NOT empathize, validate feelings, comment on their day, problem-solve, or offer to talk — this is an add box, not a chat. Do not claim anything was created — nothing is saved until they tap Create.`;
+}
+
 /**
  * The act/narrate split. Pass 1 (action) runs non-streamed on an isolated
  * context — action-only prompt, the volatile state block, and a tiny
@@ -179,10 +198,24 @@ export async function* streamChatReplyActNarrate(
   const maxTokens = (n: number) =>
     maxTokensParam === 'max_tokens' ? { max_tokens: n } : { max_completion_tokens: n };
 
+  // Quick-add sheet (routes/messages.ts `mode: 'create_task'|'create_goal'`): a
+  // create-scoped act prompt + a single-tool toolset (matching which tab's "+"
+  // was tapped), the conversation fast path force-off below, and a create-scoped
+  // narrate pass — so the turn can only preview that one kind of create or ask
+  // for a missing required field. Absent = normal chat, unchanged.
+  const createEntity = actionCtx.createMode;
+  const createMode = !!createEntity;
+  const actSystemPrompt = createMode ? CREATE_MODE_ACTION_PROMPT : ACTION_SYSTEM_PROMPT;
+  const actionPassTools = createMode
+    ? createEntity === 'task'
+      ? OPENAI_CREATE_TASK_PASS_TOOLS
+      : OPENAI_CREATE_GOAL_PASS_TOOLS
+    : OPENAI_ACTION_PASS_TOOLS;
+
   try {
     // ---- pass 1: act -----------------------------------------------------
     const actionMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
-      { role: 'system', content: ACTION_SYSTEM_PROMPT },
+      { role: 'system', content: actSystemPrompt },
       { role: 'system', content: tailText },
       // The FULL record, pending cards included. Filtering them out here left two
       // user messages back-to-back with no assistant turn, and the act pass —
@@ -247,7 +280,9 @@ export async function* streamChatReplyActNarrate(
      * correctness.
      */
     const newestUserMessage = windowed[windowed.length - 1]?.content ?? '';
-    const mayBeConversational = looksPurelyConversational(newestUserMessage);
+    // In create mode there is no conversation branch at all — the fast
+    // conversational reply path must never fire, whatever the act pass returns.
+    const mayBeConversational = createMode ? false : looksPurelyConversational(newestUserMessage);
     // Grounding for maybeCorrectFabricatedFigure needs more than the newest
     // message: a number the user stated a turn or two ago (e.g. "3x a week")
     // and the reply echoes back later ("which 3 days?") is not invented, but
@@ -305,7 +340,7 @@ export async function* streamChatReplyActNarrate(
           model,
           ...maxTokens(MAX_OUTPUT_TOKENS),
           messages: actionMessages,
-          tools: OPENAI_ACTION_PASS_TOOLS,
+          tools: actionPassTools,
           tool_choice: wantRequired ? 'required' : 'auto',
           ...actExtra,
         } as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming);
@@ -320,7 +355,7 @@ export async function* streamChatReplyActNarrate(
           model,
           ...maxTokens(MAX_OUTPUT_TOKENS),
           messages: actionMessages,
-          tools: OPENAI_ACTION_PASS_TOOLS,
+          tools: actionPassTools,
           tool_choice: 'auto',
           ...actExtra,
         } as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming);
@@ -544,7 +579,15 @@ export async function* streamChatReplyActNarrate(
     // what it needs about a pending card from a server fact instead
     // (actionCtx.pendingConfirmCard).
     const narrateHistory = windowed.filter((m) => !m.isPendingCard && !m.isActionAck);
-    const narrateMessages = buildTailedMessages(buildSystemPrompt(user) + buildMemoryBlock(user.memories ?? []), narrateTailText + buildStyleBlock(user), narrateHistory);
+    // In create mode the narrate pass only ever runs to ASK for a missing field
+    // (a successful create already returned silently under the rule above), so
+    // it uses the crisp quick-add helper prompt instead of the full companion
+    // persona — otherwise a vague message got a warm "how's your day" reply that
+    // read as wandering out of the create flow.
+    const narrateSystemPrompt = createMode
+      ? CREATE_MODE_NARRATE_PROMPT
+      : buildSystemPrompt(user) + buildMemoryBlock(user.memories ?? []);
+    const narrateMessages = buildTailedMessages(narrateSystemPrompt, narrateTailText + buildStyleBlock(user), narrateHistory);
     // Action/failure priority is unchanged from before styleFacts existed
     // (see actionResultsBlock/failureResultsBlock) — style is composed
     // ALONGSIDE that choice, never in place of it, so a style change stated
@@ -556,7 +599,9 @@ export async function* streamChatReplyActNarrate(
           ? failureResultsBlock(failureFacts)
           : styleFacts.length > 0
             ? '' // nothing else happened — the style block below is the whole story
-            : noActionResultsBlock(noActionReason, actionCtx.pendingConfirmCard);
+            : createMode
+              ? createModeNoActionBlock(noActionReason)
+              : noActionResultsBlock(noActionReason, actionCtx.pendingConfirmCard);
     narrateMessages.push({
       role: 'system',
       content:

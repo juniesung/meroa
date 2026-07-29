@@ -110,7 +110,16 @@ messageRoutes.post('/:id/report', zValidator('json', reportSchema), async (c) =>
   return c.json({ ok: true });
 });
 
-const sendSchema = z.object({ text: z.string().trim().min(1).max(4000) });
+// `mode: 'create_task' | 'create_goal'` is the Tasks/Goals tab quick-add sheet
+// (features/chat/QuickCreateSheet). Same endpoint, same thread, same SSE
+// contract — it just runs the turn in a create-scoped mode (actionCtx.createMode)
+// so it can only preview a create or ask for a missing required field, never
+// wander into general conversation. The suffix is which tab it came from (a soft
+// entity bias). Absent = normal chat.
+const sendSchema = z.object({
+  text: z.string().trim().min(1).max(4000),
+  mode: z.enum(['create_task', 'create_goal']).optional(),
+});
 
 function isChatRole(role: string): role is 'user' | 'assistant' {
   return role === 'user' || role === 'assistant';
@@ -245,7 +254,7 @@ function historyContentFor(m: { content: string; meta: unknown }): string {
 //                   any earlier segments in this turn already were
 messageRoutes.post('/', rateLimit({ windowMs: 60_000, max: 20 }), zValidator('json', sendSchema), async (c) => {
   const userId = c.get('userId');
-  const { text } = c.req.valid('json');
+  const { text, mode } = c.req.valid('json');
 
   // Apple 5.1.2(i): nothing reaches the third-party AI provider without explicit,
   // current consent. This is THE compliance boundary — enforced server-side so a
@@ -616,6 +625,7 @@ messageRoutes.post('/', rateLimit({ windowMs: 60_000, max: 20 }), zValidator('js
         pendingConfirmCard,
         hasPendingPreview: !!pendingPreview || hasPendingTask,
         userMessageText: userMessage.content,
+        createMode: mode === 'create_task' ? 'task' : mode === 'create_goal' ? 'goal' : undefined,
       })) {
         if (event.type === 'delta') {
           await stream.writeSSE({

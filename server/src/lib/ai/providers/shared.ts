@@ -113,6 +113,17 @@ export type ChatActionContext = {
   // task it already picked). Optional so a caller that can't supply it
   // (none today) simply disables that one guard rather than failing.
   userMessageText?: string;
+  // Quick-create mode (the Tasks/Goals tab "+" sheet, routes/messages.ts
+  // `mode: 'create_task' | 'create_goal'`). Presence means the user tapped "+",
+  // so intent is unambiguously "add something": the act pass runs a create-
+  // scoped prompt with a restricted toolset (create_task/create_goal +
+  // no_action-to-ask), the conversation fast path is disabled, AND the narrate
+  // pass is create-scoped — so the turn can only produce a create preview or a
+  // targeted clarifying question, never wander into general chat. The value is
+  // which tab it came from ('task'/'goal'), a soft bias toward that entity (the
+  // model still makes the other type when the words clearly describe it).
+  // Absent = normal chat, byte-for-byte unchanged.
+  createMode?: 'task' | 'goal';
 };
 
 // Shared by the two OpenAI-compatible providers (openai.ts, deepseek.ts).
