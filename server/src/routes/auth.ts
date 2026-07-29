@@ -231,13 +231,36 @@ authRoutes.post('/refresh', zValidator('json', refreshSchema), async (c) => {
     )
     .limit(1);
 
-  if (!session) return c.json({ error: 'invalid_session' }, 401);
+  if (!session) {
+    // Reuse detection: the presented token doesn't match any live session, but
+    // does it match the token a session ALREADY rotated away from? If so it
+    // leaked (rotation invalidates a token exactly once) — revoke that lineage
+    // so the attacker's rotated-to token dies with it, and force re-auth. A
+    // legit client whose rotation response was lost also lands here; with Apple
+    // sign-in re-auth is seamless, and silently honoring a replayed token would
+    // defeat the whole mechanism.
+    const [replayed] = await db
+      .select({ id: sessions.id })
+      .from(sessions)
+      .where(and(eq(sessions.previousTokenHash, tokenHash), isNull(sessions.revokedAt)))
+      .limit(1);
+    if (replayed) {
+      await db.update(sessions).set({ revokedAt: new Date() }).where(eq(sessions.id, replayed.id));
+      return c.json({ error: 'token_reuse_detected' }, 401);
+    }
+    return c.json({ error: 'invalid_session' }, 401);
+  }
 
   const now = new Date();
   const newRefreshToken = generateRefreshToken();
   await db
     .update(sessions)
-    .set({ refreshTokenHash: hashWithPepper(newRefreshToken), lastUsedAt: now, expiresAt: refreshExpiry() })
+    .set({
+      refreshTokenHash: hashWithPepper(newRefreshToken),
+      previousTokenHash: tokenHash,
+      lastUsedAt: now,
+      expiresAt: refreshExpiry(),
+    })
     .where(eq(sessions.id, session.id));
 
   // A live refresh means the app is in active use — the broad signal the

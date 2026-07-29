@@ -66,6 +66,11 @@ export const sessions = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
     refreshTokenHash: text('refresh_token_hash').notNull(),
+    // The immediately-preceding token's hash, kept for one rotation so a replay
+    // of an already-rotated token is detectable (reuse detection) instead of
+    // silently failing as "invalid_session". A matching replay means the token
+    // leaked → the session lineage is revoked. See routes/auth.ts /refresh.
+    previousTokenHash: text('previous_token_hash'),
     deviceLabel: text('device_label'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     lastUsedAt: timestamp('last_used_at', { withTimezone: true }).notNull().defaultNow(),
