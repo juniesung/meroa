@@ -1,9 +1,82 @@
 # Launch checklist
 
-Living list of everything between here and a submitted app. Last updated **2026-07-28**.
+Living list of everything between here and a submitted app. Last updated **2026-07-29**.
 
 Ordered by what unblocks what — the critical path is **§1 → §2**. Sections 3–6 are
 parallelizable, but none of them close a Definition of Done the way the device test does.
+
+The **Submission runbook** below is the operative, dependency-ordered plan to reach
+"Submit for Review" — work it top to bottom. Sections §1–§6 remain as the detailed
+reference behind each step.
+
+---
+
+## Submission runbook — do these IN ORDER
+
+> Governing rule: **do everything that could force a code fix on the build you already
+> have BEFORE cutting the production build.** A failed restore test *after* you've built
+> production means building twice. So: pre-build gates → device tests on the current
+> build → fix → build production → portal metadata while it processes → submit.
+
+### Stage 1 — Pre-build gates (cheap; prevents rebuilds)
+
+- [ ] **1. Sign in with Apple capability** — confirm it's enabled on the `com.meroa.app`
+      identifier in Apple Developer *and* in the app entitlements. It works on the dev
+      build so it's likely on; a missing capability in the release build breaks auth and
+      is invisible until review. (§6)
+- [ ] **2. Version + build number** — `app.json` is at `version: 1.0.0`; no `buildNumber`
+      is pinned, so EAS auto-manages it. Confirm the ASC upload lands a unique build
+      number. Bump `version` only if you re-submit after a rejection.
+- [ ] **3. Merge decision** — decide whether production builds from `main` or
+      `phase-8-partial` (74 commits unmerged). Building off the branch is fine; just know
+      which commit ships. Merge first if you want `main` to be the release source. (§6)
+
+### Stage 2 — Device tests on the build you ALREADY have (before production build)
+
+> Anything failing here is a **code fix** that then rolls into the production build for free.
+
+- [ ] **4. Restore purchases** — delete + reinstall → Restore → entitlement re-grants via
+      server verification. *Apple actively tests this; a top rejection cause.* (§2, Phase 7 DoD)
+- [ ] **5. Cross-device entitlement** — second device, same account → `plus` active
+      without re-purchasing. (§2, Phase 7 DoD)
+- [ ] **6. `introPrice` = 7 days** — fresh sandbox tester (`+sbx2` alias; trial
+      eligibility sticks per-account) → paywall shows 7-day trial copy. (§2)
+- [ ] **7. Push-token registration** — real device registers a token (needs the dev
+      build; Expo Go can't). (§2)
+- [ ] **8. Phase 8 UX pass** — AI-consent nav flow, delete/export UI, report-a-response
+      UI, notification tap routing, error/offline states. (§2)
+
+> ⛔ If anything in Stage 2 fails, fix code NOW, re-verify, then continue.
+
+### Stage 3 — Cut the production build
+
+- [ ] **9. `eas build --profile production --platform ios`** → upload to App Store
+      Connect (TestFlight). Processing takes time — start it, then do Stage 4 in parallel.
+
+### Stage 4 — Portal metadata (parallel with the build; no build needed)
+
+- [ ] **10. Re-export screenshots at 1320×2868 (6.9")** — current 941×1672 set will be
+      rejected. Copy/captions in `docs/app-store-listing.md`. (§4)
+- [ ] **11. App listing into ASC** — name, subtitle, description, keywords, promo,
+      support/privacy URLs, category (all in `docs/app-store-listing.md`). (§4)
+- [ ] **12. Age rating** questionnaire in ASC. (§4)
+- [ ] **13. App Privacy questionnaire** — enter answers from `docs/app-privacy-answers.md`. (§4)
+- [ ] **14. Pricing & Availability** — deselect the 27 EU territories (DSA decision). (§4)
+- [ ] **15. Subscription review screenshot + review notes** for `meroa_monthly`. (§4)
+- [x] **16. Export compliance** — already handled: `ITSAppUsesNonExemptEncryption: false`
+      is set in `app.json`, so no per-submit encryption prompt appears. Nothing to do.
+
+### Stage 5 — Assemble + submit
+
+- [ ] **17. Attach the processed build** to the version in ASC.
+- [ ] **18. App Review notes** — paste the drafted notes (see `docs/app-review-notes.md`).
+- [ ] **19. Final read-through** of the version page → **Submit for Review**.
+
+### After submit (not blockers)
+
+- [ ] `CRON_SECRET` + Railway cron → notifications go live (§3)
+- [ ] Enroll in App Store Small Business Program (before real revenue) (§6)
+- [ ] Revoke the old `sk_XFiU…` RevenueCat secret key (§6)
 
 ---
 
@@ -139,8 +212,11 @@ not the App Store. Trial eligibility is per-account and sticks — mint a fresh
       for `com.meroa.app` in the Apple Developer identifier if not already.
 - [ ] Merge `phase-8-partial` → `main` (unmerged, many commits)
 - [ ] Revoke the old `sk_XFiU…` RevenueCat secret key if still active
-- [ ] `scripts/battery.sh` reuses a fixed phone (`+15559000001`) with no reset —
-      count-based assertions drift against leftover data across runs
+- [x] `scripts/battery.sh` drift fix — default was already a fresh **random**
+      account per run (no drift there); added opt-in `RESET=1` that wipes the
+      account's rows (FK-safe) so a *pinned* re-run (`RESET=1 npm run battery -- 42`)
+      is deterministic too, while a plain pinned reattach still preserves state
+      for post-failure inspection. `bash -n` clean.
 
 **App Review note (nice):** with Sign in with Apple, the reviewer signs in with their
 own Apple ID — no demo credentials to provide. Just note the sandbox for the subscription.

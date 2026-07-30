@@ -52,6 +52,14 @@ API="${API:-http://localhost:8787}"
 # ("2 tasks exist"), so reusing one number makes every run after the first
 # fail against the previous run's leftovers. Pass a 7-digit suffix explicitly
 # to reattach to a specific account (e.g. to inspect state after a failure).
+#
+# When you DO pin a suffix to make a run re-runnable, set RESET=1 to wipe that
+# account's data first, so count assertions don't drift against last run's rows:
+#
+#   RESET=1 npm run battery -- 42     # pinned AND deterministic
+#
+# Without RESET a pinned re-run reattaches to the leftover data untouched, which
+# is what you want when inspecting state after a failure — so reset stays opt-in.
 PHONE="+1555${1:-$(printf '%07d' $(( (RANDOM * 32768 + RANDOM) % 10000000 )))}"
 
 if ! curl -s -o /dev/null --max-time 3 "$API/"; then
@@ -63,6 +71,21 @@ npm run dev:token "$PHONE" 2>/dev/null | sed -n '/^{/,$p' > /tmp/battery.json
 TOKEN="$(jq -r .accessToken /tmp/battery.json)"
 USER_ID="$(jq -r .userId /tmp/battery.json)"
 [[ "$TOKEN" == "null" || -z "$TOKEN" ]] && { echo "✗ could not mint a dev token" >&2; exit 1; }
+
+# RESET=1: wipe this account's data so a pinned re-run starts clean and the
+# absolute-count assertions hold. Child rows first (FK-safe), all scoped to
+# this user. No-op on a brand-new random account; only matters when reattaching.
+if [[ "${RESET:-}" == "1" ]]; then
+  npx tsx scripts/db-query.ts "
+    delete from goal_entries where goal_id in (select id from goals where user_id='$USER_ID');
+    delete from records where user_id='$USER_ID';
+    delete from tasks where user_id='$USER_ID';
+    delete from goals where user_id='$USER_ID';
+    delete from messages where conversation_id in (select id from conversations where user_id='$USER_ID');
+    delete from conversations where user_id='$USER_ID';
+  " > /dev/null 2>&1
+  echo "  ↺ reset data for $PHONE"
+fi
 
 # Grant AI consent — the chat route refuses every send with a 403 until it's
 # recorded (Phase 6/8's compliance gate, added after this script was written).
