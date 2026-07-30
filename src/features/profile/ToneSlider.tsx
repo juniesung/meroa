@@ -120,6 +120,12 @@ export function ToneSlider({
         <Text style={styles.endLabel}>Warmest</Text>
         <Text style={styles.endLabel}>Edgiest</Text>
       </View>
+
+      {/* Heads-up at the top of the range: Meroa will swear at Edgy/Edgiest.
+          Reserved height so toggling levels doesn't shift the layout. */}
+      <Text style={styles.warning}>
+        {value >= 3 ? '⚠ Meroa may use strong language at this level.' : ''}
+      </Text>
     </View>
   );
 }
@@ -188,4 +194,5 @@ const styles = StyleSheet.create({
   },
   endsRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 12 },
   endLabel: { color: theme.faint, fontSize: 12, fontWeight: '600' },
+  warning: { color: theme.dim, fontSize: 12, textAlign: 'center', marginTop: 14, minHeight: 16 },
 });
