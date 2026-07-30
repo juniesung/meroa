@@ -44,10 +44,12 @@ export default function TabsLayout() {
       }}
       screenOptions={{
         headerShown: false,
-        // No 'shift' tab transition: on the New Architecture it intermittently
-        // left the incoming screen's CONTENT black (tab bar fine, no recovery
-        // on re-tap, only fixed by navigating away and back) — the animation
-        // layer stranding the screen, not a render crash. Instant switch is safe.
+        // No tab transition animation. On the New Architecture, ANY animated
+        // tab switch ('shift' AND 'fade' both reproduce it, 'none' does not)
+        // intermittently strands the incoming screen's content black (tab bar
+        // fine, only fixed by navigating away and back) — react-native-screens
+        // freezing the transitioning screen. Instant switch is the safe choice;
+        // the tab icons still spring-scale on focus, so switches aren't lifeless.
         tabBarActiveTintColor: theme.blue,
         tabBarInactiveTintColor: theme.dim,
         tabBarLabelStyle: { fontSize: 10.5, fontWeight: '600' },
