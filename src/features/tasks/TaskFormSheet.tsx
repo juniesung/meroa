@@ -132,9 +132,15 @@ function TaskFormBody({ task, onClose }: { task?: ApiTask; onClose: () => void }
   );
   const [weekdays, setWeekdays] = useState<Weekday[]>(initialRecurrence.weekdays);
   const [everyN, setEveryN] = useState(initialRecurrence.everyN);
-  const [reminder, setReminder] = useState(
-    () => !!(task?.config as { reminder?: boolean } | undefined)?.reminder,
+  // Reminder is the user's/stored explicit choice (reminderOverride) when set,
+  // else the default: ON for a NEW task that has a specific TIME, off when it
+  // doesn't (a date-only / timeless task isn't what a reminder is for). Derived
+  // during render rather than synced via an effect, so it tracks the time field
+  // with no cascading re-render. An existing task keeps its stored value.
+  const [reminderOverride, setReminderOverride] = useState<boolean | null>(() =>
+    task ? !!(task.config as { reminder?: boolean } | undefined)?.reminder : null,
   );
+  const reminder = reminderOverride ?? !!dueTime;
 
   // Goal link — "None" plus every live goal, filtered to what this task
   // could actually count toward: a habit goal needs a recurring check-in
@@ -549,7 +555,7 @@ function TaskFormBody({ task, onClose }: { task?: ApiTask; onClose: () => void }
           // re-checks actual permission before scheduling, so a denial here
           // doesn't need to flip the toggle back.
           if (next) void requestNotificationPermission();
-          setReminder(next);
+          setReminderOverride(next);
         }}
         style={styles.reminderRow}
       >
