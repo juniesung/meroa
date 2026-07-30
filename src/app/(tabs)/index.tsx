@@ -238,9 +238,6 @@ export default function ChatScreen() {
   const headerStatus = isReplying ? 'Typing…' : 'Listening';
   const { send, retry } = useSendMessage();
   const [draft, setDraft] = useState('');
-  // Controlled composer height — see MIN/MAX_INPUT_HEIGHT for why it isn't left
-  // to the native auto-size.
-  const [inputHeight, setInputHeight] = useState(MIN_INPUT_HEIGHT);
   const [menuSheetOpen, setMenuSheetOpen] = useState(false);
   const [vibeSheetOpen, setVibeSheetOpen] = useState(false);
   const { data: me } = useMe();
@@ -270,7 +267,12 @@ export default function ChatScreen() {
   // above the keyboard's top. Collapse it to a small gap while typing.
   const [keyboardShown, setKeyboardShown] = useState(false);
   useEffect(() => {
-    const show = Keyboard.addListener('keyboardWillShow', () => setKeyboardShown(true));
+    const show = Keyboard.addListener('keyboardWillShow', () => {
+      setKeyboardShown(true);
+      // Keep the newest message visible above the keyboard when it opens —
+      // the scroll view shrinks as the composer lifts, so re-pin to the bottom.
+      scrollRef.current?.scrollToEnd({ animated: true });
+    });
     const hide = Keyboard.addListener('keyboardWillHide', () => setKeyboardShown(false));
     return () => {
       show.remove();
@@ -328,8 +330,7 @@ export default function ChatScreen() {
     if (!text) return;
     isSubmittingRef.current = true;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-    setDraft('');
-    setInputHeight(MIN_INPUT_HEIGHT); // snap the box back to one line, don't leave the tall frame
+    setDraft(''); // native input shrinks back to minHeight when the value clears
     void send(text);
     setTimeout(() => {
       isSubmittingRef.current = false;
@@ -488,11 +489,11 @@ export default function ChatScreen() {
             onChangeText={setDraft}
             placeholder="Message Meroa"
             placeholderTextColor={theme.faint}
-            style={[
-              styles.input,
-              { height: Math.min(Math.max(inputHeight, MIN_INPUT_HEIGHT), MAX_INPUT_HEIGHT) },
-            ]}
-            onContentSizeChange={(e) => setInputHeight(e.nativeEvent.contentSize.height)}
+            // Native auto-grow between min/max. The previous JS-controlled height
+            // (driven by onContentSizeChange) didn't grow on the New Architecture
+            // — that event is unreliable on Fabric — so let the native multiline
+            // input size itself; it shrinks back to minHeight when draft clears.
+            style={styles.input}
             multiline
             maxLength={MAX_MESSAGE_LENGTH}
             onSubmitEditing={sendDraft}
@@ -598,7 +599,9 @@ const styles = StyleSheet.create({
   },
   input: {
     flex: 1,
-    // Height is controlled (inputHeight state) — see MIN/MAX_INPUT_HEIGHT.
+    // Native auto-grow between these bounds (no JS-controlled height).
+    minHeight: MIN_INPUT_HEIGHT,
+    maxHeight: MAX_INPUT_HEIGHT,
     color: theme.text,
     fontSize: 15,
     paddingHorizontal: 14,
