@@ -23,10 +23,11 @@ export default function SignInScreen() {
     setLoading(true);
     try {
       const credential = await AppleAuthentication.signInAsync({
-        requestedScopes: [
-          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
-          AppleAuthentication.AppleAuthenticationScope.EMAIL,
-        ],
+        // FULL_NAME only — we store the name (as displayName) but never store or
+        // use the email, so we don't request the EMAIL scope. Keeps the privacy
+        // story unambiguous: email is genuinely not collected (see
+        // docs/app-privacy-answers.md §2).
+        requestedScopes: [AppleAuthentication.AppleAuthenticationScope.FULL_NAME],
       });
       if (!credential.identityToken) throw new Error('no_identity_token');
       // Apple returns the name only on the FIRST sign-in — forward it so the
