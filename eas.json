@@ -15,7 +15,11 @@
       }
     },
     "production": {
-      "autoIncrement": true
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://meroa-production.up.railway.app",
+        "EXPO_PUBLIC_REVENUECAT_IOS_KEY": "appl_lSLrGhVYzHyWlxHeeFAKhnHeRQG"
+      }
     }
   },
   "submit": {
