@@ -124,6 +124,13 @@ export type ChatActionContext = {
   // model still makes the other type when the words clearly describe it).
   // Absent = normal chat, byte-for-byte unchanged.
   createMode?: 'task' | 'goal';
+  // First-run guided tour (lib/ai/onboarding.ts). When set, the reply pass is
+  // steered by this director block AND the "successful action → say nothing"
+  // rule is relaxed so Meroa can keep the tour moving after a real action. Null
+  // on every non-tour turn, so the whole pipeline is unchanged for existing
+  // users. Carried on actionCtx (rather than a new positional arg) so it flows
+  // to act-narrate.ts without touching chat.ts or the provider shims.
+  onboardingDirector?: string | null;
 };
 
 // Shared by the two OpenAI-compatible providers (openai.ts, deepseek.ts).

@@ -205,6 +205,14 @@ export async function* streamChatReplyActNarrate(
   // for a missing required field. Absent = normal chat, unchanged.
   const createEntity = actionCtx.createMode;
   const createMode = !!createEntity;
+  // First-run guided tour (lib/ai/onboarding.ts). When present, this block is
+  // appended to the reply pass's results block, and it flips two normal-turn
+  // behaviours below (all gated on this, so non-tour turns are unchanged):
+  // the "successful action → stay silent" rule is relaxed so the tour keeps
+  // talking, and the conversation fast path is disabled so every tour turn
+  // takes the full narrate path where the director can be injected.
+  const onboardingDirector = actionCtx.onboardingDirector ?? null;
+  const onboardingActive = !!onboardingDirector;
   const actSystemPrompt = createMode ? CREATE_MODE_ACTION_PROMPT : ACTION_SYSTEM_PROMPT;
   const actionPassTools = createMode
     ? createEntity === 'task'
@@ -282,7 +290,11 @@ export async function* streamChatReplyActNarrate(
     const newestUserMessage = windowed[windowed.length - 1]?.content ?? '';
     // In create mode there is no conversation branch at all — the fast
     // conversational reply path must never fire, whatever the act pass returns.
-    const mayBeConversational = createMode ? false : looksPurelyConversational(newestUserMessage);
+    // During the guided tour it's disabled too: the fast/speculative path only
+    // ever builds noActionResultsBlock and so can't carry the tour director, and
+    // every tour turn needs the director.
+    const mayBeConversational =
+      createMode || onboardingActive ? false : looksPurelyConversational(newestUserMessage);
     // Grounding for maybeCorrectFabricatedFigure needs more than the newest
     // message: a number the user stated a turn or two ago (e.g. "3x a week")
     // and the reply echoes back later ("which 3 days?") is not invented, but
@@ -552,7 +564,11 @@ export async function* streamChatReplyActNarrate(
     // A style adjustment is real, but has no card — "the card is the
     // confirmation" doesn't hold for it, so it must never fall through this
     // silence rule on its own. styleFacts.length === 0 is the whole carve-out.
-    if (actionFacts.length > 0 && !anyFailed && styleFacts.length === 0) {
+    // ...UNLESS the guided tour is running. There the reply is not noise: a
+    // successful action mid-tour ("remind me to call mom") still gets its card,
+    // but Meroa must also acknowledge it and carry the tour forward, so the
+    // narrate pass runs and the director rides on the actionResultsBlock below.
+    if (actionFacts.length > 0 && !anyFailed && styleFacts.length === 0 && !onboardingActive) {
       if (speculation) {
         const settled = await speculation;
         if (settled.ok) {
@@ -602,12 +618,18 @@ export async function* streamChatReplyActNarrate(
             : createMode
               ? createModeNoActionBlock(noActionReason)
               : noActionResultsBlock(noActionReason, actionCtx.pendingConfirmCard);
+    const resultsContent =
+      styleFacts.length > 0
+        ? [baseResultsBlock, styleResultsBlock(styleFacts)].filter(Boolean).join('\n\n')
+        : baseResultsBlock;
     narrateMessages.push({
       role: 'system',
-      content:
-        styleFacts.length > 0
-          ? [baseResultsBlock, styleResultsBlock(styleFacts)].filter(Boolean).join('\n\n')
-          : baseResultsBlock,
+      // The tour director is appended LAST so it steers the phrasing on top of
+      // whatever actually happened this turn (an action described, a question
+      // asked, or nothing) — see lib/ai/onboarding.ts.
+      content: onboardingDirector
+        ? [resultsContent, onboardingDirector].filter(Boolean).join('\n\n')
+        : resultsContent,
     });
 
     /**

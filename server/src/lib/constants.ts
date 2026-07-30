@@ -25,4 +25,4 @@ export const DEMO_OTP_CODE = '000000';
 // standalone blunt sentence, per CLAUDE.md §2 — it must still hold from the
 // very first message, just not read as a clinical disclaimer up front.
 export const WELCOME_MESSAGE =
-  "Hey — I'm Meroa, your AI companion. I'm here to help you actually follow through on the stuff that matters, keep track of it all, and be someone to think out loud with whenever something's on your mind. What's going on with you today?";
+  "Hey — I'm Meroa, your AI companion. I'm here to help you actually follow through on the stuff that matters, keep track of it all, and be someone to think out loud with whenever something's on your mind. Want the quick 30-second rundown of how I work, or should we just dive in? (you can say \"skip\" anytime)";

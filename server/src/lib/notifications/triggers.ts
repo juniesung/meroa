@@ -3,6 +3,7 @@ import { and, eq, inArray, isNull, lt, sql } from 'drizzle-orm';
 import { db } from '../../db/client.ts';
 import { goalEntries, goals, records, tasks } from '../../db/schema.ts';
 import { env } from '../../env.ts';
+import { readTourState } from '../ai/onboarding.ts';
 import { listMemories } from '../memories/executor.ts';
 import { buildGoalCardSummaries } from '../goals/summary.ts';
 
@@ -180,6 +181,9 @@ export async function buildTrigger(
   now: Date,
   rng: () => number = Math.random,
 ): Promise<NotificationTrigger | null> {
+  // While the first-run guided tour is running it owns the thread — no
+  // proactive reach-out should cut in (lib/ai/onboarding.ts).
+  if (readTourState(user.prefs)) return null;
   const tz = user.timezone ?? 'UTC';
   const todayYmd = ymdInTz(now, tz);
   const inactive =

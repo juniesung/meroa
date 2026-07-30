@@ -6,7 +6,7 @@ import { streamSSE } from 'hono/streaming';
 import { z } from 'zod';
 
 import { db } from '../db/client.ts';
-import { conversations, messageReports, messages, records, users } from '../db/schema.ts';
+import { conversations, goals, messageReports, messages, records, tasks, users } from '../db/schema.ts';
 import { streamChatReply, type ChatHistoryMessage } from '../lib/ai/chat.ts';
 import { maybeExtractMemories } from '../lib/ai/memory-extractor.ts';
 import { claimNewlyEarned, mostSignificant } from '../lib/achievements/evaluate.ts';
@@ -27,6 +27,12 @@ import {
 } from '../lib/ai/system-prompt.ts';
 import { computeActiveGoalAllowance, computeTaskCreateAllowance } from '../lib/limits.ts';
 import { listMemories } from '../lib/memories/executor.ts';
+import {
+  buildOnboardingDirector,
+  isTourSkipIntent,
+  nextTourState,
+  readTourState,
+} from '../lib/ai/onboarding.ts';
 import { buildTaskContext } from '../lib/ai/task-context.ts';
 import { buildGoalContext } from '../lib/ai/goal-context.ts';
 import {
@@ -536,6 +542,37 @@ messageRoutes.post('/', rateLimit({ windowMs: 60_000, max: 20 }), zValidator('js
   // can only be as good as the facts you give it").
   const stateFactsText = buildTailBlock(sharedTail) + buildMemoryFactsText(memoryContext);
 
+  // First-run guided tour (lib/ai/onboarding.ts). While active, a director block
+  // steers the reply pass through one topic per turn; the step advances (or the
+  // tour ends) server-side once the turn closes. `tourState`/`tourSkip` are held
+  // in this closure so the stream_end handler below can persist the next state.
+  const tourState = readTourState(prefs);
+  const tourSkip = tourState ? isTourSkipIntent(text) : false;
+  let onboardingDirector: string | null = null;
+  if (tourState) {
+    // Ground the tour in the user's own goal/task (created during the signup
+    // questionnaire) so Meroa can name a real example rather than a generic one.
+    const [tourGoal] = await db
+      .select({ name: goals.name })
+      .from(goals)
+      .where(and(eq(goals.userId, userId), isNull(goals.archivedAt)))
+      .orderBy(desc(goals.createdAt))
+      .limit(1);
+    const [tourTask] = await db
+      .select({ title: tasks.title })
+      .from(tasks)
+      .where(and(eq(tasks.userId, userId), eq(tasks.status, 'open')))
+      .orderBy(tasks.createdAt)
+      .limit(1);
+    onboardingDirector = buildOnboardingDirector({
+      step: tourState.step,
+      skip: tourSkip,
+      displayName: user?.displayName ?? null,
+      goalName: tourGoal?.name ?? null,
+      taskTitle: tourTask?.title ?? null,
+    });
+  }
+
   return streamSSE(c, async (stream) => {
     await stream.writeSSE({ event: 'user_message', data: JSON.stringify(userMessage) });
 
@@ -629,6 +666,7 @@ messageRoutes.post('/', rateLimit({ windowMs: 60_000, max: 20 }), zValidator('js
         hasPendingPreview: !!pendingPreview || hasPendingTask,
         userMessageText: userMessage.content,
         createMode: mode === 'create_task' ? 'task' : mode === 'create_goal' ? 'goal' : undefined,
+        onboardingDirector,
       })) {
         if (event.type === 'delta') {
           await stream.writeSSE({
@@ -851,6 +889,25 @@ messageRoutes.post('/', rateLimit({ windowMs: 60_000, max: 20 }), zValidator('js
               // A congrats is a nicety — never let it break the turn's close.
               Sentry.captureException(err);
               logger.error({ err, userId }, 'achievement congrats failed');
+            }
+          }
+          // Advance (or end) the first-run guided tour now that this turn is
+          // delivered — one topic per turn, ended on a skip or after the last
+          // topic (lib/ai/onboarding.ts). Merge-write so no other prefs key is
+          // touched; a failure just leaves the step where it was, so it's a
+          // nicety like the congrats above and never breaks the turn's close.
+          if (tourState) {
+            try {
+              const next = nextTourState(tourState, { skip: tourSkip });
+              await db
+                .update(users)
+                .set({
+                  prefs: sql`coalesce(${users.prefs}, '{}'::jsonb) || ${JSON.stringify({ onboardingTour: next })}::jsonb`,
+                })
+                .where(eq(users.id, userId));
+            } catch (err) {
+              Sentry.captureException(err);
+              logger.error({ err, userId }, 'onboarding tour state advance failed');
             }
           }
           await stream.writeSSE({ event: 'stream_end', data: JSON.stringify({}) });

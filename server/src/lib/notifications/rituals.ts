@@ -3,6 +3,7 @@ import { and, eq, gte, isNull, sql } from 'drizzle-orm';
 import { db } from '../../db/client.ts';
 import { goals, records, tasks, users } from '../../db/schema.ts';
 import { logger } from '../../logger.ts';
+import { readTourState } from '../ai/onboarding.ts';
 import { resolveTone } from '../ai/system-prompt.ts';
 import { buildGoalCardSummaries } from '../goals/summary.ts';
 import { deliverThreadReachOut } from './dispatch.ts';
@@ -165,6 +166,9 @@ export async function runUserCatchUp(userId: string, now: Date = new Date()): Pr
     // A user who explicitly turned proactive reach-outs off gets none — even
     // these gentle in-thread ones. Default is on (companion direction).
     if (prefs?.proactiveCheckins === false) return;
+    // Don't let a daily ritual / weekly recap stomp the first-run guided tour
+    // (lib/ai/onboarding.ts) — the tour owns the thread until it's done.
+    if (readTourState(prefs)) return;
 
     const user: NotifyUser = {
       id: row.id,

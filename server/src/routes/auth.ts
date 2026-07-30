@@ -1,5 +1,5 @@
 import { zValidator } from '@hono/zod-validator';
-import { and, eq, gt, isNull } from 'drizzle-orm';
+import { and, eq, gt, isNull, sql } from 'drizzle-orm';
 import { Hono } from 'hono';
 import { z } from 'zod';
 
@@ -37,6 +37,15 @@ async function provisionNewUser(userId: string): Promise<void> {
     role: 'assistant',
     content: WELCOME_MESSAGE,
   });
+  // Arm the first-run guided tour (lib/ai/onboarding.ts). The seeded welcome
+  // above offers it; the user's first reply drives it. Merged into prefs so any
+  // key set at account creation survives.
+  await db
+    .update(users)
+    .set({
+      prefs: sql`coalesce(${users.prefs}, '{}'::jsonb) || ${JSON.stringify({ onboardingTour: { active: true, step: 0 } })}::jsonb`,
+    })
+    .where(eq(users.id, userId));
 }
 
 // Mint an access token + a rotating refresh token and record the session.

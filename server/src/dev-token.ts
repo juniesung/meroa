@@ -37,7 +37,9 @@ async function main() {
   if (!user) {
     const [created] = await db
       .insert(users)
-      .values({ phoneE164: phone, prefs: {} })
+      // Arm the first-run guided tour, matching auth.ts's provisionNewUser so a
+      // dev user behaves like a real signup (lib/ai/onboarding.ts).
+      .values({ phoneE164: phone, prefs: { onboardingTour: { active: true, step: 0 } } })
       .onConflictDoNothing({ target: users.phoneE164 })
       .returning();
 
