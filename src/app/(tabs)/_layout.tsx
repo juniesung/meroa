@@ -6,6 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Icon, type IconName } from '@/components/Icon';
 import { TAB_BAR_CONTENT_HEIGHT, theme } from '@/constants/theme';
+import { useChatUnread } from '@/features/chat/useChatUnread';
 import { useDailyCatchUp } from '@/features/chat/useDailyCatchUp';
 import { usePushRegistration } from '@/features/profile/usePushRegistration';
 import { useTimezoneSync } from '@/features/profile/useTimezoneSync';
@@ -32,6 +33,7 @@ export default function TabsLayout() {
   useTimezoneSync();
   usePushRegistration();
   useDailyCatchUp();
+  const chatUnread = useChatUnread();
 
   return (
     <Tabs
@@ -42,7 +44,10 @@ export default function TabsLayout() {
       }}
       screenOptions={{
         headerShown: false,
-        animation: 'shift',
+        // No 'shift' tab transition: on the New Architecture it intermittently
+        // left the incoming screen's CONTENT black (tab bar fine, no recovery
+        // on re-tap, only fixed by navigating away and back) — the animation
+        // layer stranding the screen, not a render crash. Instant switch is safe.
         tabBarActiveTintColor: theme.blue,
         tabBarInactiveTintColor: theme.dim,
         tabBarLabelStyle: { fontSize: 10.5, fontWeight: '600' },
@@ -61,7 +66,25 @@ export default function TabsLayout() {
             : undefined,
       }}
     >
-      <Tabs.Screen name="index" options={{ title: 'Chat', tabBarIcon: makeIcon('chat') }} />
+      <Tabs.Screen
+        name="index"
+        options={{
+          title: 'Chat',
+          tabBarIcon: makeIcon('chat'),
+          // A dot (empty-string badge) when Meroa has messaged since the user
+          // last had Chat focused; cleared on focus by markChatRead. Sized down
+          // to a dot (tiny font so the empty label adds no height).
+          tabBarBadge: chatUnread ? '' : undefined,
+          tabBarBadgeStyle: {
+            backgroundColor: theme.blue,
+            minWidth: 10,
+            maxHeight: 10,
+            borderRadius: 5,
+            fontSize: 1,
+            lineHeight: 10,
+          },
+        }}
+      />
       <Tabs.Screen name="tasks" options={{ title: 'Tasks', tabBarIcon: makeIcon('tasks') }} />
       <Tabs.Screen name="goals" options={{ title: 'Goals', tabBarIcon: makeIcon('goals') }} />
       <Tabs.Screen name="you" options={{ title: 'You', tabBarIcon: makeIcon('you') }} />

@@ -1,5 +1,5 @@
 import * as Haptics from 'expo-haptics';
-import { router, useFocusEffect } from 'expo-router';
+import { router, useFocusEffect, useIsFocused } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
@@ -36,6 +36,7 @@ import { radii, theme } from '@/constants/theme';
 import { CARD_BY_KIND } from '@/features/chat/cards';
 import { ChatMenuSheet } from '@/features/chat/ChatMenuSheet';
 import { type ChatMessage, useClearConversation, useMessages, useReportMessage, useSendMessage } from '@/features/chat/queries';
+import { markChatRead } from '@/features/chat/useChatUnread';
 import { useGoalConsistency } from '@/features/goals/queries';
 import { useMe } from '@/features/profile/queries';
 import { VibePickerSheet } from '@/features/profile/VibePickerSheet';
@@ -216,6 +217,19 @@ function MessageRow({
 
 export default function ChatScreen() {
   const { data: messages = [], isLoading } = useMessages();
+
+  // Chat-tab unread badge (Option A): while this tab is focused, keep the read
+  // cursor at the newest message, so a proactive message that lands afterwards
+  // (while the user is on another tab) surfaces a dot on the Chat icon. This
+  // screen stays mounted across tab switches, so gate on FOCUS, not mount —
+  // otherwise it'd mark messages read while the user is elsewhere.
+  const isChatFocused = useIsFocused();
+  useEffect(() => {
+    if (!isChatFocused || messages.length === 0) return;
+    let newest = '';
+    for (const m of messages) if (!m.status && m.createdAt > newest) newest = m.createdAt;
+    markChatRead(newest);
+  }, [isChatFocused, messages]);
   const groupFlags = useMemo(() => computeGroupFlags(messages), [messages]);
   // A real state, not decoration: 'streaming' covers the whole round trip
   // from send through the last segment (the same status TypingDots keys off
