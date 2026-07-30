@@ -18,6 +18,7 @@ import {
   useTrialEligibility,
 } from '@/features/billing/queries';
 import { isBillingConfigured } from '@/features/billing/purchases';
+import { consentGranted } from '@/features/profile/ai-consent';
 import type { OnboardingDraft } from '@/features/profile/OnboardingDraftFlush';
 import { useMe } from '@/features/profile/queries';
 import { haptics } from '@/lib/haptics';
@@ -57,11 +58,17 @@ export default function PaywallScreen() {
   // member" after a real purchase/restore instead of landing in the app. The
   // voluntary, dismissible entry points (Settings, cap-hit banners) are
   // unaffected — canDismiss is already true there, so this never fires.
+  //
+  // Route to the NEXT gate, not a hardcoded /(tabs): a brand-new user still
+  // has the AI-consent screen between the paywall and the tabs (_layout's
+  // needsAiConsent), and (tabs) stays guard-gated until consent is granted —
+  // so replacing straight to /(tabs) silently no-ops and re-strands them on
+  // the "you're a member" screen. Mirror the root guard's order here.
   useEffect(() => {
     if (isPlus && !canDismiss) {
-      router.replace('/(tabs)');
+      router.replace(consentGranted(me?.user.prefs) ? '/(tabs)' : '/ai-consent');
     }
-  }, [isPlus, canDismiss]);
+  }, [isPlus, canDismiss, me]);
 
   const handleSubscribe = () => {
     if (!pkg) return;
