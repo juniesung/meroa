@@ -194,6 +194,7 @@ export default function SettingsScreen() {
           <Row
             icon="bell"
             label="Proactive check-ins"
+            sublabel="Reminders for your tasks, plus the occasional nudge or check-in from Meroa."
             right={
               <Switch
                 value={proactiveCheckins}

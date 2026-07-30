@@ -8,12 +8,14 @@ import { Icon, type IconName } from './Icon';
 export function Row({
   icon,
   label,
+  sublabel,
   right,
   danger,
   onPress,
 }: {
   icon?: IconName;
   label: string;
+  sublabel?: string;
   right?: React.ReactNode;
   danger?: boolean;
   onPress?: () => void;
@@ -44,7 +46,10 @@ export function Row({
           <Icon name={icon} size={16} color={danger ? '#FF6B60' : theme.blue} stroke={1.9} />
         </View>
       )}
-      <Text style={[styles.label, danger && { color: '#FF6B60' }]}>{label}</Text>
+      <View style={styles.labelCol}>
+        <Text style={[styles.label, danger && { color: '#FF6B60' }]}>{label}</Text>
+        {sublabel && <Text style={styles.sublabel}>{sublabel}</Text>}
+      </View>
       {right ?? <Icon name="chevron" size={16} color={theme.faint} stroke={2} />}
     </AnimatedPressable>
   );
@@ -68,5 +73,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  label: { flex: 1, color: theme.text, fontSize: 15, fontWeight: '500' },
+  labelCol: { flex: 1 },
+  label: { color: theme.text, fontSize: 15, fontWeight: '500' },
+  sublabel: { color: theme.dim, fontSize: 12.5, lineHeight: 16, marginTop: 2 },
 });
