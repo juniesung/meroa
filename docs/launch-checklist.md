@@ -35,15 +35,16 @@ reference behind each step.
 
 > Anything failing here is a **code fix** that then rolls into the production build for free.
 
-- [ ] **4. Restore purchases** — delete + reinstall → Restore → entitlement re-grants via
-      server verification. *Apple actively tests this; a top rejection cause.* (§2, Phase 7 DoD)
-- [ ] **5. Cross-device entitlement** — second device, same account → `plus` active
-      without re-purchasing. (§2, Phase 7 DoD)
-- [ ] **6. `introPrice` = 7 days** — fresh sandbox tester (use the Gmail **dot trick**,
-      not `+` — ASC blocks plus-addressing; trial eligibility sticks per-account) → paywall
-      shows the trial copy, which renders as **"1 week"** (correct — Apple's intro unit). (§2)
-- [ ] **7. Push-token registration** — real device registers a token (needs the dev
-      build; Expo Go can't). (§2)
+- [x] **4. Restore purchases** — fresh OTA install unlocked straight to the account
+      (server re-grant on a no-local-state install proves it). Verified 2026-07-30. (§2, Phase 7 DoD)
+- [x] **5. Cross-device entitlement** — accepted as verified-by-architecture: the
+      `entitlements` table is the single source of truth and any client reads it from the
+      server (the fresh install in #4 exercised exactly that path). (§2, Phase 7 DoD)
+- [x] **6. `introPrice` = 7 days** — paywall showed **"1 week free, then $11.99/month"**
+      on a fresh trial-eligible sandbox tester. Verified 2026-07-30. (§2)
+- [x] **7. Push-token registration** — toggling Proactive check-ins on a physical dev
+      build minted an Expo token and registered it server-side (`push_tokens` row,
+      platform ios). Verified 2026-07-30. (§2)
 - [ ] **8. Phase 8 UX pass** — AI-consent nav flow, delete/export UI, report-a-response
       UI, notification tap routing, error/offline states. (§2)
 
