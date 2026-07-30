@@ -48,7 +48,10 @@ Meroa is a hard-paywall app with a 7-day free trial:
     client claim alone.
 To test the purchase, sign the sandbox tester in under
 Settings > Developer > Sandbox Apple Account (not the App Store), then start
-the trial from the paywall. Restore Purchases is on the paywall and in You.
+the trial from the paywall. Restore Purchases is a link on the paywall
+(shown in the locked/not-yet-subscribed state a reviewer sees). Once
+subscribed, You > Settings > Manage subscription opens Apple's native
+subscription management instead.
 
 REACHING THE FULL APP
 Chat is the first tab. Try "remind me to call the dentist tomorrow at 3pm"
@@ -120,7 +123,9 @@ reviewer taps **"Sign in with Apple"** on the welcome screen and authenticates w
 signs the **sandbox tester** in under **Settings → Developer → Sandbox Apple Account** and
 starts the trial from the paywall — full access follows immediately. (RevenueCat + App Store
 Connect sandbox is configured; product `meroa_monthly`, entitlement `plus`, offering
-`default`.) **Restore Purchases** is available on the paywall and in the You tab.
+`default`.) **Restore Purchases** is a link on the paywall, shown in the
+locked/not-yet-subscribed state the reviewer sees. (Once subscribed, **You →
+Settings → Manage subscription** opens Apple's native subscription management.)
 
 **Once in:** Chat is the first tab. Type *"remind me to call the dentist tomorrow at 3pm"*
 to see task creation; *"I want to save $300 for a new bike"* to see goal creation; the

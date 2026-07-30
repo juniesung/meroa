@@ -39,8 +39,9 @@ reference behind each step.
       server verification. *Apple actively tests this; a top rejection cause.* (§2, Phase 7 DoD)
 - [ ] **5. Cross-device entitlement** — second device, same account → `plus` active
       without re-purchasing. (§2, Phase 7 DoD)
-- [ ] **6. `introPrice` = 7 days** — fresh sandbox tester (`+sbx2` alias; trial
-      eligibility sticks per-account) → paywall shows 7-day trial copy. (§2)
+- [ ] **6. `introPrice` = 7 days** — fresh sandbox tester (use the Gmail **dot trick**,
+      not `+` — ASC blocks plus-addressing; trial eligibility sticks per-account) → paywall
+      shows the trial copy, which renders as **"1 week"** (correct — Apple's intro unit). (§2)
 - [ ] **7. Push-token registration** — real device registers a token (needs the dev
       build; Expo Go can't). (§2)
 - [ ] **8. Phase 8 UX pass** — AI-consent nav flow, delete/export UI, report-a-response
@@ -161,8 +162,12 @@ Everything here depends on it:
 - [x] Paywall visual review on device (rendered; purchase flow works).
 
 Sandbox notes: sign the tester in under **Settings → Developer → Sandbox Apple Account**,
-not the App Store. Trial eligibility is per-account and sticks — mint a fresh
-`+sbx2` alias to re-test the "new user sees trial copy" path.
+not the App Store. Trial eligibility is per-account and sticks — mint a fresh tester to
+re-test the "new user sees trial copy" path. ⚠ **App Store Connect rejects `+` in sandbox
+tester emails** (plus-addressing is blocked). Use the **Gmail dot trick** instead —
+`lee.junseong1211@gmail.com`, `l.eejunseong1211@gmail.com`, etc. all deliver to the one
+inbox but are distinct emails to Apple. Also: the paywall renders a 7-day trial as
+**"1 week"** (Apple's intro-offer unit), which is correct — not a bug.
 
 ## 3. Notifications — to actually go live
 
