@@ -18,10 +18,10 @@
 
 ## 1. How to read this
 
-- **Linked to user?** — "Yes" means the row is keyed to a user identity (phone number is
-  the identity key; `userId` UUID is the internal join key). Meroa has **no anonymous /
-  not-linked data path** — there is no analytics SDK and no device identifier collection
-  (see §4), so everything we store is linked.
+- **Linked to user?** — "Yes" means the row is keyed to a user identity (the **Apple user
+  id** from Sign in with Apple is the account identity; `userId` UUID is the internal join
+  key). Meroa has **no anonymous / not-linked data path** — there is no analytics SDK and no
+  device identifier collection (see §4), so everything we store is linked.
 - **Retention** — Meroa keeps data **until account deletion**, which is an **immediate
   hard delete** (`DELETE /me`, Item 3 of the Phase 8 plan). There is no separate
   time-based expiry except OTP codes (short-lived) and access tokens (15-min TTL). "Undo"
@@ -37,8 +37,8 @@ Schema: `server/src/db/schema.ts` — 16 tables.
 
 | # | Table | Data | Linked to user? | Purpose | Retention |
 |---|---|---|---|---|---|
-| 1 | `users` | **Phone number (E.164)**, display name, timezone, prefs (jsonb: chat vibe, quiet hours, and — added in Item 1 — AI-sharing consent) | Yes (phone is the identity key) | Account identity; personalization of chat + reminders | Until account deletion |
-| 2 | `otp_codes` | Phone number, **hashed** one-time login code, attempt count | Yes (by phone; no FK) | Phone-number login / verification | Short-lived (expires per code); also hard-deleted by phone on account deletion |
+| 1 | `users` | **Apple user id** (Sign in with Apple), **Apple refresh token** (stored solely to revoke on account deletion, guideline 5.1.1(v)), **display name** (Apple's one-time first-sign-in name, if shared), timezone, prefs (jsonb: chat tone, quiet hours, AI-sharing consent). `phone_e164` column is **nullable/legacy — not collected by the Apple-only client** | Yes (Apple user id is the identity key) | Account identity; personalization of chat + reminders | Until account deletion |
+| 2 | `otp_codes` | Phone number, **hashed** one-time login code, attempt count. **Dormant: the phone/OTP route still exists server-side but the shipping app is Sign in with Apple only, so no rows are written in practice** | Yes (by phone; no FK) | Legacy phone-login path (unreachable from the app) | Short-lived (expires per code); also hard-deleted on account deletion |
 | 3 | `sessions` | **Hashed** refresh token, timestamps. (`deviceLabel` column exists but is **never written** — no device name is collected.) | Yes | Keeping a user signed in across app launches | Until account deletion or token expiry/rotation |
 | 4 | `conversations` | Channel (`app` / `sms`), timestamps | Yes | Groups a user's chat thread(s) | Until account deletion |
 | 5 | `messages` | **Message content** — the user's typed messages and Meroa's AI replies; `meta` jsonb (card/action metadata) | Yes | The conversation itself; context for future replies | Until account deletion |
@@ -72,6 +72,7 @@ entered.
 | **OpenAI** (`api.openai.com`) — third-party AI provider, **no-training-by-default, US-processed** → a data **processor**, not a third party using data for its own ends | The user's **message content** and server-computed state blocks (task/goal **titles**, counts, streaks); the memory extractor also sends **raw messages** | **No.** No phone number and no user identifier is placed in the model request. (`userId` appears only in internal server logs / Sentry context, never in the provider payload.) | Generates chat replies, runs the claim-check guards, extracts memories, composes notifications | `providers/openai.ts` (chat) + `lib/ai/utility-client.ts` (guards / extractor / compose) |
 | **RevenueCat** (`api.revenuecat.com`) | Our internal **`userId` (UUID)** as the app-user id | UUID only — **no phone, no message content** | Subscription receipt verification / entitlement state | `server/src/lib/billing/revenuecat.ts` |
 | **Apple / Google** (platform billing) | Handled entirely by the OS billing sheet; the **real subscription lives with the store**, not us | Store account, not our identity | Purchase, renewal, cancellation | Client billing (Phase 7) |
+| **Apple (Sign in with Apple)** | The identity token is verified against Apple's public keys; on account deletion the stored refresh token is sent to Apple's **token-revoke** endpoint (5.1.1(v)) | Apple user id (their own identifier) | Login identity + revoke-on-delete | `src/app/(auth)/sign-in.tsx`, `server/src/lib/apple-auth.ts`, `server/src/routes/auth.ts` |
 | **Sentry** (server-side only) | **Error diagnostics** — exception objects + `environment` tag | Not message content by design; a stack trace/error context could *incidentally* contain a fragment | Crash / error monitoring | `server/src/index.ts`, `providers/*.ts` (`Sentry.captureException`) |
 | **Railway** | Hosts the server and the Postgres database (i.e. *all* of §2) | All application data, as the infrastructure host | Hosting / database | Deployment (Docker on Railway) |
 | **Expo push service** (`exp.host` → Apple APNs / Google FCM) | The device **push token** and the **notification title/body** to deliver | Push token (device-level); **no phone, no user id** | Delivering reminder / proactive push notifications to the device | `src/lib/push.ts` (token mint), `server/src/lib/notifications/send.ts` (`expo-server-sdk`) |
@@ -115,21 +116,29 @@ Stated explicitly because store forms ask, and "we don't" is an answer that must
 
 | Apple category | Meroa data | Linked to user | Used for tracking |
 |---|---|---|---|
-| **Contact Info → Phone Number** | `users.phoneE164` | Yes | No |
+| **Contact Info → Name** | `users.displayName` (Apple's first-sign-in name) | Yes | No |
 | **User Content → Other User Content** (chat messages) | `messages` | Yes | No |
 | **User Content → Other User Content** (tasks, goals, memories) | tasks/goals/records/memories | Yes | No |
-| **Identifiers → User ID** | internal `userId` UUID (sent to RevenueCat) | Yes | No |
+| **Identifiers → User ID** | Apple user id (`users.appleUserId`) + internal `userId` UUID (sent to RevenueCat) | Yes | No |
 | **Identifiers → Device ID** | Expo **push token** (`push_tokens`) — *[judgment call: a functional push identifier, not an advertising ID; declared conservatively because we store it linked to the user]* | Yes | No |
 | **Purchases → Purchase History** | `entitlements` / RevenueCat | Yes | No |
 | **Diagnostics → Crash Data / Other Diagnostic Data** | Sentry errors | Linked (server) | No |
 
 Product-interaction / usage-data analytics: **None collected** (no analytics SDK).
 
+- **Phone Number is NOT declared** — the app is Sign in with Apple only; the phone/OTP
+  route is unreachable from the shipping client, so no phone is collected.
+- **Email is NOT declared** — the client requests the Apple `EMAIL` scope, so the email
+  reaches the server in the identity token, but it is **never stored** (no email column;
+  decoded then discarded) → transient-processing exemption. *(Judgment call — see
+  `docs/app-privacy-answers.md §2`. Cleanest fix is to drop the `EMAIL` scope, which we
+  don't use.)*
+
 ### Google — Data safety
 
 | Google category | Meroa data | Collected | Shared w/ 3rd party | Purpose |
 |---|---|---|---|---|
-| **Personal info → Phone number** | `users.phoneE164` | Yes | No | Account management |
+| **Personal info → Name** | `users.displayName` (Apple sign-in name) | Yes | No | Account management / personalization |
 | **Messages → Other in-app messages** | `messages` | Yes | **No** — the AI provider (OpenAI) is a no-training **processor** (see §3); processor transfers are excluded from Google "sharing" | App functionality (chat) |
 | **App activity → Other user-generated content** | tasks/goals/memories | Yes | No | App functionality |
 | **Device or other IDs** | Expo **push token** (`push_tokens`) | Yes | Yes → Expo push service (delivery) | App functionality (notifications) |
@@ -146,6 +155,14 @@ Product-interaction / usage-data analytics: **None collected** (no analytics SDK
 
 ## 6. Change log
 
+- **2026-07-30** — **Reconciled with the Sign in with Apple pivot** (auth changed from
+  phone/SMS-OTP to Apple). §1 identity is now the Apple user id; §2 row 1 (`users`) lists
+  `appleUserId` + `appleRefreshToken` + Apple-sourced `displayName` and marks `phone_e164`
+  legacy/uncollected; row 2 (`otp_codes`) marked dormant. Added **Apple (Sign in with
+  Apple)** as a subprocessor (§3, token verify + revoke-on-delete). §5 mappings: **Phone
+  Number → Name** (Apple/Google both), User ID now includes the Apple user id, and Phone +
+  Email are explicitly **not declared** (Apple-only client; email requested-but-not-stored,
+  transient exemption).
 - **2026-07-26** — Re-verified against the current `phase-8-partial` branch for submission.
   Added `push_tokens`, `notifications_log`, `achievements` to §2 (16 tables total). Corrected
   §4: the app **does** now collect an Expo **push token** (`src/lib/push.ts` calls

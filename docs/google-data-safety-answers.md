@@ -49,7 +49,8 @@ without it; "Required" = core.
 
 | Google category → data type | Collected | Shared | Purpose(s) | Req/Opt | Notes |
 |---|---|---|---|---|---|
-| **Personal info → Phone number** | Yes | No | Account management, App functionality | Required | Login identity + OTP |
+| **Personal info → Name** | Yes | No | App functionality | Optional | Apple sign-in name, only if the user chooses to share it → `users.displayName` |
+| **Personal info → User IDs** | Yes | No | Account management, App functionality | Required | Apple user id (Sign in with Apple login identity) + internal `userId` UUID → RevenueCat (processor) |
 | **Messages → Other in-app messages** | Yes | **No** | App functionality | Required | AI provider (OpenAI) is a no-training processor → not "sharing" (resolved 2026-07-26). |
 | **App activity → Other user-generated content** | Yes | No | App functionality | Required | tasks, goals, records, memories |
 | **Financial info → Purchase history** | Yes | No | App functionality (subscription) | Required | `entitlements` via RevenueCat (processor) + the store handles the actual purchase (user-initiated) |
@@ -57,10 +58,13 @@ without it; "Required" = core.
 | **App info & performance → Diagnostics** | Yes | No | App functionality | Required | Sentry (processor) |
 | **Device or other IDs** ⚠️ | Yes | No | App functionality (notifications) | **Optional** | Expo **push token**; collected only if the user enables notifications; Expo delivers on our behalf |
 
-**Not collected** (leave every other Google type unchecked): Location, Health &
-fitness (as a declared type), Photos/videos, Audio, Files & docs, Calendar,
-Contacts, Web browsing, App interactions/search-history/installed-apps,
-advertising ID. **No data is used for advertising or tracking.**
+**Not collected** (leave every other Google type unchecked): **Phone number** (the
+app is Sign in with Apple only — the phone/OTP path is unreachable from the shipping
+client), **Email address** (the Apple `EMAIL` scope reaches the server but is never
+stored → transient exemption), Location, Health & fitness (as a declared type),
+Photos/videos, Audio, Files & docs, Calendar, Contacts, Web browsing, App
+interactions/search-history/installed-apps, advertising ID. **No data is used for
+advertising or tracking.**
 
 ---
 
@@ -77,6 +81,10 @@ advertising ID. **No data is used for advertising or tracking.**
 - **Purchase history "Shared = No":** RevenueCat is a processor; the store
   purchase itself is user-initiated (excluded). If you'd rather be conservative,
   marking it Shared → RevenueCat is harmless.
+- **⚠️ Auth = Sign in with Apple (reconciled 2026-07-30).** Phone number was
+  dropped (Apple-only client) and replaced by **Name** (optional, if shared) +
+  **User IDs** (the Apple user id). Email is requested via scope but not stored →
+  not declared. Keep this in sync with `app-privacy-answers.md` and `privacy-draft.md`.
 - **Reconcile with the inventory.** `data-inventory.md §5` lists recipients in a
   "shared with 3rd party" column; that's the *who-receives-it* view, not Google's
   *legal-sharing* view. This sheet is the one to transcribe into Play Console.
