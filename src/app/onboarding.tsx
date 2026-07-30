@@ -30,6 +30,7 @@ import { ToneSlider } from '@/features/profile/ToneSlider';
 import type { GoalTemplateKey, Weekday } from '@/lib/api/types';
 import { useUpdatePrefs } from '@/features/profile/queries';
 import { DEFAULT_TONE, toneLabel } from '@/features/profile/tone';
+import { requestNotificationPermission } from '@/lib/notifications';
 
 // First-run sell + questionnaire, shown before the paywall (root guard:
 // absence of prefs.tone — server-persisted, survives reinstall; a legacy
@@ -171,6 +172,14 @@ export default function OnboardingScreen() {
   const [toneTrackWidth, setToneTrackWidth] = useState(0);
   const createMemory = useCreateMemory();
   const updatePrefs = useUpdatePrefs();
+  // Notification opt-in from step 5. Only flips proactiveCheckins on at finish
+  // if the OS permission was actually granted — a denied prompt leaves it off.
+  const [notifOptIn, setNotifOptIn] = useState(false);
+  const enableNotifications = async () => {
+    const granted = await requestNotificationPermission();
+    setNotifOptIn(granted);
+    setStep(6);
+  };
 
   const toggleFocus = (key: FocusKey) => {
     setFocuses((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
@@ -252,7 +261,7 @@ export default function OnboardingScreen() {
           }
         : null;
 
-    updatePrefs.mutate({ tone, onboardingDraft });
+    updatePrefs.mutate({ tone, onboardingDraft, ...(notifOptIn ? { proactiveCheckins: true } : {}) });
   };
 
   return (
@@ -347,9 +356,12 @@ export default function OnboardingScreen() {
           {step === 5 && (
             <StepFrame>
               <Text style={styles.title}>The right nudge, right when it counts.</Text>
-              <Text style={styles.subtitle}>I nudge you when autopilot would take over — not just whenever.</Text>
+              <Text style={styles.subtitle}>I nudge you when autopilot would take over — not just whenever. Turn on notifications and I&apos;ll remind you at the moments that matter.</Text>
               <ReminderShowcase />
-              <PrimaryButton label="Keep going" onPress={() => setStep(6)} style={styles.cta} />
+              <PrimaryButton label="Turn on notifications" onPress={enableNotifications} style={styles.cta} />
+              <Text style={styles.skip} onPress={() => setStep(6)}>
+                Maybe later
+              </Text>
             </StepFrame>
           )}
 
