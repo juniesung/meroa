@@ -36,6 +36,18 @@ function weekBucketOf(ymd: string): number {
   return Math.floor(Date.parse(`${ymd}T00:00:00Z`) / DAY_MS / 7);
 }
 
+// Local part-of-day for the greeting. The daily ritual fires on the first
+// *open* of the day, which is just as often afternoon or night — so a
+// hardcoded "good morning" reads wrong (it did, at 8pm). Bucketed from the
+// user's local hour so both the model instruction and the fallback body match.
+function greetingForTz(now: Date, tz: string): { long: string; short: string } {
+  const h =
+    Number(new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: 'numeric', hour12: false }).format(now)) % 24;
+  if (h < 12) return { long: 'good morning', short: 'morning' };
+  if (h < 18) return { long: 'good afternoon', short: 'afternoon' };
+  return { long: 'good evening', short: 'evening' };
+}
+
 // The best live habit streak worth mentioning (>= 3 days), across the user's
 // goals — computed from summaries, never here.
 async function bestStreak(
@@ -58,8 +70,9 @@ async function bestStreak(
 
 // --- daily ritual ---------------------------------------------------------
 
-async function buildDailyRitual(user: NotifyUser, todayYmd: string): Promise<NotificationTrigger> {
+async function buildDailyRitual(user: NotifyUser, todayYmd: string, now: Date): Promise<NotificationTrigger> {
   const name = user.displayName?.trim() || null;
+  const greeting = greetingForTz(now, user.timezone ?? 'UTC');
   // What's actually open right now — real titles, so Meroa points at the day
   // instead of inventing one. Instances + standalone tasks (skip templates).
   const openTasks = await db
@@ -74,7 +87,7 @@ async function buildDailyRitual(user: NotifyUser, todayYmd: string): Promise<Not
   const streak = await bestStreak(user);
 
   const facts = [
-    `A first-of-the-day check-in with ${name ?? 'the user'} — say good morning like a friend does.`,
+    `A first-of-the-day check-in with ${name ?? 'the user'} — say ${greeting.long} like a friend does.`,
     titles.length
       ? `On their list right now: ${titles.join(', ')} (${titles.length} open${titles.length === 5 ? '+' : ''}).`
       : `Their task list is clear right now.`,
@@ -85,8 +98,8 @@ async function buildDailyRitual(user: NotifyUser, todayYmd: string): Promise<Not
     .join('\n');
 
   const templateBody = titles.length
-    ? `morning! ${titles.length} thing${titles.length === 1 ? '' : 's'} on your list today, starting with "${titles[0]}".`
-    : `morning! clean slate today, what's the plan?`;
+    ? `${greeting.short}! ${titles.length} thing${titles.length === 1 ? '' : 's'} on your list today, starting with "${titles[0]}".`
+    : `${greeting.short}! clean slate today, what's the plan?`;
 
   return { kind: 'daily_ritual', facts, templateBody, dedupeKey: `daily:${todayYmd}`, data: { route: 'chat' } };
 }
@@ -157,7 +170,7 @@ async function buildWeeklyRecap(
 export async function runUserCatchUp(userId: string, now: Date = new Date()): Promise<void> {
   try {
     const [row] = await db
-      .select({ id: users.id, displayName: users.displayName, timezone: users.timezone, prefs: users.prefs, lastActiveAt: users.lastActiveAt })
+      .select({ id: users.id, displayName: users.displayName, timezone: users.timezone, prefs: users.prefs, lastActiveAt: users.lastActiveAt, createdAt: users.createdAt })
       .from(users)
       .where(eq(users.id, userId))
       .limit(1);
@@ -201,8 +214,13 @@ export async function runUserCatchUp(userId: string, now: Date = new Date()): Pr
       const recap = await buildWeeklyRecap(user, now, weekBucket);
       if (recap && (await deliver(recap))) return;
     }
-    if (!(await alreadySent(userId, `daily:${todayYmd}`))) {
-      await deliver(await buildDailyRitual(user, todayYmd));
+    // Skip the daily "here's your day" ritual on the user's signup day — the
+    // first-run onboarding tour just welcomed them, so a "good afternoon,
+    // here's your list" landing seconds later reads as Meroa talking to itself.
+    // It resumes normally the next local day.
+    const isSignupDay = ymdInTz(row.createdAt, tz) === todayYmd;
+    if (!isSignupDay && !(await alreadySent(userId, `daily:${todayYmd}`))) {
+      await deliver(await buildDailyRitual(user, todayYmd, now));
     }
   } catch (err) {
     logger.warn({ err, userId }, 'user catch-up failed');
